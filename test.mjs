@@ -19,7 +19,9 @@
 // slash ids normalized to skills.sh's canonical (slash-stripped) form, the
 // trending top 100 and the curated owners written as id-only lists (every
 // per-skill field the index drops is dropped here too), a missing
-// GITHUB_TOKEN aborting the run, and verifier rejection of tampered datasets.
+// GITHUB_TOKEN aborting the run, verifier rejection of tampered datasets, and
+// the dist publisher (one commit per day via same-day amend, prune re-rooting
+// that preserves the original commit dates, and the dist-<date> tag window).
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -28,7 +30,7 @@ import { mkdtemp, mkdir, readFile, readdir, rm, writeFile, access } from "node:f
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { canonicalId } from "./lib.mjs";
 
@@ -782,5 +784,91 @@ test("missing GITHUB_TOKEN aborts before any request", async () => {
     assert.match(stderr, /github\.com\/settings\/tokens/);
   } finally {
     await rm(workDir, { recursive: true, force: true });
+  }
+});
+
+test("publish: one commit per day, date-preserving prune, tag window", async () => {
+  const PUBLISH = fileURLToPath(new URL("./publish.mjs", import.meta.url));
+  const root = await mkdtemp(path.join(tmpdir(), "skills-publish-"));
+  const sh = (cmd, cwd) => {
+    const r = spawnSync("sh", ["-c", cmd], { cwd, encoding: "utf8" });
+    assert.equal(r.status, 0, `git ${cmd}\n${r.stderr}`);
+    return r.stdout.trim();
+  };
+  // A bare "origin" plus a work repo whose data/ plays the scraped snapshot.
+  try {
+    sh("git init -q --bare origin.git", root);
+    const work = path.join(root, "work");
+    sh("git init -q -b main work", root);
+    sh("git config user.name tester && git config user.email t@t.io && git remote add origin ../origin.git", work);
+    sh("git commit -q --allow-empty -m seed", work);
+    const scrape = async (day, body) => {
+      const data = path.join(work, "data");
+      await mkdir(path.join(data, "skills", "o/r/s"), { recursive: true });
+      await writeFile(path.join(data, "skills", "o/r/s", "SKILL.md"), `# s rev ${day}\n`);
+      await writeFile(path.join(data, "skills.jsonl"), `{"day":"${day}","body":"${body}"}\n`);
+      for (const f of ["trending.json", "curated.json", "stats.json"]) {
+        await writeFile(path.join(data, f), `{"day":"${day}"}\n`);
+      }
+    };
+    const publish = (day) => spawnSync(process.execPath, [PUBLISH, "--date", day], { cwd: work, encoding: "utf8" });
+    const distLog = (fmt) => sh(`git fetch -q origin dist && git log --format=${fmt} origin/dist`, work);
+    const distTip = (fmt) => sh(`git fetch -q origin dist && git log -1 --format=${fmt} origin/dist`, work);
+    const remoteTag = (tag) => sh(`git ls-remote origin refs/tags/${tag}`, work);
+
+    await scrape("d1", "first");
+    let r = publish("d1");
+    assert.equal(r.status, 0, r.stderr);
+    // First publish: an orphan dist branch with a single day-one commit, tagged.
+    assert.equal(distLog("%s"), "skills.sh data — d1");
+    const d1Sha = distLog("%H");
+    assert.match(remoteTag("dist-d1"), new RegExp(`^${d1Sha}`));
+
+    // Same-day rerun amends the day's commit instead of stacking a second one,
+    // re-points the tag at the amended sha, and keeps the original author date.
+    const authorDate = distTip("%aD");
+    await scrape("d1", "second");
+    r = publish("d1");
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(distLog("%H").split("\n").length, 1);
+    assert.equal(distLog("%s"), "skills.sh data — d1");
+    assert.notEqual(distLog("%H"), d1Sha);
+    assert.equal(distLog("%aD"), authorDate);
+    assert.equal(sh("git show origin/dist:skills.jsonl", work), `{"day":"d1","body":"second"}`);
+    assert.match(remoteTag("dist-d1"), new RegExp(`^${distLog("%H")}`));
+
+    // Five more days fill the window; the sixth overflows it and re-roots.
+    // The author date of each day's commit is captured right after its publish
+    // (git dates have 1s resolution, so runs inside the same second can tie).
+    const authorDates = {};
+    for (const day of ["d2", "d3", "d4", "d5", "d6"]) {
+      await scrape(day, day);
+      r = publish(day);
+      assert.equal(r.status, 0, r.stderr);
+      authorDates[day] = distTip("%aD");
+    }
+    assert.equal(distLog("%H").split("\n").length, 5);
+    // The pruned (re-rooted) commits keep their real per-run timeline — the
+    // rewrite does not stamp them all with the rewrite moment — and their
+    // subjects name their days (newest first in the log).
+    const shas = distLog("%H%x7C%s%x7C%aD").split("\n");
+    assert.deepEqual(
+      shas.map((l) => l.split("|")[1]),
+      ["skills.sh data — d6", "skills.sh data — d5", "skills.sh data — d4", "skills.sh data — d3", "skills.sh data — d2"],
+    );
+    for (const line of shas) {
+      const [, subject, authorDate] = line.split("|");
+      assert.equal(authorDate, authorDates[subject.slice(-2)]);
+    }
+
+    // Tags mirror the window: d1 fell out and its tag was deleted, d2–d6
+    // remain, each pointing at its own day's commit.
+    assert.match(remoteTag("dist-d1"), /^$/);
+    for (const day of ["d2", "d3", "d4", "d5", "d6"]) {
+      const sha = shas[4 - ["d2", "d3", "d4", "d5", "d6"].indexOf(day)].split("|")[0];
+      assert.match(remoteTag(`dist-${day}`), new RegExp(`^${sha}`), day);
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
   }
 });
