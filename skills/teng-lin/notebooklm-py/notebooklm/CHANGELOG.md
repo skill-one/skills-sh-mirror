@@ -9,6 +9,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Web vs Android public-behavior inventory.**
+  [`docs/web-android-public-behavior.md`](docs/web-android-public-behavior.md)
+  classifies remaining public backend splits (notes tombstone projection, raw
+  escape-hatch types, deliberate research-import policy, tracked default flips
+  gated by C3-02/C5A-01, and the [#2384](https://github.com/teng-lin/notebooklm-py/issues/2384)
+  `get_history` contract fix) so callers
+  do not treat every difference as a defect.
+- **Owner-grouped client configuration.** `notebooklm.options` adds frozen
+  `ClientConfig` groups for runtime capacity, retries, selected backend,
+  transfer phases, feature read windows, and Web session hooks. Both direct
+  construction and `from_storage` accept keyword-only `config=` while retaining
+  flat 0.x arguments through one compatibility normalizer.
+- **Public mutation-outcome evidence.** `notebooklm.outcomes` now exposes
+  `CommitState`, `RecoveryAction`, frozen `OperationMetadata`, typed reconciliation reports,
+  and ordered batch outcomes. These let callers
+  distinguish a request proven not sent, a decoded rejection, an unknown
+  commit outcome, and a caller-correlated confirmation. Unknown-outcome errors
+  retain the compatibility `unconfirmed` marker and may expose bounded
+  reconciliation candidates for manual inspection. Legacy `unconfirmed`, `source_id`, and
+  `stage` attributes remain projections; because they are now declared on `NotebookLMError`,
+  callers should test `source_id is None` rather than `hasattr(error, "source_id")`.
+- **Aggregate operation deadlines and journals.** Public
+  `client.operation(timeout=...)` and `RuntimeOptions.operation_timeout` apply
+  one monotonic budget across queueing, authentication, retries, transport,
+  polling, reconciliation, and transfers. Owned expiry raises
+  `OperationTimeoutError`; partial failures and cancellation retain the
+  operation's ordered mutation evidence.
+- **Adapter-neutral preparation and execution.** CLI, MCP, and REST workflows
+  now share presentation-free `_app` request preparation and execution cores.
+  Generation uses typed requests and outcomes, while source batches preserve a
+  typed result for every input occurrence. MCP confirmation previews return
+  canonical resource IDs; during v0.9, a successful confirmed mutation that
+  still uses a name or partial ID emits a registered compatibility warning.
 - **Pre-merge live CI qualification.** The repository owner can dispatch RPC health or nightly
   E2E from the trusted `main` workflow against the immutable head SHA of an open, same-repository
   PR targeting `main`. Forks, non-owner dispatches, and direct feature-ref dispatches remain
@@ -19,6 +52,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **MCP stdio `source_add` host-path file-add is default-deny.**
+  `source_add(source_type="file", path=...)` over stdio now requires
+  `NOTEBOOKLM_MCP_ALLOWED_ROOTS` (OS-pathsep directories; `$HOME` and
+  `~/.notebooklm` are rejected as roots). Known credential filenames
+  (`storage_state.json`, `master_token.json`) and Playwright profile dirs
+  are refused even inside an allowed root. Remote HTTP still never opens a
+  server-host `path`.
+- **Fuzzy artifact resolution refuses incomplete listings.** CLI
+  `resolve_artifact_id` and MCP `resolve_artifact` now require
+  `list_with_status().is_complete` before title/prefix matching. A notes
+  outage (or other secondary backing failure) no longer turns an ambiguous
+  title/prefix into a unique hit or a partial miss into not-found; both
+  surfaces raise the existing `artifacts.lookup` incomplete-read `RPCError`.
+  Canonical UUID refs still fast-path without listing ([#2380](https://github.com/teng-lin/notebooklm-py/issues/2380)).
+- **REST/MCP research import shares one operation budget.** Poll, optional
+  cited/max filtering, and import now run under one `client.operation` so a
+  configured aggregate deadline cannot restart between the read and the
+  mutation (`Fixes #2382`).
+- **CLI `ask --save-as-note --json` keeps save-failure commit evidence.** Optional
+  note-save remains non-fatal, but JSON now projects `SaveNoteOutcome.failure`
+  through the same commit-state / recovery-action / known-id fields as other CLI
+  errors instead of dropping them on a redacted `note_save_error` string (#2383).
+- **Retry-unsafe writes no longer replay after transmission.** Notebook and
+  source creates, file registration, research imports, collection creates, and
+  chat POSTs now require explicit commit evidence before any outer replay.
+  Because neither backend's full-set response nor a matching list row proves
+  which collection belongs to the caller, Web and Android
+  `client.collections.create()` send once and then raise `CollectionError` with
+  bounded candidate IDs for manual identification. Staged Drive cleanup
+  deletes only rows proven to belong to the current operation.
+- **Web chat preserves ambiguous post-send outcomes.** A transmitted turn is
+  never blindly replayed after an HTTP 429, 5xx, write/read/protocol failure, or
+  auth-shaped 400/401/403. Stale credentials are refreshed once for later
+  calls, but the current ask surfaces unknown commit evidence with
+  conversation-history inspection guidance. Positively pre-send connection
+  failures retain bounded retry.
+- **Decoded refusals stay distinct from transport throttles.** Artifact
+  rate-limit retry now follows commit evidence rather than exception type: a
+  decoded service refusal with `REJECTED` evidence may consume the explicit
+  retry budget, while a bare transport 429 or other unknown post-dispatch
+  outcome surfaces without replay.
 - **Nightly E2E and RPC health template validation.** The disposable-copy contract now matches
   the immutable public template title and its cross-backend copied artifact inventory, allowing
   provisioning to proceed in the scheduled Web and Android lanes. Legacy quiz/flashcard rows that
@@ -46,6 +120,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`chat.get_history` raises on turn-fetch failures.** Web previously logged
+  `ChatError`/`NetworkError` from the conversation-turns RPC and returned `[]`,
+  so a failed fetch looked like an empty conversation. Android already raised.
+  Both backends now raise; for a positive `limit`, `[]` means no conversation
+  or no turns. Android also returns `[]` for non-positive limits
+  ([#2384](https://github.com/teng-lin/notebooklm-py/issues/2384)).
+- **Legacy client tuning has a v1 runway.** A construction using non-default
+  flat tuning keywords now emits one caller-attributed `DeprecationWarning`
+  naming all arguments to migrate to `config=ClientConfig(...)`. Explicit old
+  defaults remain silent. Web read/write/pool timers and start/finalize/Drive
+  transfer timers now reach their owning transports independently without
+  changing legacy defaults.
+- **Create and research-import recovery is diagnostic, not success-producing.**
+  The former probe-and-retry helper and `PROBE_THEN_CREATE` policy are retired.
+  Ambiguous mutations are sent once and surfaced unchanged.
+  `research.import_sources_with_verification()` never reissues an import after
+  response loss; its bounded read-only inspection can attach candidates and
+  unresolved inputs before re-raising, but cannot claim that a row belongs to
+  the failed call.
+- **Artifact poll followers declare their v1 behavior.** During v0.x the first
+  waiter still owns the shared leader's polling options, so differing follower
+  values are ignored with a deprecation warning. A follower
+  `on_status_change` callback still receives only the final status and emits a
+  separate warning; v1.0 will make options per-waiter and deliver every
+  observed status to each callback.
 - **Artifact download authentication failures now raise `AuthError`.** Public
   artifact download methods surface HTTP 401/403 responses from guarded asset
   transfers as `AuthError` instead of wrapping them in `ArtifactDownloadError`.
@@ -66,6 +165,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   3.10–3.14 on Ubuntu plus Python 3.12 on macOS and Windows). The full 15-cell
   Ubuntu/macOS/Windows × Python 3.10–3.14 matrix now runs only in the nightly
   workflow, and manual nightly dispatches include it by default.
+
+### Documentation
+
+- **MCP/REST hosting threat model (`SECURITY.md`).** Operator-facing security
+  docs no longer claim the CLI has "no long-lived API keys or OAuth tokens".
+  They now document that `master_token.json` is account-equivalent, MCP OAuth
+  refresh tokens are long-lived (rotating `NOTEBOOKLM_MCP_OAUTH_PASSWORD` does
+  not revoke them), stdio `source_add(path)` reads server-host files, `/files/dl`
+  and `/files/ul` are HMAC-URL auth only, open OAuth DCR does not bypass the
+  login password, MCP loopback HTTP may be tokenless while REST always requires
+  `NOTEBOOKLM_SERVER_TOKEN`, `GET /healthz` is liveness not readiness, and
+  `pip-audit` in CI still exports `browser+dev+markdown` by default.
+  ([#2387](https://github.com/teng-lin/notebooklm-py/issues/2387))
 
 ### Removed
 

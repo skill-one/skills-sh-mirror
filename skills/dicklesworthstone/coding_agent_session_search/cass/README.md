@@ -398,7 +398,7 @@ Ingests history from 26 local agents, normalizing them into a unified `Conversat
 - **Muse Code**: `~/.local/share/muse/sessions/<YYYY>/<MM>/<DD>/<session-id>/session.jsonl`, including nested `subagent/*/session.jsonl` transcripts (override with `CASS_MUSE_DATA_ROOT`)
 - **Qwen Code**: `~/.qwen/tmp/*/chats/session-*.json` (Chat JSON)
 - **Factory (Droid)**: `~/.factory/sessions` (JSONL files organized by workspace slug)
-- **Antigravity (agy)**: `~/.gemini/antigravity-cli/brain/<uuid>/.system_generated/logs/transcript.jsonl` (clean JSONL transcript), with the durable per-conversation `conversations/<uuid>.db` (SQLite) mirrored alongside. Resume with `cass resume <transcript> --agent agy` (`agy --conversation <uuid>`).
+- **Antigravity (IDE + agy CLI)**: both stores are probed by default — the IDE's `~/.gemini/antigravity/` and the CLI's `~/.gemini/antigravity-cli/` — each holding `brain/<uuid>/.system_generated/logs/transcript.jsonl` (clean JSONL transcript) with the durable per-conversation `conversations/<uuid>.db` (SQLite) mirrored alongside. IDE conversations are keyed `ide/<uuid>` so the two stores never collide; `CASS_ANTIGRAVITY_DATA_ROOT` replaces both with one explicit base. Resume with `cass resume <transcript> --agent agy` (`agy --conversation <uuid>`).
 - **OpenHands (OpenDevin)**: `~/.openhands/conversations/<id>/` — `base_state.json` metadata plus an `events/event-NNNNN-<uuid>.json` event stream (JSON)
 - **Grok Build (xAI `grok`)**: `~/.grok/sessions/<percent-encoded-cwd>/<session-uuid>/` — `updates.jsonl` (authoritative ACP session-update stream) with `summary.json` metadata and `chat_history.jsonl` fallback (override the base dir with `GROK_HOME`). Resume with `grok --resume <session-id>`.
 
@@ -1332,6 +1332,7 @@ cass index --full --json --robot-trace-ingest 2>/tmp/cass-ingest-trace.jsonl
 |------|---------|
 | `--idempotency-key KEY` | Safe retries: same key + params returns cached result (24h TTL) |
 | `--json` | JSON output with stats |
+| `--gc` | Reclaim merge-retired lexical segment files and exit: runs the engine's grace-period garbage sweep (a folded segment file is unlinked only once no published MANIFEST generation has referenced it for 300 s) and reports files/bytes reclaimed. Every incremental `cass index` performs the same sweep at open; `doctor --json` reports the reclaimable bytes under `storage_pressure.full_rebuild_readiness` (GH #453) |
 
 ### Robot Documentation System
 
@@ -3225,7 +3226,7 @@ Update check state is stored in the data directory:
 | `CASS_CACHE_BYTE_CAP` | 10485760 | Cache byte limit (10MB) |
 | `CASS_WARM_DEBOUNCE_MS` | 120 | Warm-up search debounce |
 | `CASS_DEBUG_CACHE_METRICS` | unset | Enable cache hit/miss logging |
-| `CASS_QUILL_QUERY_FUEL_BUDGET` | Quill default (10000000) | Escape hatch for Quill's deterministic per-query work ceiling (GH #441). Zero or unparseable values keep the engine default. When fuel runs out on a hybrid query the lexical leg is dropped, the semantic leg still answers, and `_meta.lexical_degrade_reason` reports `query_fuel_exhausted`; lexical-only queries return an actionable hint. The durable fix for fuel exhaustion is a consolidated index (`cass index --full`), and cass now publishes Quill snapshots only on its own commits (no per-second visibility seals), which is what let segment counts grow into the hundreds on append-only archives |
+| `CASS_QUILL_QUERY_FUEL_BUDGET` | Quill default (10000000) | Escape hatch for Quill's deterministic per-query work ceiling (GH #441). Zero or unparseable values keep the engine default. When fuel runs out on a hybrid query the lexical leg is dropped, the semantic leg still answers, and `_meta.lexical_degrade_reason` reports `query_fuel_exhausted`; lexical-only queries return an actionable hint. The durable fix for fuel exhaustion is a consolidated index (an incremental `cass index` folds fragmented generations in its maintenance pass; `--full` rebuilds from scratch), and cass now publishes Quill snapshots only on its own commits (no per-second visibility seals), which is what let segment counts grow into the hundreds on append-only archives |
 | **Semantic Search** | | |
 | `CASS_SEMANTIC_EMBEDDER` | auto | Force embedder: `hash`, `minilm`, or explicit `multilingual-minilm` |
 | `CASS_SEMANTIC_PROGRESS_JSONL` | unset | Absolute path to a JSONL file the semantic backfill appends one event per transition to (`selection_*`, `packet_replay_*`, `embed_batch_*`, `staging_write_*`, `checkpoint_save_*`, `publish_*`, `error`, `cancelled`, `complete`). Each line carries timestamp, phase + sub-phase, batch/row counters, byte counts, elapsed-since-start, and a cheap RSS estimate. Silent when unset. Best-effort writes — failures log at debug and never crash a backfill. See [cass#257](https://github.com/Dicklesworthstone/coding_agent_session_search/issues/257). |

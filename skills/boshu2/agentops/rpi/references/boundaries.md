@@ -38,20 +38,15 @@ subjects only when the caller explicitly asked for document review.
 ## Adapters and specialists
 
 Premortem, Postmortem, Council, genie, factory, tracker, and runtime adapters
-are caller-selected and leave phase order and core outcomes unchanged, with
-two legs the traversal dispatches itself on a risky write scope: premortem at
-Plan exit, and council on a risky split that survives repair. Both stay
-judgment legs. Premortem returns blocking findings against a plan that has no
-subject yet, so its block is the `NOT_PLANNED` status, never a verdict.
-Council rules on findings, never on verdicts, and its rulings are recorded for
-the caller rather than applied: it closes nothing, and the split is resolved
-by the convergence law and the repair phase, never by a third judge or by
-electing a leg. A convergence-law stop convenes no council at all. A
+are caller-selected and leave phase order and core outcomes unchanged, with one
+read the traversal asks for itself: on a risky write scope, a premortem over
+the frozen plan before Implement. That stays a judgment leg. It raises blocking
+findings against a plan that has no subject yet, so its block is the
+`NOT_PLANNED` status, never a verdict, and the caller may waive it.
 
-[`plan`](../../plan/SKILL.md) source owns `binding_judge`: it is the caller's
-declared disposition for a split that survives repair, bound into the plan
-identity so a disagreeing caller argument refuses the traversal rather than
-silently rebinding it. Validate never reads it as an override. A
+A judge split is the orchestrator's decision, made in the open and recorded in
+the report; it is never resolved by a third judge convened on the traversal's
+own initiative. A
 selected factory receives intent through its own coordinator (for Gas City,
 the Mayor; see the `using-gc` skill); the core hands over intent and reads
 native state, and the factory's own reconciler creates, scales, and repairs
@@ -76,6 +71,12 @@ read and judge; the orchestrating context fixes. Validate emits no WARN,
 confidence, disposition, briefing learning, owner, next action, repair, retry,
 replan, helper, escalation, tracker, Git, release, closure, or delivery state.
 RPI and Validate reports end with the evidence; the caller owns continuation.
+A selected bounded outer goal may consume informative red and authorize a
+different experiment under unchanged acceptance. Its one causal HOLD helper
+per incident stays inside the remaining allowance and cannot replace required
+validation or revive a spent RPI bound. Cancellation, explicit refusal/judgment,
+and spent hard time/cost/quota skip that helper. The core never claims native
+pause or aggregate budget enforcement from objective text alone.
 A wrong subject needs no second judge: a subject or digest mismatch is
 `NOT_PROVEN` before any cross-family leg runs. Validate never asks the model
 to reconstruct Plan or Candidate packets; identity, scope, and freshness come

@@ -358,6 +358,65 @@ pub struct PlannedAnswerPack {
     pub omitted: Vec<OmittedPackCandidate>,
 }
 
+impl PlannedAnswerPack {
+    /// Make progress toward a measured final-output bound without changing
+    /// citation identity. Rendering must be repeated after each reduction:
+    /// escaping, handoff text and format overhead affect the actual savings.
+    pub(crate) fn reduce_for_output_budget(
+        &mut self,
+        excess_tokens: usize,
+        require_evidence: bool,
+    ) -> bool {
+        let Some(item) = self.evidence.last_mut() else {
+            return false;
+        };
+        let chars = item.excerpt.chars().count();
+        let max_chars = chars
+            .saturating_sub(
+                excess_tokens
+                    .max(1)
+                    .saturating_mul(TOKEN_ESTIMATE_CHARS_PER_TOKEN),
+            )
+            .max(4);
+        if max_chars < chars
+            && item
+                .excerpt
+                .chars()
+                .take(max_chars - 3)
+                .any(|character| !character.is_whitespace())
+        {
+            let (excerpt, _) = truncate_excerpt(&item.excerpt, max_chars);
+            self.estimated_tokens = self.estimated_tokens.saturating_sub(item.estimated_tokens);
+            item.excerpt = excerpt;
+            item.excerpt_truncated = true;
+            item.estimated_tokens = estimated_tokens(&item.excerpt);
+            item.selection.token_cost = item.estimated_tokens;
+            self.estimated_tokens += item.estimated_tokens;
+            return true;
+        }
+        if require_evidence && self.evidence.len() == 1 {
+            return false;
+        }
+        let Some(item) = self.evidence.pop() else {
+            return false;
+        };
+        self.estimated_tokens = self.estimated_tokens.saturating_sub(item.estimated_tokens);
+        self.omitted.push(omitted_candidate(
+            &item.candidate,
+            PackOmittedReason::TokenBudgetExhausted,
+            item.selection,
+        ));
+        self.selected_evidence_count = self.evidence.len();
+        self.selected_session_count = self
+            .evidence
+            .iter()
+            .map(|item| item.candidate.session_key())
+            .collect::<HashSet<_>>()
+            .len();
+        true
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PackPlannerDiagnostics {
     pub candidate_fetch_limit: usize,
@@ -856,6 +915,11 @@ pub fn plan_answer_pack(
         .candidates
         .iter()
         .map(|candidate| {
+            if crate::export::is_skill_injection(&candidate.excerpt) {
+                // Pack has no skill-content opt-in yet. Reuse the export
+                // default and account for exclusion as redacted_to_empty.
+                return (String::new(), false, Vec::new());
+            }
             let mut redactions = Vec::new();
             let redacted = redact_pack_output_text(&candidate.excerpt, &mut redactions);
             let (excerpt, truncated) =
@@ -946,7 +1010,10 @@ pub fn plan_answer_pack(
         remaining = next_remaining;
         let candidate = &request.candidates[best_candidate.index];
 
-        let remaining_tokens = diagnostics.budget.evidence_tokens.saturating_sub(used_tokens);
+        let remaining_tokens = diagnostics
+            .budget
+            .evidence_tokens
+            .saturating_sub(used_tokens);
         if best_candidate.score.token_cost > remaining_tokens {
             let max_chars = remaining_tokens.saturating_mul(TOKEN_ESTIMATE_CHARS_PER_TOKEN);
             let retained_chars = max_chars.saturating_sub(3);
@@ -1134,16 +1201,29 @@ pub(crate) fn verify_pack_source_citations(
             let Some(message) = crate::connectors::codex::modern_codex_message(&raw) else {
                 continue;
             };
+            let mut redacted_content = None;
             for (slot, evidence_index) in matches.iter_mut().zip(&indices) {
                 let candidate = &plan.evidence[*evidence_index].candidate;
-                // The modern Codex parser trims message boundaries, while
-                // archived FAD messages can retain that whitespace. Preserve
-                // internal whitespace and require a unique normalized record.
-                if message.content == candidate.excerpt.trim()
-                    && candidate
-                        .created_at_ms
-                        .is_none_or(|created| message.created_at == Some(created))
+                if candidate
+                    .created_at_ms
+                    .is_some_and(|created| message.created_at != Some(created))
                 {
+                    continue;
+                }
+                // The modern Codex parser trims message boundaries, while
+                // archived FAD messages can retain that whitespace. Ingestion
+                // can also redact credentials before storing the message.
+                // Compare that exact transform, never the shortened excerpt;
+                // still require a unique record and hash its original bytes.
+                let excerpt = candidate.excerpt.trim();
+                let same_content = if message.content == excerpt {
+                    true
+                } else {
+                    let redacted =
+                        redacted_content.get_or_insert_with(|| redact_text(&message.content));
+                    redacted.as_ref() == excerpt
+                };
+                if same_content {
                     slot.0 += 1;
                     slot.1 = line_index + 1;
                     slot.2 = Some(blake3::hash(line));
@@ -1608,7 +1688,15 @@ pub fn render_answer_pack_without_trust_correlation(
     request: &PackRenderRequest,
 ) -> Result<String, PackRenderError> {
     let correlation = crate::search::trust_correlation::CorrelationIndex::default();
-    let envelope = rendered_answer_pack_with_correlation(plan, request, &correlation);
+    render_answer_pack_with_correlation(plan, request, &correlation)
+}
+
+pub(crate) fn render_answer_pack_with_correlation(
+    plan: &PlannedAnswerPack,
+    request: &PackRenderRequest,
+    correlation: &crate::search::trust_correlation::CorrelationIndex,
+) -> Result<String, PackRenderError> {
+    let envelope = rendered_answer_pack_with_correlation(plan, request, correlation);
     match request.format {
         PackRenderFormat::Json => {
             serde_json::to_string_pretty(&envelope).map_err(|err| render_error(request, err))
@@ -1631,10 +1719,18 @@ pub fn render_answer_pack_value_without_trust_correlation(
     request: &PackRenderRequest,
 ) -> Result<serde_json::Value, PackRenderError> {
     let correlation = crate::search::trust_correlation::CorrelationIndex::default();
+    render_answer_pack_value_with_correlation(plan, request, &correlation)
+}
+
+pub(crate) fn render_answer_pack_value_with_correlation(
+    plan: &PlannedAnswerPack,
+    request: &PackRenderRequest,
+    correlation: &crate::search::trust_correlation::CorrelationIndex,
+) -> Result<serde_json::Value, PackRenderError> {
     serde_json::to_value(rendered_answer_pack_with_correlation(
         plan,
         request,
-        &correlation,
+        correlation,
     ))
     .map_err(|err| render_error(request, err))
 }
@@ -2851,6 +2947,59 @@ mod tests {
     }
 
     #[test]
+    fn pack_omits_skill_injections_before_truncation_and_preserves_safe_evidence() {
+        let mut safe = candidate("safe", "local", "/work/safe.jsonl", 1.0);
+        safe.excerpt = "Ordinary skill design discussion stays useful.".to_string();
+        let mut candidates = vec![safe.clone()];
+        for (index, marker) in [
+            "Base directory for this skill:",
+            "<system-reminder>",
+            "The following skills are available for use with the Skill tool:",
+            "skillInjection: matchedSkills",
+            "<!-- skillInjection:",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut injected = candidate(
+                &format!("skill-{index}"),
+                "local",
+                &format!("/work/skill-{index}.jsonl"),
+                100.0,
+            );
+            injected.excerpt = format!("PROPRIETARY PLAYBOOK {} {marker}", "界".repeat(120));
+            candidates.push(injected);
+        }
+        let plan = plan_answer_pack(request(candidates.clone())).unwrap();
+        assert_eq!(plan.candidate_count, 6);
+        assert_eq!(plan.selected_evidence_count, 1);
+        assert_eq!(plan.evidence[0].candidate, safe);
+        assert_eq!(plan.evidence[0].excerpt, safe.excerpt);
+        assert_eq!(plan.omitted.len(), 5);
+        let mut omitted_ids = HashSet::new();
+        for omitted in &plan.omitted {
+            assert_eq!(omitted.reason, PackOmittedReason::RedactedToEmpty);
+            assert_eq!(omitted.estimated_tokens, 0);
+            assert!(omitted_ids.insert(&omitted.candidate_id));
+        }
+        let value = render_answer_pack_value_without_trust_correlation(
+            &plan,
+            &render_request(PackRenderFormat::Json),
+        )
+        .unwrap();
+        assert_eq!(value["privacy"]["redaction_applied"], true);
+        assert_eq!(value["privacy"]["skill_content_included"], false);
+        assert_eq!(value["privacy"]["redaction_counts"]["redacted_to_empty"], 5);
+        assert!(!value.to_string().contains("PROPRIETARY PLAYBOOK"));
+
+        candidates.remove(0);
+        let excluded = plan_answer_pack(request(candidates)).unwrap();
+        assert!(excluded.evidence.is_empty());
+        assert_eq!(excluded.omitted.len(), 5);
+        assert_eq!(excluded.estimated_tokens, 0);
+    }
+
+    #[test]
     fn from_search_hit_uses_robot_match_type_spelling() {
         let hit = SearchHit {
             title: "session".to_string(),
@@ -3011,6 +3160,60 @@ mod tests {
                 assert_eq!(
                     evidence.candidate.span_hash,
                     blake3::hash(source.as_bytes()).to_hex().to_string()
+                );
+            }
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), source);
+        }
+    }
+
+    #[test]
+    fn source_citations_match_ingestion_redaction_without_ignoring_ambiguity() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let path = temp.path().join("rollout-redacted.jsonl");
+        let first = format!("verifiedneedle sk-{}", "A".repeat(40));
+        let second = format!("verifiedneedle sk-{}", "B".repeat(40));
+        let archived = "verifiedneedle [REDACTED]";
+        let record = |text: &str| {
+            serde_json::json!({
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": text}]
+                }
+            })
+            .to_string()
+        };
+        let raw = record(&first);
+        for (excerpt, source, timestamp, verified) in [
+            (archived, raw.clone(), None, true),
+            (first.as_str(), raw.clone(), None, true),
+            (first.as_str(), record(&second), None, false),
+            (archived, format!("{raw}\n{}", record(&second)), None, false),
+            (archived, record("different content"), None, false),
+            (archived, raw.clone(), Some(1), false),
+        ] {
+            std::fs::write(&path, &source).unwrap();
+            let mut item = candidate("redacted", "local", path.to_str().unwrap(), 10.0);
+            item.excerpt = excerpt.to_string();
+            item.created_at_ms = timestamp;
+            let mut plan = plan_answer_pack(request(vec![item])).unwrap();
+            let prepared = plan.evidence[0].excerpt.clone();
+            verify_pack_source_citations(
+                &mut plan,
+                std::time::Instant::now() + std::time::Duration::from_secs(1),
+            );
+            let evidence = &plan.evidence[0];
+            assert_eq!(evidence.candidate.citation_verified, verified);
+            assert_eq!(evidence.candidate.line_start, verified.then_some(1));
+            assert_eq!(evidence.candidate.line_end, verified.then_some(1));
+            assert_eq!(evidence.candidate.excerpt, excerpt);
+            assert_eq!(evidence.excerpt, prepared);
+            assert_eq!(evidence.id, evidence_id(&evidence.candidate));
+            if verified {
+                assert_eq!(
+                    evidence.candidate.span_hash,
+                    blake3::hash(raw.as_bytes()).to_hex().to_string()
                 );
             }
             assert_eq!(std::fs::read_to_string(&path).unwrap(), source);
@@ -4211,6 +4414,78 @@ mod tests {
             plan.omitted[0].reason,
             PackOmittedReason::TokenBudgetExhausted
         );
+    }
+
+    #[test]
+    fn final_output_reduction_preserves_citations_and_reconciles_dropped_evidence() {
+        let first = candidate("first", "local", "/s/first.jsonl", 10.0);
+        let mut last = candidate("last", "remote", "/s/last.jsonl", 9.0);
+        last.excerpt = "界😀e\u{301}".repeat(20);
+        let mut plan = plan_answer_pack(request(vec![first, last.clone()])).unwrap();
+        let original_first = plan.evidence[0].clone();
+        let original_last_id = plan.evidence[1].id.clone();
+        assert!(plan.reduce_for_output_budget(10_000, true));
+        assert_eq!(plan.evidence[0], original_first);
+        assert_eq!(plan.evidence[1].candidate, last);
+        assert_eq!(plan.evidence[1].id, original_last_id);
+        assert_eq!(plan.evidence[1].excerpt, "界...");
+        assert_eq!(plan.evidence[1].estimated_tokens, 1);
+        assert_eq!(plan.evidence[1].selection.token_cost, 1);
+        assert_eq!(plan.estimated_tokens, original_first.estimated_tokens + 1);
+        assert!(plan.omitted.is_empty());
+
+        assert!(plan.reduce_for_output_budget(10_000, true));
+        assert_eq!(plan.evidence, vec![original_first.clone()]);
+        assert_eq!(plan.selected_evidence_count, 1);
+        assert_eq!(plan.selected_session_count, 1);
+        assert_eq!(plan.estimated_tokens, original_first.estimated_tokens);
+        assert_eq!(plan.omitted.len(), 1);
+        assert_eq!(plan.omitted[0].candidate_id, last.candidate_id);
+        assert_eq!(
+            plan.omitted[0].reason,
+            PackOmittedReason::TokenBudgetExhausted
+        );
+        let rendered = render_answer_pack_value_without_trust_correlation(
+            &plan,
+            &render_request(PackRenderFormat::Json),
+        )
+        .unwrap();
+        assert_eq!(
+            rendered["pack"]["answer_outline"].as_array().unwrap().len(),
+            1
+        );
+        assert_eq!(
+            rendered["pack"]["handoff"][0]["evidence_ids"][0],
+            original_first.id
+        );
+        assert_eq!(
+            rendered["pack"]["source_summary"].as_array().unwrap().len(),
+            1
+        );
+
+        assert!(plan.reduce_for_output_budget(10_000, true));
+        assert!(!plan.reduce_for_output_budget(10_000, true));
+        assert_eq!(plan.evidence.len(), 1, "required evidence cannot disappear");
+        assert!(plan.reduce_for_output_budget(10_000, false));
+        assert!(plan.evidence.is_empty());
+        assert_eq!(plan.selected_session_count, 0);
+        assert_eq!(plan.selected_evidence_count, 0);
+        assert_eq!(plan.estimated_tokens, 0);
+        assert_eq!(plan.omitted.len(), 2);
+        assert!(!plan.reduce_for_output_budget(10_000, false));
+    }
+
+    #[test]
+    fn final_output_reduction_drops_whitespace_prefix_without_fabricating_text() {
+        let mut item = candidate("space", "local", "/s/space.jsonl", 10.0);
+        item.excerpt = " \t\n meaningful text".to_string();
+        let mut plan = plan_answer_pack(request(vec![item])).unwrap();
+        let before = plan.clone();
+        assert!(!plan.reduce_for_output_budget(10_000, true));
+        assert_eq!(plan, before);
+        assert!(plan.reduce_for_output_budget(10_000, false));
+        assert!(plan.evidence.is_empty());
+        assert_eq!(plan.omitted.len(), 1);
     }
 
     #[test]

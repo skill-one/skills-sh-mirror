@@ -48,10 +48,11 @@ and dispatches Plan and Implement at most once; Validate repeats only inside
 the repair phase, under the convergence law and the caller's `repair_rounds`.
 Read [references/boundaries.md](references/boundaries.md), the ownership and
 delegation boundary shared by the core skills, before dispatch.
-[`scripts/run_once.py`](scripts/run_once.py) is the reference for the repair
-law: it makes round admission, class reopening, and stop executable without
-Git, `ao`, or a tracker. It implements that law only, not the premortem,
-council, or receipt legs.
+[`scripts/run_once.py`](scripts/run_once.py) is the grandfathered pure reference:
+it consumes supplied rounds and decoded receipt facts without Git, `ao`, a
+tracker, I/O, helper dispatch, or a budget account. It checks the repair bound,
+recurrence, discovery classification evidence, and named gap closure; fresh
+judgment still establishes acceptance relevance and the truth of those facts.
 
 ## Prompt
 
@@ -68,9 +69,11 @@ plus a cross-family leg (the scope is a risky surface). repair_rounds=2.
   one `implement` dispatch.
 - The validator's context ID differs from the author's, and the report opens
   with `status:` and changed paths, not a digest.
-- Each round appends one `repair round N: k open findings` line to `checked`,
-  `k` never grows, and the run ends on `converged`, a law violation, or
-  `repair_rounds`, with no next action after the evidence.
+- Each round appends one `repair round N: k open findings` line to `checked`
+  alongside the acceptance gap closed and its proof. Counts may grow through
+  evidenced pre-existing discoveries; they never establish progress or cause.
+  The run ends on `converged`, a law violation, or `repair_rounds`, with no next
+  action after the evidence.
 
 ## Admission and phase lock
 
@@ -98,13 +101,18 @@ comment alone is not that.
    caller-owned source by reference and digest, or, only when no durable
    source exists, the exact resolved bytes snapshotted by the runtime under
    their digest.
-3. On a risky write scope, dispatch the Plan-exit premortem leg below before
-   Implement. A nonempty `blocking` list returns `NOT_PLANNED` naming those
-   findings. A caller may declare `premortem: skip`. Every terminal report
-   carries `premortem: not-required | required | clean | blocking | skipped | failed`, so a
-   skipped or failed leg is never read as a clean one.
+3. When the write scope touches a risky surface (the short list
+   [`validate`](../validate/SKILL.md) names), have one fresh judge read the
+   frozen plan before Implement. A blocking finding sends the plan back to the
+   caller as `NOT_PLANNED`, naming that finding. The caller may waive the read,
+   and the report says so. Every terminal report says whether that read was not
+   required, clean, blocking, waived, or never finished, so a waived or dead
+   read is never taken for a clean one.
 4. Invoke Implement once: one bounded experiment; the runtime derives subject
-   identity and check receipts. With no subject built, report `NOT_BUILT`.
+   identity and check receipts. After Implement, and again after each repair
+   round, run `bash scripts/evidence-orphans.sh <changed paths>` and put its
+   output in the check receipts, so the validator and the caller both see what
+   evidence this change orphaned. With no subject built, report `NOT_BUILT`.
 5. Invoke Validate once in a context distinct from the author's, passing the
    intent reference and digest, exact subject manifest, receipts, validator
    identity, and freshness attestation.
@@ -115,80 +123,77 @@ comment alone is not that.
    machine-readable evidence or a declared consumer requires it.
 
 `NOT_PLANNED` and `NOT_BUILT` are report statuses, never semantic verdicts.
-A caller may revise the intent and start a new invocation.
+A caller or explicitly selected bounded outer goal may authorize a materially
+different experiment within unchanged goal acceptance, scope, and allowance;
+that starts a new invocation, never resets a spent bound, and never rewrites a
+prior verdict. Changing accepted outcome or scope requires caller authority.
 
 ## The convergence law
 
 A repair round is admitted only while all hold:
 
 1. `rounds_used < repair_rounds` (caller-declared, default 2).
-2. The open finding set, keyed by stable `findings[].id` (union of the fresh
-   and cross-family validators), is not larger than the previous round's.
-3. No finding id closed in an earlier round reopens.
-4. Between rounds the subject-manifest digest changed (generated-only changes
-   count) or, for `NOT_PROVEN`, new digest-bound evidence resolved a named gap.
-5. No finding class closed in an earlier round reappears under a new id.
+2. New digest-bound evidence proves closure of a named acceptance finding or,
+   for `NOT_PROVEN`, resolves a named proof gap. A changed digest or a smaller
+   finding count alone is not useful progress. Generated-only changes qualify
+   only when the evidence proves that they repair required behavior or parity.
+   An unchanged subject previously judged FAIL cannot be repaired by a new label
+   or verdict flip; changed bytes still require acceptance proof.
+3. No finding id closed in an earlier round reopens. No closed finding class
+   recurs, and no introduced regression or new finding of unknown cause is
+   admitted. Before/after reproduction or equivalent causal evidence under the
+   same acceptance must distinguish a pre-existing discovery from a regression;
+   neither counts, timestamps, nor a new id establish that distinction.
 
-`findings[].class` is optional: a stable short name for the defect kind,
-either absent or a real name, never present and blank. A present-but-blank
-class makes the round invalid, because a blank class defeats rule 5 in
-silence. Rule 5 tests continuous rename: a resolved id's class reappearing on
-a new id, while no surviving prior id still carries that class, is
-`class_reopened`. One round can carry both a reopened id and a reopened class;
-repair stops on either, and the caller returns to Plan, because the design is
-wrong, not the patch.
+Keep the union of every required judge's findings, keyed by stable
+`findings[].id`; do not hide a necessary finding as optional. Newly exposed
+pre-existing defects may increase the open count while another acceptance gap
+is demonstrably closed. Their evidence must prove prior existence;
+unknown cause stops repair for causal examination even if another gap closed.
+Validators reuse a short stable `class` for each kind of defect. A reopened id
+or returning class warrants causal HOLD in a selected outer goal. Recurrence
+alone does not prove that the design is wrong and never auto-reopens Plan.
 
-Converged: the fresh validator returns PASS and, on a risky surface, so does
-the cross-family validator. On any violation of 1-5 RPI stops and reports the
-current status. `checked` carries one line per round
-(`repair round N: k open findings`); open findings ride in the result and the
-report. A reworded finding with the same id is the same finding. Acceptance
-and its digest stay fixed: a repair moves the subject. The orchestrating
-context fixes; judge legs only read. No judge beyond the council leg, no
-escalation, no auto-replan.
+Reuse existing check receipts, findings summaries, and evidence references for
+this reasoning. In the pure reference, decoded receipt bindings use `ref`,
+`subject_digest`, and `resolves` for ids actually closed. `preexisting` ids must
+bind reproduction to the prior subject digest; `introduced` ids bind causal
+comparison to the current digest and stop repair. These are supplied receipt
+facts, not new persisted verdict fields or a lifecycle schema. The reference
+cannot prove a receipt's truth or infer cause from wording.
+
+Converged: the fresh validator returns PASS and every required cross-family
+validator does too, over the exact subject and all acceptance with empty
+`not_checked`. On any violation RPI stops and reports the current status.
+`checked` carries one line per round (`repair round N: k open findings`); open
+findings ride in the result and the report. A reworded finding with the same id
+is the same finding. Acceptance and its digest stay fixed. The orchestrating
+context fixes; judge legs only read. RPI convenes no further judge of its own,
+does not escalate, and does not auto-replan.
 
 ## Cross-family validation
 
-Risky surfaces default to a cross-family fresh validator: `cli/internal/gates/**`,
-`scripts/check-*.sh`, `tests/**`, `skills/*/scripts/**`,
-`skills/cc-hooks/policies/**`, `lib/**`, `.github/workflows/**`, `scripts/security-gate.sh`.
-[`validate`](../validate/SKILL.md) owns the surface list. No authorized live
-adapter means `diversity_unsatisfied`, which on a risky surface is `NOT_PROVEN`.
+[`validate`](../validate/SKILL.md) owns risk classification by effect on
+acceptance and enforcement. Fresh author-distinct judgment always remains;
+changes to acceptance, stopping, guards, safety, or enforcement require the
+stronger cross-family leg even when expressed in documentation. Narrow low-risk
+wording edits may use one fresh judge with exact applicable receipts. Unknown
+risk takes the stronger path. This prospective rule never waives a leg already
+required for the current change or by caller acceptance. No authorized live
+adapter for a required leg means `diversity_unsatisfied` / `NOT_PROVEN`.
 
-The law stands over both legs. A risky surface converges only when both legs
-return PASS; a split never certifies PASS; no finding leaves the open set
-because a judge was elected. `binding_judge` is a field of the Plan output,
-bound into the plan identity, and a caller argument that disagrees with it
-refuses the traversal. It declares the caller's disposition for a split that
-survives repair, applies only on a risky scope, and is carried in the report.
-It is never a verdict override and never mutates a leg's verdict.
-
-A risky split that survives repair goes to one
-[`council`](../council/SKILL.md) leg that adjudicates findings, not verdicts.
-The leg receives a bounded packet (acceptance, write scope, runtime-derived
-changed paths, criteria, and both legs' findings with evidence references,
-marked untrusted) and returns one ruling per finding. The traversal validates
-the shape of what comes back (exactly one ruling per finding id, a duplicated
-id refuses the whole set, ids checked against the table, evidence references
-kept verbatim and never resolved) and records it under `council.rulings`. It
-closes nothing. The verdict and the open finding set are exactly what the
-repair phase left them, and the rulings are there for the caller's next intent
-to read.
-
-The council closed findings on cited evidence for five rounds, and each round
-of hardening that path drew a new defect of the same kind. By this traversal's
-own convergence law a class that reopens after repair means the design is
-wrong, so the closure was cut rather than hardened again. A convergence-law
-stop convenes no council at all: the run already failed to converge, and a
-third judge on top of that is the escalation the law forbids. Council mints no
-verdict.
+Two judges disagreeing is the orchestrator's decision, and it is made in the
+open. Both reads go in the report, each with its own verdict, alongside what
+was decided and why. A risky surface still converges only when both judges
+pass, so a split is never a PASS and no finding leaves the open set because one
+judge was preferred.
 
 ## Judgment dispatch
 
 | Condition | Leg |
 |---|---|
-| risky write scope at Plan exit: a `write_scope` glob intersects a risky-surface glob, and a bare `**` or `*` glob counts as an intersection | [`premortem`](../premortem/SKILL.md) before Implement, returning `{blocking: [{id, class, summary}], notes: [...]}`; nonempty `blocking` is `NOT_PLANNED` |
-| a risky split that survives repair | `council`, one leg, returning `{id, ruling: real \| not_real \| not_proven, evidence_refs}` per finding |
+| the write scope reaches a risky surface at Plan exit, a broad or unbounded scope included | [`premortem`](../premortem/SKILL.md) before Implement; a blocking finding is `NOT_PLANNED` |
+| the two judges split | the orchestrator decides in the open and records both reads; [`council`](../council/SKILL.md) is available when the caller selects it |
 | an irreversible landing decision | `one-way-door`, caller-selected, outside the traversal |
 
 ## Waves
@@ -205,13 +210,21 @@ guard; RPI reuses that judgment instead of turning each component, gate
 failure, or specialist comment into a new planning artifact, and one terminal
 goal may span several source owners as one bounded experiment.
 
-The spiral breaker fires on a convergence-law violation, or when two
-consecutive rounds change neither the subject digest nor the digest-bound
-evidence, never on a verdict count: a `FAIL` or `NOT_PROVEN` under repair is
-progress; repeated control artifacts with no new implementation evidence are
-the spiral. Report `NOT_BUILT` when no subject exists; otherwise report the
-subject's current status without dispatching another lane, keeping the full
-integration check and fresh validation for the frozen subject.
+The spiral breaker fires on a convergence-law violation; repeated activity
+without acceptance-relevant evidence cannot renew repair. FAIL and NOT_PROVEN
+are outcomes, not progress by themselves. Informative red may falsify a live
+hypothesis and justify a different experiment in an explicitly selected bounded
+outer goal under unchanged acceptance. It does not extend this RPI's bound.
+
+The selected outer goal owns causal HOLD and exactly one bounded fresh helper
+per incident, charged inside its remaining allowance. Cancellation, an explicit
+refusal/judgment lane, or a genuinely spent hard time/cost/quota ceiling skips
+that helper. An unhelpful helper stops implementation; automatic continuation
+cannot create another helper incident. RPI itself neither dispatches that helper
+nor reports native pause/aggregate enforcement from objective text.
+Report `NOT_BUILT` when no subject exists; otherwise report the subject's current
+status and unresolved acceptance, keeping the full integration check and
+required fresh validation for the frozen subject.
 
 ## Report
 
@@ -220,17 +233,11 @@ integration check and fresh validation for the frozen subject.
 2. **Machine artifact:** return or persist the exact `rpi-report.v1` object
    only when the caller requests machine-readable evidence or a declared
    adapter consumes it; `schemas/rpi-report.v1.schema.json` (repo checkout)
-   owns its exact shape and `status` set.
+   owns its nine-key shape and `status` set.
 
-The workflow result is the camelCase object the adapter returns. It carries
-`status`; `premortem`; `dissent`, the judge split with each leg's own verdict;
-`plannedOrphans`, the evidence the frozen plan said this write scope would
-orphan, budgeted as recapture work before any code was written;
-`orphanedEvidence`, the bound evidence this change actually invalidated with a
-`cause` per entry; and `stopReason` from a fixed enum. Each is empty or null when
-nothing applies; none is omitted to keep a result short. Those keys belong to
-the workflow result alone: `rpi-report.v1` keeps its nine snake_case keys
-unchanged.
+Say in the report what this change orphaned: the evidence the plan budgeted to
+recapture, and the evidence the orphan receipt actually named after Implement
+and after each repair round.
 
 Lead with the status and one sentence naming the caller-visible outcome, then
 the subject: paths changed, commits, test results, acceptance satisfied or

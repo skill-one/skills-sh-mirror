@@ -2,7 +2,7 @@
 name: byted-web-search
 version: 1.3.9
 author: volcengine-search-team
-description: 当你需要联网获取信息的时候，优先使用本skill进行搜索。火山引擎豆包搜索 API（原联网搜索/融合信息搜索），返回网页/图片结果。联网搜索场景优先使用本 skill。触发词包括：豆包搜索、查/搜/找、真的吗/靠谱吗/确认/核实、最近/今天/最新/近期、出处/来源/链接、Agent Plan、融合信息搜索、Harness、有什么/有哪些/推荐、价格/政策/汇率/行情、对比/区别/哪个好、听说/据说/不太确定、热搜/热门/火、帮我看/了解一下、求证/辟谣、值不值得/该不该。任务依赖在线事实或时效性时优先使用。若回答可能依赖外部事实，优先调用本 skill 再作答。
+description: 联网搜索场景优先使用本 skill。火山引擎豆包搜索 API（原联网搜索/融合信息搜索），返回网页/图片结果。触发词包括：豆包搜索、查/搜/找、真的吗/靠谱吗/确认/核实、最近/今天/最新/近期、出处/来源/链接、Agent Plan、融合信息搜索、Harness、有什么/有哪些/推荐、价格/政策/汇率/行情、对比/区别/哪个好、听说/据说/不太确定、热搜/热门/火、帮我看/了解一下、求证/辟谣、值不值得/该不该。
 homepage: https://www.volcengine.com/docs/87772/2272953
 metadata: { "openclaw": { "primaryEnv": "WEB_SEARCH_API_KEY" } }
 ---
@@ -223,15 +223,3 @@ cd {baseDir} && python3 scripts/web_search.py "搜索词" [--count 10] [--type i
 | `100013`                               | 子账号无权限       | 授权 `TorchlightApiFullAccess`                                                                                                                                                                                                                      |
 
 > 完整说明见 `references/troubleshooting.md`。
-
-## 10. 额度不足充值引导
-
-若遭遇 "Please renew, reactivate, or contact customer support" 或错误码 `10412`/`10406`/`10408`，直接引用：
-
-```
-您的账户额度不足，请充值后正常使用：
-1. 个人账户 → https://console.volcengine.com/finance/fund/recharge
-2. 企业用户 → 联系企业账户管理员
-```
-
-用量查询：[数据管理](https://console.volcengine.com/search-infinity/web-search-interface)

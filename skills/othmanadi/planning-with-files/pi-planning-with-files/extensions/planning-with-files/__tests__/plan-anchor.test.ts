@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { readPlanStatus, resolvePlanPaths } from "../plan.ts";
+import { isSessionAttached, readPlanStatus, resolvePlanPaths, SESSION_PLAN_AMBIGUOUS_NOTICE } from "../plan.ts";
 import { planLabel } from "../runtime.ts";
 
 // Issue #208: the Pi session cwd follows the live shell. Before v3.8.1 an
@@ -111,6 +111,46 @@ describe("resolvePlanPaths anchor walk (#208)", () => {
 			if (previous === undefined) delete process.env.PLAN_ID;
 			else process.env.PLAN_ID = previous;
 		}
+	});
+
+	it("refuses shared-pointer selection when session isolation has several live plans", () => {
+		const root = makeWorkspace();
+		writeScopedPlan(root, "plan-a", "# Task Plan: A\n");
+		writeScopedPlan(root, "plan-b", "# Task Plan: B\n");
+		writeFileSync(join(root, ".planning", ".active_plan"), "plan-a\n");
+		mkdirSync(join(root, ".planning", "sessions"), { recursive: true });
+		writeFileSync(join(root, ".planning", "sessions", "alpha.attached"), "");
+
+		const paths = resolvePlanPaths(root);
+		expect(paths.scope).toBe("none");
+		expect(paths.selectionError).toBe("session-plan-ambiguous");
+		expect(SESSION_PLAN_AMBIGUOUS_NOTICE).toContain("Set PLAN_ID=<slug>");
+	});
+
+	it("keeps an armed single-plan session and explicit PLAN_ID selection usable", () => {
+		const root = makeWorkspace();
+		writeScopedPlan(root, "plan-a", "# Task Plan: A\n");
+		mkdirSync(join(root, ".planning", "sessions"), { recursive: true });
+
+		expect(resolvePlanPaths(root).planId).toBe("plan-a");
+
+		writeScopedPlan(root, "plan-b", "# Task Plan: B\n");
+		const previous = process.env.PLAN_ID;
+		process.env.PLAN_ID = "plan-a";
+		try {
+			expect(resolvePlanPaths(root).planId).toBe("plan-a");
+		} finally {
+			if (previous === undefined) delete process.env.PLAN_ID;
+			else process.env.PLAN_ID = previous;
+		}
+	});
+
+	it("fails closed when the sessions sentinel is malformed", () => {
+		const root = makeWorkspace();
+		mkdirSync(join(root, ".planning"), { recursive: true });
+		writeFileSync(join(root, ".planning", "sessions"), "not a directory");
+
+		expect(isSessionAttached(root, "alpha")).toBe(false);
 	});
 });
 
