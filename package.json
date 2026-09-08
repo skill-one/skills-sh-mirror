@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Scrape all skills from skills.sh into a local directory.",
   "engines": {
-    "node": ">=22"
+    "node": ">=24"
   },
   "scripts": {
     "scrape": "node scraper.mjs",

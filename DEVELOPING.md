@@ -16,7 +16,7 @@ Both `trending.json` and the per-owner `skills` arrays in `curated.json` are pla
 
 | Field | Meaning |
 |---|---|
-| `startedAt`, `finishedAt` | when the run started / ended (`durationMs` is their difference) |
+| `startedAt`, `finishedAt`, `durationMs` | when the run started / ended, and the wall-clock difference in ms |
 | `limit`, `audits` | run configuration (`limit` is `null` for a full scrape) |
 | `leaderboardTotal` | github-sourced leaderboard entries after deduplication |
 | `nonGithub` | leaderboard entries skipped because they are not github-sourced |
@@ -28,7 +28,7 @@ Both `trending.json` and the per-owner `skills` arrays in `curated.json` are pla
 
 ## Prerequisites
 
-Node >= 22, a Vercel OIDC token (any Vercel project works), and a GitHub token
+Node >= 24, a Vercel OIDC token (any Vercel project works), and a GitHub token
 (for the star counts; public repo read access is enough):
 
 ```bash
@@ -74,5 +74,5 @@ npm run scrape && npm run verify  # full scrape + integrity check
 
 ## CI
 
-- **`ci.yml`** (push / PR): layer 1 on Node 22 and 24. Secret-free, so fork PRs run too.
+- **`ci.yml`** (push / PR): layer 1 on Node 24. Secret-free, so fork PRs run too.
 - **`fetch-skills.yml`** (daily 18:00 UTC + manual): restores the previous `dist` snapshot into `data/` first — the upstream hashes in its `skills.jsonl` pin `fetchedAt`, reuse unchanged audit results, keep the last good content of failed fetches, and make the `changed`/`added`/`removed` counters describe the run instead of an empty workspace — then full scrape as a daily canary → `verify.mjs` → `publish.mjs` force-pushes the [`dist` branch](README.md#where-the-data-is) with one commit per day (a same-day rerun amends the day's commit), prunes history to the newest 5 (re-rooted commits keep their original author/committer dates) and tags each retained snapshot `dist-<date>` (slash-free so the tag resolves in raw URLs; tags outside the window are deleted, so pruned objects stay unreachable). It mints a fresh OIDC token from the long-lived `VERCEL_TOKEN` (required secrets: `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` — the last two from `.vercel/project.json` after `vercel link`); star counts read the repo secret `GH_TOKEN` (a personal access token, mapped to the `GITHUB_TOKEN` env var — set it with `gh secret set GH_TOKEN`).

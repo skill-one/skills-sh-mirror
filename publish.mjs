@@ -40,8 +40,6 @@ if (hasRef("fetch", "-q", "origin", "dist")) {
   git(["checkout", "-q", "--orphan", "dist"]);
   git(["rm", "-rq", "--cached", "--ignore-unmatch", "."]);
 }
-// Drop the retired layout (the snapshot used to live under data/).
-git(["rm", "-rq", "--ignore-unmatch", "data"]);
 for (const f of SNAPSHOT) rmSync(f, { recursive: true, force: true });
 for (const f of SNAPSHOT) renameSync(`data-fresh/${f}`, f);
 rmSync("data-fresh", { recursive: true, force: true });

@@ -2,7 +2,7 @@
 /**
  * Scrape all skills from skills.sh and save them locally.
  *
- * Zero dependencies (Node >= 22). Auth: a Vercel OIDC token in VERCEL_OIDC_TOKEN
+ * Zero dependencies (Node >= 24). Auth: a Vercel OIDC token in VERCEL_OIDC_TOKEN
  * (env var, or .env.local produced by `vercel env pull`) for skills.sh, and a
  * GitHub token in GITHUB_TOKEN for star counts — see DEVELOPING.md.
  *
@@ -52,6 +52,7 @@
  * up on the next run.
  */
 
+import { setTimeout as sleep } from "node:timers/promises";
 import { mkdir, readdir, readFile, rename, rmdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { argValue, canonicalId, dirName, exists, githubRepoOf, safeSegment, skillDescription } from "./lib.mjs";
@@ -60,13 +61,22 @@ const API_BASE = (process.env.SKILLS_API_BASE ?? "https://skills.sh").replace(/\
 const GITHUB_API_BASE = (process.env.GITHUB_API_BASE ?? "https://api.github.com").replace(/\/+$/, "");
 const args = process.argv.slice(2);
 const OUT_DIR = argValue(args, "--out") ?? "data";
-const DETAIL_LIMIT = argValue(args, "--limit") ? Number(argValue(args, "--limit")) : Infinity;
+const limitArg = argValue(args, "--limit");
+const DETAIL_LIMIT = limitArg ? Number(limitArg) : Infinity;
 const WANT_AUDITS = args.includes("--audits");
 const CONCURRENCY = 10; // request budget shared by both API clients
 const startedAt = new Date();
 
 // repo -> stargazers_count, filled by the stars phase and read by fetchSkill.
 const repoStars = new Map();
+
+// Every JSON artifact (trending.json, curated.json, skills.jsonl, stats.json)
+// is written to `<path>.tmp` first and swapped in via rename(2), so a crash
+// can never leave a half-updated artifact behind (verify.mjs flags leftovers).
+const atomicWrite = async (p, contents) => {
+  await writeFile(`${p}.tmp`, contents);
+  await rename(`${p}.tmp`, p);
+};
 
 // Tokens come from the environment or .env.local. A missing token is fatal.
 async function loadEnvToken(name, hint) {
@@ -79,8 +89,6 @@ async function loadEnvToken(name, hint) {
   console.error(`Missing ${name}.\n${hint}`);
   process.exit(1);
 }
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Rolling 60s window limiter, kept just under each host's documented limit.
 const makeLimiter = (ratePerMin) => {
@@ -359,15 +367,13 @@ console.error(`[2/5] Fetching trending top ${TRENDING_COUNT} (github-sourced) fr
 const { ids: trending, nonGithub: trendingNonGithub } = await fetchTrending(skillsApi);
 // Written atomically, like the index; independent of the rest of the run.
 const trendingPath = path.join(OUT_DIR, "trending.json");
-await writeFile(`${trendingPath}.tmp`, JSON.stringify(trending, null, 2) + "\n");
-await rename(`${trendingPath}.tmp`, trendingPath);
+await atomicWrite(trendingPath, JSON.stringify(trending, null, 2) + "\n");
 console.error(`  trending: ${trending.length}${trendingNonGithub ? ` (${trendingNonGithub} non-github skipped)` : ""}`);
 
 console.error(`[3/5] Fetching curated skills from ${API_BASE} ...`);
 const curated = await fetchCurated(skillsApi);
 const curatedPath = path.join(OUT_DIR, "curated.json");
-await writeFile(`${curatedPath}.tmp`, JSON.stringify(curated, null, 2) + "\n");
-await rename(`${curatedPath}.tmp`, curatedPath);
+await atomicWrite(curatedPath, JSON.stringify(curated, null, 2) + "\n");
 console.error(`  curated: ${curated.data.length} owners / ${curated.totalSkills} skills`);
 
 const targets = Number.isFinite(DETAIL_LIMIT) ? skills.slice(0, DETAIL_LIMIT) : skills;
@@ -470,13 +476,10 @@ for (const id of removed) await rm(skillDir(id), { recursive: true, force: true 
 
 // Sort by installs desc, ties by id: workers finish out of order, so the row
 // order would otherwise be nondeterministic and daily snapshots would differ
-// even without real changes. Written atomically so the index is never
-// half-updated.
+// even without real changes.
 const byRank = (a, b) => b.installs - a.installs || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 const indexPath = path.join(OUT_DIR, "skills.jsonl");
-const tmpIndex = `${indexPath}.tmp`;
-await writeFile(tmpIndex, rows.sort(byRank).map((row) => JSON.stringify(row)).join("\n") + (rows.length ? "\n" : ""));
-await rename(tmpIndex, indexPath);
+await atomicWrite(indexPath, rows.sort(byRank).map((row) => JSON.stringify(row)).join("\n") + (rows.length ? "\n" : ""));
 await rm(path.join(OUT_DIR, ".tmp"), { recursive: true, force: true });
 
 // Prune directories left empty by dropped skills (git drops empty dirs on
@@ -498,6 +501,7 @@ const finishedAt = new Date();
 const stats = {
   startedAt: startedAt.toISOString(),
   finishedAt: finishedAt.toISOString(),
+  durationMs: finishedAt - startedAt,
   limit: Number.isFinite(DETAIL_LIMIT) ? DETAIL_LIMIT : null,
   audits: WANT_AUDITS,
   leaderboardTotal: skills.length,
@@ -513,8 +517,7 @@ const stats = {
   failedIds: failed,
 };
 const statsPath = path.join(OUT_DIR, "stats.json");
-await writeFile(`${statsPath}.tmp`, JSON.stringify(stats, null, 2) + "\n");
-await rename(`${statsPath}.tmp`, statsPath);
+await atomicWrite(statsPath, JSON.stringify(stats, null, 2) + "\n");
 
 console.error(`Done: changed=${changed}, added=${added}, removed=${removed.length}, dropped=${dropped}, failed=${failed.length} (carried over: ${carried}) -> ${OUT_DIR}/`);
 // Machine-readable numbers live in ${OUT_DIR}/stats.json (written above).

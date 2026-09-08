@@ -39,8 +39,8 @@ function checkRow(row) {
   const segs = typeof id === "string" ? id.split("/").filter((s) => s.length) : [];
   if (segs.length !== 3) problem(`${label}: malformed id`);
   if (!Number.isFinite(row.installs) || row.installs < 0) problem(`${label}: bad installs`);
-  if (row.stars !== null && (!Number.isFinite(row.stars) || row.stars < 0)) problem(`${label}: bad stars`);
   if (!("stars" in row)) problem(`${label}: missing stars`);
+  else if (row.stars !== null && (!Number.isFinite(row.stars) || row.stars < 0)) problem(`${label}: bad stars`);
   if (row.url !== null && typeof row.url !== "string") problem(`${label}: bad url`);
   if (row.fetchedAt !== null && !isIso(row.fetchedAt)) problem(`${label}: bad fetchedAt`);
   if (row.hash !== null && !isHash(row.hash)) problem(`${label}: bad hash`);

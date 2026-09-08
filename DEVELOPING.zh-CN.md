@@ -16,7 +16,7 @@
 
 | 字段 | 含义 |
 |---|---|
-| `startedAt`、`finishedAt` | 运行的开始 / 结束时间(`durationMs` 即两者之差) |
+| `startedAt`、`finishedAt`、`durationMs` | 运行的开始 / 结束时间,以及两者的毫秒差 |
 | `limit`、`audits` | 运行配置(全量抓取时 `limit` 为 `null`) |
 | `leaderboardTotal` | 去重后的 GitHub 来源排行榜条目数 |
 | `nonGithub` | 因非 GitHub 来源被跳过的排行榜条目数 |
@@ -28,7 +28,7 @@
 
 ## 前置条件
 
-Node >= 22、Vercel OIDC token(任意 Vercel 项目均可)和 GitHub token(用于抓 star,仅有公开仓库读权限即可):
+Node >= 24、Vercel OIDC token(任意 Vercel 项目均可)和 GitHub token(用于抓 star,仅有公开仓库读权限即可):
 
 ```bash
 npm i -g vercel
@@ -72,5 +72,5 @@ npm run scrape && npm run verify  # 全量抓取 + 完整性校验
 
 ## CI
 
-- **`ci.yml`**(push / PR):层 1,跑在 Node 22 和 24 上。无需 secrets,fork 的 PR 也能运行。
+- **`ci.yml`**(push / PR):层 1,跑在 Node 24 上。无需 secrets,fork 的 PR 也能运行。
 - **`fetch-skills.yml`**(每日 18:00 UTC + 手动):先把上一份 `dist` 快照还原进 `data/`——其 `skills.jsonl` 里的上游 hash 用来固定 `fetchedAt`、沿用未变化的审计结果、保留抓取失败技能的上一次内容,并让 `changed`/`added`/`removed` 计数描述的是本次运行而非空工作区——然后全量抓取作为每日金丝雀 → `verify.mjs` → `publish.mjs` 强制推送 [`dist` 分支](README.zh-CN.md#数据在哪里),每天一个提交(同日重复运行会 amend 当天的提交),历史只保留最近 5 个(重新落根的提交保留原始的 author/committer 日期),并为窗口内的每个快照打 `dist-<日期>` 标签(标签名不含 `/`,以便在 raw URL 中解析;窗口外的标签会一并删除,被裁掉的提交因此保持不可达)。工作流用长效 `VERCEL_TOKEN` 现场换取新鲜 OIDC token(所需 secrets:`VERCEL_TOKEN`、`VERCEL_ORG_ID`、`VERCEL_PROJECT_ID`——后两项在 `vercel link` 后从 `.vercel/project.json` 复制);抓 star 读取仓库 secret `GH_TOKEN`(个人访问 token,映射为环境变量 `GITHUB_TOKEN`——用 `gh secret set GH_TOKEN` 配置)。

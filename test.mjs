@@ -401,6 +401,7 @@ test("scraper end-to-end against mock API", async () => {
     assert.ok(!Number.isNaN(Date.parse(stats1.startedAt)));
     assert.ok(!Number.isNaN(Date.parse(stats1.finishedAt)));
     assert.ok(stats1.finishedAt >= stats1.startedAt);
+    assert.ok(Number.isInteger(stats1.durationMs) && stats1.durationMs >= 0);
     assert.equal(stats1.leaderboardTotal, 8); // github-sourced leaderboard entries (drift dupe excluded)
     assert.equal(stats1.nonGithub, 1); // mintlify.com/mintlify
     assert.equal(stats1.githubRepos, 4); // unique repos among the targets
@@ -555,126 +556,120 @@ test("scraper end-to-end against mock API", async () => {
     assert.equal(v2.status, 0, `verify out2 failed:\n${v2.stdout}${v2.stderr}`);
     assert.match(v2.stdout, /OK: 5 rows, 5 content directories/);
 
-    // --- verifier rejects tampered datasets (problems are reported on stderr)
-    // 1. content directory without an index row
-    await mkdir(dir(out1, "owner/repo/orphan"), { recursive: true });
-    const t1 = await verify(out1);
-    assert.equal(t1.status, 1);
-    assert.match(t1.stderr, /orphan content directory/);
-    await rm(dir(out1, "owner/repo/orphan"), { recursive: true, force: true });
-    // 2. index claims content that is gone from disk
-    await rm(dir(out1, "vercel-labs/skills/find-skills"), { recursive: true, force: true });
-    const t2 = await verify(out1);
-    assert.equal(t2.status, 1);
-    assert.match(t2.stderr, /no content directory/);
-    await mkdir(dir(out1, "vercel-labs/skills/find-skills"), { recursive: true });
-    await writeFile(dir(out1, "vercel-labs/skills/find-skills", "SKILL.md"), findSkillsFiles(findSkillsRev)[0].contents);
-    // 3. index order broken
-    const reversed = (await readRows(out1)).reverse();
-    await writeFile(path.join(out1, "skills.jsonl"), reversed.map((r) => JSON.stringify(r)).join("\n") + "\n");
-    const t3 = await verify(out1);
-    assert.equal(t3.status, 1);
-    assert.match(t3.stderr, /not sorted/);
-    await writeFile(path.join(out1, "skills.jsonl"), rows1.map((r) => JSON.stringify(r)).join("\n") + "\n");
-    // 4. leftover temp file from an interrupted run
-    await writeFile(path.join(out1, "skills.jsonl.tmp"), "{");
-    const t4 = await verify(out1);
-    assert.equal(t4.status, 1);
-    assert.match(t4.stderr, /skills\.jsonl\.tmp/);
-    await rm(path.join(out1, "skills.jsonl.tmp")); // the following runs must start clean
-    // 5. equal-installs rows out of id order (find-skills ties with wei rd~x)
-    const tied = (await readRows(out1)).map((r, i) => (i === 0 ? { ...r, installs: 99 } : r));
-    await writeFile(path.join(out1, "skills.jsonl"), tied.map((r) => JSON.stringify(r)).join("\n") + "\n");
-    const t5 = await verify(out1);
-    assert.equal(t5.status, 1);
-    assert.match(t5.stderr, /not sorted by id/);
-    // 6. two ids sanitizing to the same directory name
-    const colliding = (await readRows(out1)).map((r) => ({ ...r }));
-    colliding[1].id = "owner/repo/a b";
-    colliding.splice(2, 0, { ...colliding[1], id: "owner/repo/a_b" }); // both -> owner/repo/a_b
-    await writeFile(path.join(out1, "skills.jsonl"), colliding.map((r) => JSON.stringify(r)).join("\n") + "\n");
-    const t6 = await verify(out1);
-    assert.equal(t6.status, 1);
-    assert.match(t6.stderr, /collides/);
-    await writeFile(path.join(out1, "skills.jsonl"), rows6.map((r) => JSON.stringify(r)).join("\n") + "\n");
-    // 7. stats.json is unparseable
-    await writeFile(path.join(out1, "stats.json"), "{");
-    const t7 = await verify(out1);
-    assert.equal(t7.status, 1);
-    assert.match(t7.stderr, /stats\.json: invalid JSON/);
-    // 8. stats.json's indexedRows disagrees with the index
-    await writeFile(path.join(out1, "stats.json"), JSON.stringify({ ...stats6, indexedRows: 99 }, null, 2) + "\n");
-    const t8 = await verify(out1);
-    assert.equal(t8.status, 1);
-    assert.match(t8.stderr, /indexedRows 99 != index row count 6/);
-    await writeFile(path.join(out1, "stats.json"), JSON.stringify(stats6, null, 2) + "\n");
-    // 9. description disagrees with the on-disk SKILL.md
-    const mislabeled = (await readRows(out1)).map((r, i) => (i === 0 ? { ...r, description: "bogus" } : r));
-    await writeFile(path.join(out1, "skills.jsonl"), mislabeled.map((r) => JSON.stringify(r)).join("\n") + "\n");
-    const t9 = await verify(out1);
-    assert.equal(t9.status, 1);
-    assert.match(t9.stderr, /description does not match/);
-    await writeFile(path.join(out1, "skills.jsonl"), rows6.map((r) => JSON.stringify(r)).join("\n") + "\n");
-    // 10. stars is not a non-negative number
-    const badStars = (await readRows(out1)).map((r, i) => (i === 0 ? { ...r, stars: "many" } : r));
-    await writeFile(path.join(out1, "skills.jsonl"), badStars.map((r) => JSON.stringify(r)).join("\n") + "\n");
-    const t10 = await verify(out1);
-    assert.equal(t10.status, 1);
-    assert.match(t10.stderr, /bad stars/);
-    // 11. the stars field is missing entirely
-    const noStars = (await readRows(out1)).map((r, i) => (i === 0 ? { ...r, stars: undefined } : r));
-    await writeFile(path.join(out1, "skills.jsonl"), noStars.map((r) => JSON.stringify(r)).join("\n") + "\n");
-    const t11 = await verify(out1);
-    assert.equal(t11.status, 1);
-    assert.match(t11.stderr, /missing stars/);
-    // 12. well-known (two-segment) ids are rejected
-    const wellKnown = (await readRows(out1)).map((r) => ({ ...r }));
-    wellKnown[1].id = "mintlify.com/mintlify";
-    await writeFile(path.join(out1, "skills.jsonl"), wellKnown.map((r) => JSON.stringify(r)).join("\n") + "\n");
-    const t12 = await verify(out1);
-    assert.equal(t12.status, 1);
-    assert.match(t12.stderr, /malformed id/);
-    await writeFile(path.join(out1, "skills.jsonl"), rows6.map((r) => JSON.stringify(r)).join("\n") + "\n");
-    // 13. trending.json is unparseable
-    await writeFile(path.join(out1, "trending.json"), "{");
-    const t13 = await verify(out1);
-    assert.equal(t13.status, 1);
-    assert.match(t13.stderr, /trending\.json: invalid JSON/);
-    // 14. trending.json holds something else than an array of ids
-    await writeFile(path.join(out1, "trending.json"), JSON.stringify({ top: 1 }));
-    const t14 = await verify(out1);
-    assert.equal(t14.status, 1);
-    assert.match(t14.stderr, /trending\.json: not an array of ids/);
-    // 15. trending.json repeats an id
-    await writeFile(path.join(out1, "trending.json"), JSON.stringify(["a/b/c", "a/b/c"]));
-    const t15 = await verify(out1);
-    assert.equal(t15.status, 1);
-    assert.match(t15.stderr, /trending\.json: duplicate id: a\/b\/c/);
-    await writeFile(
-      path.join(out1, "trending.json"),
-      JSON.stringify(["vercel-labs/skills/find-skills", "claude-office-skills/skills/facebookmeta-ads"], null, 2) + "\n",
-    );
-    // 16. curated.json is unparseable
-    await writeFile(path.join(out1, "curated.json"), "{");
-    const t16 = await verify(out1);
-    assert.equal(t16.status, 1);
-    assert.match(t16.stderr, /curated\.json: invalid JSON/);
-    // 17. curated.json's data is not an array of owners with skill ids
-    await writeFile(path.join(out1, "curated.json"), JSON.stringify({ data: [{ owner: "x" }] }));
-    const t17 = await verify(out1);
-    assert.equal(t17.status, 1);
-    assert.match(t17.stderr, /curated\.json: data is not an array of owners with skill ids/);
-    // 18. curated.json may repeat an id across owners — upstream genuinely
-    // features the same skill under several owner groups — so verify accepts it
-    await writeFile(path.join(out1, "curated.json"), JSON.stringify({ data: [
-      { owner: "x", skills: ["a/b/c"] },
-      { owner: "y", skills: ["a/b/c"] },
-    ] }));
-    const t18 = await verify(out1);
-    assert.equal(t18.status, 0);
-    await writeFile(path.join(out1, "curated.json"), JSON.stringify(CURATED_REDUCED, null, 2) + "\n");
-    const t19 = await verify(out1);
-    assert.equal(t19.status, 0);
+    // --- verifier rejects tampered datasets (problems are reported on stderr).
+    // Every case is self-contained: it mutates the known-good dataset left by
+    // run 7 (6 index rows, including the carried-over bad-id), expects verify
+    // to fail with a specific problem — or, for the pattern-less entries, to
+    // pass — and then restores the base state. No case may rely on another's
+    // leftovers.
+    const GOOD_TRENDING = ["vercel-labs/skills/find-skills", "claude-office-skills/skills/facebookmeta-ads"];
+    const GOOD_STATS = JSON.parse(await readFile(path.join(out1, "stats.json"), "utf8"));
+    const baseRows = await readRows(out1); // == rows6: 6 rows including bad-id
+    const writeIndex = async (rows) =>
+      writeFile(path.join(out1, "skills.jsonl"), rows.map((r) => JSON.stringify(r)).join("\n") + "\n");
+    const writeJson = (file, value) =>
+      writeFile(path.join(out1, file), typeof value === "string" ? value : JSON.stringify(value, null, 2) + "\n");
+
+    // Index-row cases: mutate a shallow copy of the base rows, then restore.
+    const indexCase = (name, pattern, mutate, notPattern) => ({
+      name,
+      pattern,
+      notPattern,
+      setup: async () => writeIndex(mutate(baseRows.map((r) => ({ ...r })))),
+      cleanup: () => writeIndex(baseRows),
+    });
+    // JSON-artifact cases: overwrite one artifact wholesale, then restore.
+    const jsonCase = (file, name, pattern, bad, good) => ({
+      name,
+      pattern,
+      setup: () => writeJson(file, bad),
+      cleanup: () => writeJson(file, good),
+    });
+
+    const tamperCases = [
+      {
+        name: "content directory without an index row",
+        pattern: /orphan content directory/,
+        setup: async () => mkdir(dir(out1, "owner/repo/orphan"), { recursive: true }),
+        cleanup: async () => rm(dir(out1, "owner/repo/orphan"), { recursive: true, force: true }),
+      },
+      {
+        name: "index claims content that is gone from disk",
+        pattern: /no content directory/,
+        setup: async () => rm(dir(out1, "vercel-labs/skills/find-skills"), { recursive: true, force: true }),
+        cleanup: async () => {
+          await mkdir(dir(out1, "vercel-labs/skills/find-skills"), { recursive: true });
+          await writeFile(dir(out1, "vercel-labs/skills/find-skills", "SKILL.md"), findSkillsFiles(findSkillsRev)[0].contents);
+        },
+      },
+      {
+        name: "leftover temp file from an interrupted run",
+        pattern: /skills\.jsonl\.tmp/,
+        setup: () => writeFile(path.join(out1, "skills.jsonl.tmp"), "{"),
+        cleanup: () => rm(path.join(out1, "skills.jsonl.tmp")),
+      },
+      indexCase("index order broken", /not sorted/, (rows) => rows.reverse()),
+      // find-skills (12345 installs) is dropped to tie wei rd~x's 99 while
+      // staying ahead of it in id order: the id tiebreak must catch it.
+      indexCase("equal-installs rows out of id order", /not sorted by id/, (rows) => {
+        rows[0].installs = 99;
+        return rows;
+      }),
+      indexCase("two ids sanitizing to the same directory name", /collides/, (rows) => {
+        rows[1].id = "owner/repo/a b"; // both sanitize to owner/repo/a_b
+        rows.splice(2, 0, { ...rows[1], id: "owner/repo/a_b" });
+        return rows;
+      }),
+      indexCase("description disagrees with the on-disk SKILL.md", /description does not match/, (rows) => {
+        rows[0].description = "bogus";
+        return rows;
+      }),
+      indexCase("stars is not a non-negative number", /bad stars/, (rows) => {
+        rows[0].stars = "many";
+        return rows;
+      }),
+      // JSON.stringify drops undefined fields, so the row reaches the verifier
+      // without the stars key at all — reported as exactly "missing stars",
+      // not additionally as "bad stars".
+      indexCase(
+        "the stars field is missing entirely",
+        /missing stars/,
+        (rows) => {
+          rows[0].stars = undefined;
+          return rows;
+        },
+        /bad stars/,
+      ),
+      indexCase("well-known (two-segment) ids are rejected", /malformed id/, (rows) => {
+        rows[1].id = "mintlify.com/mintlify";
+        return rows;
+      }),
+      jsonCase("stats.json", "stats.json is unparseable", /stats\.json: invalid JSON/, "{", GOOD_STATS),
+      jsonCase("stats.json", "stats.json's indexedRows disagrees with the index", /indexedRows 99 != index row count 6/, { ...GOOD_STATS, indexedRows: 99 }, GOOD_STATS),
+      jsonCase("trending.json", "trending.json is unparseable", /trending\.json: invalid JSON/, "{", GOOD_TRENDING),
+      jsonCase("trending.json", "trending.json holds something else than an array of ids", /trending\.json: not an array of ids/, { top: 1 }, GOOD_TRENDING),
+      jsonCase("trending.json", "trending.json repeats an id", /trending\.json: duplicate id: a\/b\/c/, ["a/b/c", "a/b/c"], GOOD_TRENDING),
+      jsonCase("curated.json", "curated.json is unparseable", /curated\.json: invalid JSON/, "{", CURATED_REDUCED),
+      jsonCase("curated.json", "curated.json's data is not an array of owners with skill ids", /curated\.json: data is not an array of owners with skill ids/, { data: [{ owner: "x" }] }, CURATED_REDUCED),
+      // Upstream genuinely features the same skill under several owners, so
+      // repeated ids across curated groups are accepted.
+      jsonCase("curated.json", "curated.json may repeat an id across owners", null, { data: [{ owner: "x", skills: ["a/b/c"] }, { owner: "y", skills: ["a/b/c"] }] }, CURATED_REDUCED),
+    ];
+    for (const { name, pattern, notPattern, setup, cleanup } of tamperCases) {
+      await setup();
+      const t = await verify(out1);
+      if (pattern === null) {
+        assert.equal(t.status, 0, `${name}: expected verify to pass\n${t.stdout}${t.stderr}`);
+      } else {
+        assert.equal(t.status, 1, `${name}: expected verify to fail\n${t.stdout}${t.stderr}`);
+        assert.match(t.stderr, pattern, name);
+        if (notPattern) assert.doesNotMatch(t.stderr, notPattern, name);
+      }
+      await cleanup();
+    }
+    // All cleanups ran: the dataset is whole again and verifies clean.
+    const tRestored = await verify(out1);
+    assert.equal(tRestored.status, 0, `verify failed after restores:\n${tRestored.stdout}${tRestored.stderr}`);
 
     // --- run 10: upstream delists a skill. A full run drops its row AND its
     // content directory (the row-iff-directory invariant must keep holding,
