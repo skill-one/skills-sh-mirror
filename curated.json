@@ -1,8 +1,21 @@
 {
   "generatedAt": "2026-05-28T04:12:23.313Z",
-  "totalOwners": 99,
-  "totalSkills": 5492,
+  "totalOwners": 100,
+  "totalSkills": 5497,
   "data": [
+    {
+      "owner": "aave",
+      "totalInstalls": 10,
+      "featuredRepo": "aave/skills",
+      "featuredSkill": "deleverage",
+      "skills": [
+        "aave/skills/deleverage",
+        "aave/skills/yield-analysis",
+        "aave/skills/tx-confirmation",
+        "aave/skills/account-activity",
+        "aave/skills/safe-transactions"
+      ]
+    },
     {
       "owner": "anthropics",
       "totalInstalls": 1942411,

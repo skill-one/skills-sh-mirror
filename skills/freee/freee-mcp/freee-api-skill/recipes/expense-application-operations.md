@@ -15,6 +15,7 @@ freee_api_get {
   "service": "accounting",
   "path": "/api/1/expense_applications",
   "query": {
+    "company_id": 123456,
     "limit": 10
   }
 }

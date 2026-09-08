@@ -23,6 +23,7 @@ freee_api_get {
   "service": "accounting",
   "path": "/api/1/reports/trial_pl",
   "query": {
+    "company_id": 123456,
     "fiscal_year": 2025,
     "approval_flow_status": "all"
   }
@@ -36,6 +37,7 @@ freee_api_get {
   "service": "accounting",
   "path": "/api/1/reports/general_ledgers",
   "query": {
+    "company_id": 123456,
     "start_date": "2025-01-01",
     "end_date": "2025-03-31",
     "approval_flow_status": "all"

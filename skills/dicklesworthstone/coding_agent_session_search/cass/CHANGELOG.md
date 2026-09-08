@@ -21,6 +21,11 @@ Reality-check bridge work (see `docs/planning/REALITY_CHECK_AND_BRIDGE_PLAN_2026
 Everything below is on `main`; nothing is in a released binary yet.
 
 ### Added
+- `cass pack --field-mask` selects the existing field projection, including the
+  documented `standard` and `full` presets. `--fields` accepts the same presets.
+- `cass pack --include-skill-content` explicitly includes skill payload excerpts
+  while keeping credential redaction active. Default packs still exclude these
+  payloads; privacy metadata reports only skill evidence retained in the output.
 - `cass bookmarks add|list|search|remove|export|import` — the bookmarks module the
   README advertised is now reachable from the CLI (exit codes 13 not-found, 14 io).
 - `cass search --robot` reports `_meta.lexical_degrade_reason` (`query_fuel_exhausted`)
@@ -73,6 +78,48 @@ Everything below is on `main`; nothing is in a released binary yet.
   40-segment generation is folded by a plain `cass index`).
 
 ### Fixed
+- Route every enabled connector through filesystem watching and quarantine
+  retries, including Prime Agent, Kiro, Devin, OpenHands, Goose, Crush, and Hermes.
+- Make the release formatting gate fail when rustfmt aborts or is killed.
+- Register the FTS shadow viability startup phase so watch indexing reaches the
+  scan instead of panicking during preflight.
+- Redact the archive directory inside doctor baseline explanations as well as
+  path fields.
+- Preserve requested search mode and report skipped optional sections when the
+  robot deadline expires during setup. Session-filter resolution now uses a
+  bounded, strictly read-only archive query in robot mode.
+- Keep `cass --version` parseable as a plain semantic version.
+- Extract repository lessons lazily when pack evidence actually references a
+  known commit or closed bead, avoiding that work for unrelated evidence.
+- Search keeps serving a readable lexical generation when duplicate fallback
+  FTS schema rows prevent archive fingerprinting. Schema repair remains on
+  the indexing path.
+- `cass doctor --recover-from-archive` quarantines a canonical row whose
+  identity columns (`agent_slug`, `workspace`, `external_id`, `source_path`,
+  `source_id`, `origin_host`) held a non-text value, or whose `source_path`
+  was NULL or empty, instead of exporting it under a synthetic identity
+  (GH #391). Those values violate CASS's identity contract; their types alone
+  do not prove page aliasing or establish which messages belong to the row.
+  The row is counted
+  (`rows_quarantined` in the JSON envelope and the text summary), listed in
+  `sessions` with a `quarantined canonical row` reason and its coercions,
+  and paging continues past it; a row whose only coercions are title or
+  timestamp columns is still exported and reported under `rows_coerced`.
+- Full indexing and deliberate repair scans now ignore saved connector cutoffs,
+  so older local sessions are rescanned as requested. Incremental scans retain
+  their connector-specific timestamps.
+- Search hydrates message IDs using validated integer literals, avoiding the
+  FrankenSQLite parameterized-`IN` query shape that could return no message
+  bodies even when Quill found matching documents (`6057b8e4`).
+- Answer packs verify citations against ingested, redacted source messages,
+  bind evidence IDs to the verified spans, and retain the same excerpts across
+  JSON and Markdown projections. Whole-message skill and hook injections are
+  excluded before truncation. The serialized output must fit the requested
+  token budget; an envelope that cannot retain required evidence returns
+  `pack-budget-too-small` (exit 2).
+- Answer-pack source verification receives its phase allowance after planning
+  completes, capped by the remaining request budget. Slow planning no longer
+  consumes the citation-check allowance before verification starts.
 - The full-rebuild headroom preflight (`cass index --full`, doctor's
   `full_rebuild_readiness`) doubles only the LIVE lexical bytes — what the
   current MANIFEST references — instead of the recursive size of `index/`
@@ -146,22 +193,47 @@ Everything below is on `main`; nothing is in a released binary yet.
   `rows_coerced` in the JSON envelope), and treats a failed total count as
   reporting-only. Conversations whose message pages are themselves damaged are
   still recorded as `reconstruct failed` and skipped.
-- Antigravity IDE sessions are indexed out of the box (GH #454). The default
+- Antigravity source presets recognize the IDE store (GH #454). The default
   source presets, `cass resume` agent detection, and the docs now cover the
   IDE store `~/.gemini/antigravity/` alongside the `agy` CLI store
-  `~/.gemini/antigravity-cli/`; the connector-side change (probe both roots,
-  key IDE conversations `ide/<uuid>`) lands with the next
-  `franken-agent-detection` release, and a conversation re-keyed from the bare
-  uuid reuses its existing canonical row by transcript path instead of
-  duplicating.
+  `~/.gemini/antigravity-cli/`. The published `franken-agent-detection` 0.2.3
+  probes both roots and keys IDE conversations as `ide/<uuid>`.
+  A conversation re-keyed from the bare UUID
+  will reuse its existing canonical row by transcript path instead of
+  duplicating it.
 
 ### Changed
+- `asupersync` is pinned to crates.io `=0.4.10`, which publishes the
+  `Cx::is_cancelled` API required by FrankenSearch 0.4.3. The registry archive
+  contains that API; the earlier claim that it was unpublished was incorrect.
+- `frankensearch` remains at `=0.4.2` while the runtime prerequisite is
+  validated. Its `cass index --gc` path reclaims folded inputs once 300 s
+  have passed since the previous publish (the engine's quiet-period rule).
+- `franken-agent-detection` pinned from crates.io `=0.2.2` to `=0.2.3`: the
+  Antigravity connector probes the IDE store (`~/.gemini/antigravity`) as
+  well as the `agy` CLI store, so IDE sessions index without
+  `CASS_ANTIGRAVITY_DATA_ROOT` (GH #454); Claude Code detection honors
+  `CLAUDE_CONFIG_DIR` / `XDG_CONFIG_HOME` (GH #448); Codex token usage is
+  read from real rollouts; Claude tool results are kept as `role:"tool"`
+  messages; Cursor/OpenCode mirrors are deduped; the 100 MB scan cap applies
+  to every connector; Shelley discovery names the canonical database path
+  like scan. The new `devin` connector feature is not enabled here.
+- Upgraded the complete FrankenSQLite family from the `0.3.13` line in v0.7.1
+  to registry `0.3.18`. This adds parameterized rowid seeks (GH#415/cass#382),
+  read-only WAL byte/timestamp preservation, reader-registration error
+  propagation and I/O buffer lifetime fixes. It retains incremental WAL-tail
+  folding (GH#382), reserved lock-byte/freelist repair (GH#410), FTS metadata and foreign-write
+  visibility fixes (GH#408), incremental FTS segment writes and savepoint undo
+  logs, prefix-BM25 ranking fixes, and prepared-read schema-retry cleanup.
+  All 20 family crates share the exact pin.
+  These fixes do not establish repair of an already corrupted archive, and
+  upstream GH#411 mixed-engine concurrent-WAL safety remains unresolved.
 - The index run's final `wal_checkpoint(TRUNCATE)` runs under a wall-clock
   budget (900 s, `CASS_INDEX_FINAL_WAL_CHECKPOINT_TIMEOUT_SECS`): on an archive
   whose frankensqlite writable path loops (GH #382) the run no longer hangs
   after a successful publish; the WAL is left for the next opener and a
   warning names the remedy. The loop itself is fixed upstream in frankensqlite
-  `8d012706a` and cass consumes it with the release that carries it.
+  `8d012706a`, included in the `0.3.18` engine consumed here.
 - The TUI analytics dashboard's load task is one production function with the
   detached-rebuild spawn injected (`load_chart_data_with_auto_rebuild`); the
   test-only stub that returned canned data is gone, and unit tests prove that
@@ -2481,7 +2553,7 @@ Initial development. Project scaffolding, architecture design, and first impleme
 
 ---
 
-[Unreleased]: https://github.com/Dicklesworthstone/coding_agent_session_search/compare/v0.6.26...HEAD
+[Unreleased]: https://github.com/Dicklesworthstone/coding_agent_session_search/compare/v0.7.1...HEAD
 [v0.7.0]: https://github.com/Dicklesworthstone/coding_agent_session_search/compare/v0.6.26...1f6cdcf9
 [v0.6.25]: https://github.com/Dicklesworthstone/coding_agent_session_search/compare/v0.6.24...v0.6.25
 [v0.6.24]: https://github.com/Dicklesworthstone/coding_agent_session_search/compare/v0.6.23...v0.6.24

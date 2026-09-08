@@ -9,7 +9,10 @@ freee-mcp 経由で作成したデータを識別するため、メモタグ「f
 ```
 freee_api_get {
   "service": "accounting",
-  "path": "/api/1/tags"
+  "path": "/api/1/tags",
+  "query": {
+    "company_id": 123456
+  }
 }
 ```
 

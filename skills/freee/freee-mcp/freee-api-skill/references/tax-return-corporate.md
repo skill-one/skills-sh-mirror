@@ -4,7 +4,7 @@ tax_return_corporate
 
 ## GET /hub/tax_return/corporate — 申告一覧取得
 
-事業所に紐づく法人税の申告一覧をカーソルページネーションで取得します。 各申告データには利用可能な帳票一覧（available_sheets）が含まれており、帳票取得APIで使用するtax_return_idとsheet_keyを取得できます。
+事業所に紐づく法人税の申告一覧をカーソルページネーションで取得します。 各申告データの id と、利用可能な帳票一覧（available_sheets）の sheet_code が、 帳票取得APIのパスパラメータ tax_return_id と sheet_code にそれぞれ対応します。
 
 ### パラメータ
 
@@ -31,10 +31,10 @@ tax_return_corporate
     - updated_at*: string(date-time) - 更新日時(ISO8601)
     - available_sheets*: array[object] - 利用可能な帳票一覧
       配列の要素:
-        - sheet_key*: string - 帳票キー（廃止予定。sheet_code を利用してください）
+        - sheet_key: string - 帳票キー（廃止予定。sheet_code を利用してください）
         - title*: string - 帳票タイトル
         - category*: string - 帳票カテゴリ
-        - sheet_code: string - 帳票コード。 - 国税・地方税: 帳票の sheet_code - 決算書: 識別キー（balance_sheet / profit_and_loss / cost_report / statements_of_shareholders / notes_to_financial_statements）
+        - sheet_code*: string - 帳票コード。 - 国税・地方税: 帳票の sheet_code - 決算書: 識別キー（balance_sheet / profit_and_loss / cost_report / statements_of_shareholders / notes_to_financial_statements）
 - next_page_token*: string - 次のページを取得するためのカーソルトークン。次ページがない場合はnull
 
 ## GET /hub/tax_return/corporate/office_info/{tax_return_id} — 事業所情報一覧取得
@@ -61,14 +61,14 @@ tax_return_corporate
     - city_government_code*: string - 市区町村コード
 - next_page_token*: string - 次のページを取得するためのカーソルトークン。次ページがない場合はnull
 
-## GET /hub/tax_return/corporate/sheet/national/{tax_return_id}/{sheet_key} — 国税帳票取得
+## GET /hub/tax_return/corporate/sheet/national/{tax_return_id}/{sheet_code} — 国税帳票取得
 
 指定した申告データの国税帳票を XML 形式 (application/xml) で取得します。 レスポンスの XML は e-Tax の申告データ (XTX) 形式に準拠します。 XML の各項目の仕様は [tax_return API v3 帳票項目マッピング](https://github.com/freee/freee-mcp/blob/main/skills/freee-api-skill/tax-return-references/index.md)で公開されている仕様書を参照してください。
 
 ### パラメータ
 
 - tax_return_id* (path): integer(int64) - 申告ID
-- sheet_key* (path): string - 帳票キー
+- sheet_code* (path): string - 帳票コード（申告一覧の available_sheets[].sheet_code）
 - company_id*: integer(int64) - 事業所ID
 
 ### レスポンス
@@ -83,19 +83,19 @@ XML は国税帳票が e-Tax、地方税帳票が eLTAX、決算書が e-Tax に
 - data*: object - 帳票データ（JSON形式・廃止予定）
   - envelope: object - IT部（エンベロープ）データ。e-Tax XML の IT 部に格納される共通情報。 帳票シートの IDREF タグが参照する値を含む。 国税帳票（e-Tax）の場合のみ返却される。
   - tax_data*: object - 帳票メタデータ
-    - sheet_key*: string - 帳票キー
+    - sheet_key: string - 帳票キー（廃止予定。sheet_code を利用してください）
     - title*: string - 帳票タイトル
     - version*: integer(int32) - 帳票バージョン
   - xtx*: object - XTX形式の帳票データ。style_idをキーとした構造
 
-## GET /hub/tax_return/corporate/sheet/local/{tax_return_id}/{sheet_key}/{prefecture_government_code}/{city_government_code} — 地方税帳票取得
+## GET /hub/tax_return/corporate/sheet/local/{tax_return_id}/{sheet_code}/{prefecture_government_code}/{city_government_code} — 地方税帳票取得
 
 指定した申告データの地方税帳票を XML 形式 (application/xml) で取得します。 レスポンスの XML は eLTAX の申告データ形式に準拠します。 XML の各項目の仕様は [tax_return API v3 帳票項目マッピング](https://github.com/freee/freee-mcp/blob/main/skills/freee-api-skill/tax-return-references/index.md)で案内されている公開仕様書を参照してください。 帳票のreport_unit（prefecture/city）に応じて、prefecture_government_codeまたはcity_government_codeが使用されます。
 
 ### パラメータ
 
 - tax_return_id* (path): integer(int64) - 申告ID
-- sheet_key* (path): string - 帳票キー
+- sheet_code* (path): string - 帳票コード（申告一覧の available_sheets[].sheet_code）
 - prefecture_government_code* (path): string - 都道府県の自治体コード
 - city_government_code* (path): string - 市区町村の自治体コード
 - company_id*: integer(int64) - 事業所ID
@@ -111,21 +111,21 @@ XML は国税帳票が e-Tax、地方税帳票が eLTAX、決算書が e-Tax に
 
 - data*: object - 帳票データ（JSON形式・廃止予定）
   - tax_data*: object - 帳票メタデータ
-    - sheet_key*: string - 帳票キー
+    - sheet_key: string - 帳票キー（廃止予定。sheet_code を利用してください）
     - title*: string - 帳票タイトル
     - version*: integer(int32) - 帳票バージョン
     - prefecture_government_code*: string - 都道府県の自治体コード（例: 13000）
     - city_government_code*: string - 市区町村の自治体コード（例: 13100）
   - xtx*: object - XTX形式の帳票データ。style_idをキーとした構造
 
-## GET /hub/tax_return/corporate/sheet/financial_statements/{tax_return_id}/{sheet_key} — 決算書取得
+## GET /hub/tax_return/corporate/sheet/financial_statements/{tax_return_id}/{sheet_code} — 決算書取得
 
 指定した申告データの決算書を XML 形式 (application/xml) で取得します。 レスポンスの XML は e-Tax に提出する決算書 (XBRL) 形式に準拠します。 XML の各項目の仕様は [tax_return API v3 帳票項目マッピング](https://github.com/freee/freee-mcp/blob/main/skills/freee-api-skill/tax-return-references/index.md)で公開されている仕様書を参照してください。
 
 ### パラメータ
 
 - tax_return_id* (path): integer(int64) - 申告ID
-- sheet_key* (path): string - 決算書種別キー (選択肢: balance_sheet, profit_and_loss, cost_report, statements_of_shareholders, notes_to_financial_statements, bs, pl, cr, ss, ifs)
+- sheet_code* (path): string - 決算書種別キー (選択肢: balance_sheet, profit_and_loss, cost_report, statements_of_shareholders, notes_to_financial_statements, bs, pl, cr, ss, ifs)
 - company_id*: integer(int64) - 事業所ID
 
 ### レスポンス
@@ -139,7 +139,7 @@ XML は国税帳票が e-Tax、地方税帳票が eLTAX、決算書が e-Tax に
 
 - data*: object - 帳票データ（JSON形式・廃止予定）
   - tax_data*: object - 帳票メタデータ
-    - sheet_key*: string - 決算書種別キー
+    - sheet_key: string - 決算書種別キー（廃止予定。sheet_code を利用してください）
     - title*: string - 決算書タイトル
     - ctax_return_id*: integer(int64) - 申告ID
   - xtx*: object - XBRL定義のツリー構造。xbrl_idをキーとしたネスト構造

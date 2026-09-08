@@ -40,6 +40,7 @@ freee_api_get {
   "service": "accounting",
   "path": "/api/1/receipts",
   "query": {
+    "company_id": 123456,
     "start_date": "2025-01-01",
     "end_date": "2025-01-31"
   }

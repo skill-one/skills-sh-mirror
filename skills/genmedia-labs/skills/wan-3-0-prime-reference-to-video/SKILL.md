@@ -43,11 +43,11 @@ The distinct thing here is **numbered reference binding**: you attach up to 10 i
 | Same character / product / set across a shot, driven by references | **Wan 3.0 Prime Reference to Video** |
 | Many references at once (10 images + 5 videos + 5 audio) | **Wan 3.0 Prime Reference to Video** |
 | A clip longer than 15s (up to 30s) with references | **Wan 3.0 Prime Reference to Video** |
-| Prompt only, no reference media | Wan 3.0 Prime text-to-video |
-| Animate one still, optionally to a last frame | Wan 3.0 Prime image-to-video |
-| Lip-sync to a voiceover track you already have | Wan 2.7 (`audio_url`) |
-| Cinematic multi-modal short-form with in-pass speech | Seedance 2.0 Pro |
-| Open-weights reference-to-video alternative | MiniMax H3 Open reference-to-video |
+| Prompt only, no reference media | [Wan 3.0 Prime text-to-video](https://www.runcomfy.com/models/wan-ai/wan-3.0-prime/text-to-video?utm_source=skills.sh&utm_medium=skill&utm_campaign=wan-3-0-prime-reference-to-video&utm_content=wan-ai-wan-3.0-prime-text-to-video) |
+| Animate one still, optionally to a last frame | [Wan 3.0 Prime image-to-video](https://www.runcomfy.com/models/wan-ai/wan-3.0-prime/image-to-video?utm_source=skills.sh&utm_medium=skill&utm_campaign=wan-3-0-prime-reference-to-video&utm_content=wan-ai-wan-3.0-prime-image-to-video) |
+| Lip-sync to a voiceover track you already have | [Wan 2.7](https://www.runcomfy.com/models/wan-ai/wan-2-7?utm_source=skills.sh&utm_medium=skill&utm_campaign=wan-3-0-prime-reference-to-video&utm_content=wan-ai-wan-2-7) (`audio_url`) |
+| Cinematic multi-modal short-form with in-pass speech | [Seedance 2.0 Pro](https://www.runcomfy.com/models/bytedance/seedance-v2/pro?utm_source=skills.sh&utm_medium=skill&utm_campaign=wan-3-0-prime-reference-to-video&utm_content=bytedance-seedance-v2-pro) |
+| Open-weights reference-to-video alternative | [MiniMax H3 Open reference-to-video](https://www.runcomfy.com/models/minimax/minimax-h3/reference-to-video?utm_source=skills.sh&utm_medium=skill&utm_campaign=wan-3-0-prime-reference-to-video&utm_content=minimax-minimax-h3-reference-to-video) |
 
 If the user said "Wan 3 Prime", "Wan 3.0 Prime", "reference to video" or "ref2v" explicitly, route here regardless.
 
@@ -75,7 +75,7 @@ If the user said "Wan 3 Prime", "Wan 3.0 Prime", "reference to video" or "ref2v"
 | `enable_audio` | bool | no | `true` | Output carries a synchronized audio track. Off = silent clip. |
 | `seed` | int | no | random | `0`–`2147483647`. Reuse for reproducible variants. |
 
-**At least one of `reference_images`, `reference_videos`, `reference_audios` must be supplied** — this endpoint rejects a prompt-only call. If the user has no reference media, route to Wan 3.0 Prime text-to-video instead.
+**At least one of `reference_images`, `reference_videos`, `reference_audios` must be supplied** — this endpoint rejects a prompt-only call. If the user has no reference media, route to [Wan 3.0 Prime text-to-video](https://www.runcomfy.com/models/wan-ai/wan-3.0-prime/text-to-video?utm_source=skills.sh&utm_medium=skill&utm_campaign=wan-3-0-prime-reference-to-video&utm_content=wan-ai-wan-3.0-prime-text-to-video) instead.
 
 ## Pricing — counted seconds, not wall-clock
 

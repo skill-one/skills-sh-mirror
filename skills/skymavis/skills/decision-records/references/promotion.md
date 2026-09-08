@@ -43,9 +43,9 @@ so a promoted record needs no hand-correction before commit:
 | Rewritten                                            | From → to                                                                          |
 | :--------------------------------------------------- | :--------------------------------------------------------------------------------- |
 | the H1                                               | `# CONF — <title>` → `# 0016 — <title>` (every accepted record reads `# NNNN — …`) |
-| every relative link in the body                      | re-pathed for the extra level (`../../glossary.md` → `../../../glossary.md`)       |
+| every relative link in the body                      | re-pathed for the sibling move (`AAAA-peer.md` → `../drafts/AAAA-peer.md`)         |
 | the mnemonic in prose — its own and every referrer's | `CONF` → `0016`, in the body and in front-matter prose like `summary`              |
-| a spelled-out path to the draft file                 | `docs/decisions/drafts/CONF-x.md` → `docs/decisions/accepted/<type>/0016-x.md`     |
+| a spelled-out path to the draft file                 | `docs/decisions/drafts/CONF-x.md` → `docs/decisions/accepted/0016-x.md`            |
 
 Two deliberate exclusions, both because a 4-letter mnemonic also reads as a plausible identifier:
 
@@ -56,3 +56,16 @@ Two deliberate exclusions, both because a 4-letter mnemonic also reads as a plau
 
 `promote` exits non-zero if any link is still broken afterwards, so a failed promotion is loud.
 `mdformat` reflows the rewritten paragraphs on commit — that churn is expected.
+
+## Sign-off
+
+Promotion is the act of acceptance, and the promotion PR is its record: **every name in a promoted
+record's `deciders` approves that PR before it merges.** The tool cannot see PR state, so this is a
+convention to enforce socially — or mechanically, with a CODEOWNERS entry on `docs/decisions/` and a
+required-approvals rule that names the deciders.
+
+For a ratification-grade promotion — a set of records the repo treats as constitutional — a signed
+tag per decider upgrades the sign-off from a PR approval to a cryptographic act that outlives the PR
+page: after the merge, each decider runs `git tag -s <decider>-ratifies-<milestone> <merge-commit>`
+and pushes the tag. Anyone can later verify who signed exactly which text with `git tag -v`.
+Optional, and worth it exactly when "who signed this" matters for years.

@@ -16,6 +16,7 @@
 - accounting-banks.md — 連携サービス
 - accounting-companies.md — 事業所
 - accounting-deals.md — 取引（収入・支出）
+- accounting-expense-application-currencies.md — 経費精算の外貨
 - accounting-expense-application-line-templates.md — 経費科目
 - accounting-expense-applications.md — 経費精算
 - accounting-fixed-assets.md — 固定資産台帳
@@ -129,9 +130,15 @@
 
 ## survey - freeeサーベイ
 
-- survey-employee-evaluation-evaluation-results.md — ⚠ freee-mcp（リモート版） 限定 / evaluation_results
-- survey-launch-kaigyo-application.md — ⚠ freee-mcp（リモート版） 限定 / launch_kaigyo_application
 - survey-surveys.md — ⚠ freee-mcp（リモート版） 限定 / survey
+
+## launch - freee開業
+
+- launch-kaigyo-application.md — ⚠ freee-mcp（リモート版） 限定 / launch_kaigyo_application
+
+## employee_evaluation - 人事評価
+
+- employee-evaluation-evaluation-results.md — ⚠ freee-mcp（リモート版） 限定 / employee_evaluation
 
 ## tax_return - freee申告
 

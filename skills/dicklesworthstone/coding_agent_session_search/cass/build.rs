@@ -48,7 +48,7 @@ const CONTRACTS: &[DependencyContract] = &[
         crate_package_name: "fsqlite",
         manifest_package_field: Some("fsqlite"),
         // Exact upstream source pin (established with the fsqlite 0.2.1
-        // migration, bead bo000; now at 0.3.16. 0.3.15 was evaluated on
+        // migration, bead bo000; now at 0.3.18. 0.3.15 was evaluated on
         // 2026-09-02 (bead gh382-fsqlite-pin) and NOT adopted: cass's own
         // writable open still looped on a large archive with a large WAL
         // (reclaim sweep x per-page WAL rescan, cass GH #382 / bead g3zyo).
@@ -64,10 +64,17 @@ const CONTRACTS: &[DependencyContract] = &[
         // cass#393 namespace-sidecar repair, the GH#438 Windows sidecar-less
         // read-only close, integrity-check through read-only guards, and
         // the cass#434 autoindex-vanish fixes) all carry forward.
+        // 0.3.17 adds incremental WAL-tail folding, reserved lock-byte and
+        // freelist repair (GH#410), FTS metadata/visibility fixes (GH#408),
+        // and prepared-read schema-retry cleanup. 0.3.18 adds parameterized
+        // rowid seeks (GH#415/cass#382), read-only WAL preservation, reader
+        // registration error propagation and I/O lifetime fixes. The facade
+        // API and asupersync requirement are unchanged. Updated by owner
+        // request 2026-09-07; mixed-engine concurrent-WAL GH#411 stays open.
         // fsqlite resolves from crates.io at the exact version below.
         expected_git: "",
         expected_rev: "",
-        expected_version: "0.3.16",
+        expected_version: "0.3.18",
         // `async-api` exposes frankensqlite::AsyncConnection, which
         // src/search/query.rs uses (as SearchSqliteConnection) for the
         // no-hit alternate-agent suggestions without a full storage open.
@@ -88,7 +95,7 @@ const CONTRACTS: &[DependencyContract] = &[
         // Keep shared types on the identical registry version as the facade.
         expected_git: "",
         expected_rev: "",
-        expected_version: "0.3.16",
+        expected_version: "0.3.18",
         expected_features: &[],
         expected_default_features: None,
         repo_rel: "../frankensqlite",
@@ -106,7 +113,7 @@ const CONTRACTS: &[DependencyContract] = &[
         // Keep shared types on the identical registry version as the facade.
         expected_git: "",
         expected_rev: "",
-        expected_version: "0.3.16",
+        expected_version: "0.3.18",
         expected_features: &[],
         expected_default_features: None,
         repo_rel: "../frankensqlite",
@@ -121,15 +128,19 @@ const CONTRACTS: &[DependencyContract] = &[
         dep_key: "franken-agent-detection",
         crate_package_name: "franken-agent-detection",
         manifest_package_field: None,
-        // GH#416: registry pin. crates.io 0.2.2 is the upstream release tag
-        // f19e7e0 (2026-09: cursor/antigravity/grok scan-root scoping plus the
-        // aider/copilot-cli/amp/opencode/clawdbot/muse session-loss fixes).
+        // GH#416: registry pin. crates.io 0.2.3 (2026-09-07) probes the
+        // Antigravity IDE store as well as the agy CLI store (cass#454),
+        // honors CLAUDE_CONFIG_DIR/XDG_CONFIG_HOME for Claude Code (cass#448),
+        // and carries the Codex token-usage, Claude tool-result, Cursor/OpenCode
+        // dedupe and Shelley canonical-discovery fixes on top of 0.2.2's
+        // (upstream tag f19e7e0) cursor/antigravity/grok scan-root scoping and
+        // aider/copilot-cli/amp/opencode/clawdbot/muse session-loss fixes.
         // The Shelley connector, FAD#22 source-boundary seam, and the
-        // chatgpt/omp injection seams live past this tag and wait on the next
-        // publish. crates.io refuses git dependencies, hence version-only.
+        // chatgpt/omp injection seams are published in 0.2.3.
+        // crates.io refuses git dependencies, hence version-only.
         expected_git: "",
         expected_rev: "",
-        expected_version: "0.2.2",
+        expected_version: "0.2.3",
         expected_features: &[
             "chatgpt",
             "connectors",
@@ -155,13 +166,13 @@ const CONTRACTS: &[DependencyContract] = &[
         // crates.io-only exact pin: every source (direct dep, frankensqlite
         // transitive, frankensearch transitive) resolves to a single published
         // release. The 0.4.x line (>=0.4.3,<0.5) is required by fsqlite 0.3.x,
-        // whose public API names asupersync 0.4.x types. The current 0.4.9 pin
-        // preserves the 0.4.x typed-result cancellation contract.
+        // whose public API names asupersync 0.4.x types. The 0.4.10 pin
+        // adds the published Cx::is_cancelled API needed by Quill 0.2.3.
         // Empty `expected_git` signals `validate_manifest_dependency_spec`
         // to skip git/rev checks.
         expected_git: "",
         expected_rev: "",
-        expected_version: "0.4.9",
+        expected_version: "0.4.10",
         expected_features: &["test-internals", "tls-native-roots"],
         expected_default_features: None,
         repo_rel: "../asupersync",
@@ -176,7 +187,10 @@ const CONTRACTS: &[DependencyContract] = &[
         dep_key: "frankensearch",
         crate_package_name: "frankensearch",
         manifest_package_field: None,
-        // Registry pin (gh#429, gh#410). 0.4.2 extends the native Windows Quill
+        // Registry pin (gh#429, gh#410). 0.4.3 (quill 0.2.3, cass#453)
+        // needs Cx::is_cancelled, published in asupersync 0.4.10. Its
+        // adoption follows validation of that runtime update.
+        // 0.4.2 extends the native Windows Quill
         // publication line with the explicit multilingual MiniLM embedding
         // profile while preserving the first crates.io line carrying
         // the pure-Rust `native` feature and the explicit `cass-compat` ->
@@ -442,7 +456,7 @@ fn validate_fsqlite_source_pin(manifest_dir: &Path, manifest: &Value, packaged_m
     // The fsqlite engine family must resolve exclusively from crates.io at
     // one exact version. The single-source identity is load-bearing for the
     // read-only FTS5 integrity preflight used by CASS on Windows.
-    const EXPECTED_VERSION: &str = "0.3.16";
+    const EXPECTED_VERSION: &str = "0.3.18";
     const EXPECTED_REGISTRY_SOURCE: &str = "registry+https://github.com/rust-lang/crates.io-index";
 
     // 1. With the family on crates.io (e926644f), a `[patch]` table is no

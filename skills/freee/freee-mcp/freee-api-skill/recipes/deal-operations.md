@@ -19,6 +19,7 @@ freee_api_get {
   "service": "accounting",
   "path": "/api/1/deals",
   "query": {
+    "company_id": 123456,
     "start_issue_date": "2025-01-01",
     "end_issue_date": "2025-01-31",
     "type": "expense",

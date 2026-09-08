@@ -1743,15 +1743,10 @@ fn plain_index_self_heals_when_entire_lexical_index_directory_is_missing() {
 /// pre-fix binary; the starvation flush must release the budget and let the
 /// run drain.
 ///
-/// Currently ignore-gated: on current main the ingest path parks on the
-/// oversized conversation itself (heartbeat shows `rebuild_pipeline` fully
-/// idle — `page_prep_workers=0`, `producer_state=null` — while ingest crawls
-/// at ~0.02 conv/s), so the run never reaches the lexical pipeline phase
-/// where the GH#413 retention wedge lives. That is the same mwkw0-class
-/// ingest park MossyBridge documented when first attempting a tiny GH#413
-/// repro, not this fix. Un-ignore once ingest bounding lands; this then
-/// becomes the definitive pipeline-level receipt for cjugu.
-#[ignore = "ingest path parks on multi-MiB conversations before the lexical pipeline starts (mwkw0-class); see bead cjugu comments"]
+/// The fixture serializes embedded newlines as JSON escapes so the connector
+/// receives one valid oversized message. This regression passed with the
+/// pinned FrankenSQLite 0.3.18 engine and stays in the default suite; the
+/// separate archive-scale GH#413 acceptance remains tracked in bead cjugu.
 #[test]
 fn gh413_full_rebuild_drains_when_one_conversation_exceeds_the_inflight_budget() {
     let tmp = TempDir::new().unwrap();
@@ -1768,20 +1763,42 @@ fn gh413_full_rebuild_drains_when_one_conversation_exceeds_the_inflight_budget()
     huge_text.push_str(huge_marker);
 
     let write_session = |name: &str, user_text: &str, session_id: &str| {
-        let sample = format!(
-            concat!(
-                "{{\"timestamp\":\"2025-09-30T15:42:34.559Z\",\"type\":\"session_meta\",",
-                "\"payload\":{{\"id\":\"{session_id}\",\"cwd\":\"/test/workspace\",\"cli_version\":\"0.42.0\"}}}}\n",
-                "{{\"timestamp\":\"2025-09-30T15:42:36.190Z\",\"type\":\"response_item\",",
-                "\"payload\":{{\"type\":\"message\",\"role\":\"user\",\"content\":[{{\"type\":\"input_text\",",
-                "\"text\":\"{user_text}\"}}]}}}}\n",
-                "{{\"timestamp\":\"2025-09-30T15:42:43.000Z\",\"type\":\"response_item\",",
-                "\"payload\":{{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{{\"type\":\"text\",",
-                "\"text\":\"acknowledged\"}}]}}}}\n"
-            ),
-            session_id = session_id,
-            user_text = user_text
-        );
+        // The oversized text contains newlines. Serialize them as JSON escapes
+        // so the connector receives one valid message, not thousands of broken lines.
+        let records = [
+            serde_json::json!({
+                "timestamp": "2025-09-30T15:42:34.559Z",
+                "type": "session_meta",
+                "payload": {
+                    "id": session_id,
+                    "cwd": "/test/workspace",
+                    "cli_version": "0.42.0"
+                }
+            }),
+            serde_json::json!({
+                "timestamp": "2025-09-30T15:42:36.190Z",
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": user_text}]
+                }
+            }),
+            serde_json::json!({
+                "timestamp": "2025-09-30T15:42:43.000Z",
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "acknowledged"}]
+                }
+            }),
+        ];
+        let mut sample = String::new();
+        for record in records {
+            sample.push_str(&serde_json::to_string(&record).unwrap());
+            sample.push('\n');
+        }
         fs::write(codex_root.join(name), sample).unwrap();
     };
     write_session("rollout-huge.jsonl", &huge_text, "gh413-huge");
@@ -3073,16 +3090,76 @@ fn gh453_back_to_back_runs_report_retired_segments_and_size_headroom_from_live_b
 #[test]
 #[ignore = "sleeps past the engine's 300 s garbage grace period"]
 fn gh453_gc_reclaims_folded_segments_after_the_grace_period() {
+    gh453_assert_reclamation_after_grace(false);
+}
+
+/// Later publications must not restart the grace clock for older retirements.
+#[test]
+#[ignore = "sleeps past the engine's 300 s garbage grace period"]
+fn gh453_gc_reclaims_despite_publication_during_the_grace_period() {
+    gh453_assert_reclamation_after_grace(true);
+}
+
+fn gh453_assert_reclamation_after_grace(publish_during_grace: bool) {
     let tmp = TempDir::new().unwrap();
     let home = tmp.path();
     let data_dir = home.join("cass_data");
     fs::create_dir_all(&data_dir).unwrap();
     let codex_root = home.join(".codex");
 
-    let before = gh453_run_rounds(home, &data_dir, &codex_root, 3);
+    // Two rounds have retired the original fold and leave room for one new
+    // segment below the four-segment merge threshold. The quiet control keeps
+    // its original three-round fixture.
+    let rounds = if publish_during_grace { 2 } else { 3 };
+    let before = gh453_run_rounds(home, &data_dir, &codex_root, rounds);
     assert!(before.retired_segment_files > 0, "{before:?}");
     eprintln!("gh453: before grace: {before:?}");
-    std::thread::sleep(std::time::Duration::from_secs(305));
+    let grace_start = std::time::Instant::now();
+    let recent_publication_start = if publish_during_grace {
+        let index_dir = coding_agent_search::search::tantivy::expected_index_dir(&data_dir);
+        let manifest_before = fs::read(index_dir.join("MANIFEST")).expect("published manifest");
+        std::thread::sleep(std::time::Duration::from_secs(150));
+        make_codex_session(
+            &codex_root,
+            "2026/09/07",
+            "rollout-453-during-grace.jsonl",
+            "reclaimprobe publication during grace",
+        );
+        let publication_start = std::time::Instant::now();
+        let run = base_cmd(home)
+            .current_dir(home)
+            .args(["index", "--json", "--no-progress-events", "--data-dir"])
+            .arg(&data_dir)
+            .env("CASS_AUTO_REFRESH", "0")
+            .output()
+            .expect("publish during the retirement grace period");
+        assert!(
+            run.status.success(),
+            "publication failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&run.stdout),
+            String::from_utf8_lossy(&run.stderr)
+        );
+        assert_ne!(
+            fs::read(index_dir.join("MANIFEST")).expect("successor manifest"),
+            manifest_before,
+            "the intervening index must publish a successor generation"
+        );
+        assert!(
+            grace_start.elapsed() < std::time::Duration::from_secs(300),
+            "the intervening publication must finish before the original grace expires"
+        );
+        let during = gh453_snapshot(home, &data_dir);
+        assert_eq!(
+            during.retired_segment_files, before.retired_segment_files,
+            "this fixture must preserve the original retired population: {during:?}"
+        );
+        Some(publication_start)
+    } else {
+        None
+    };
+    std::thread::sleep(
+        std::time::Duration::from_secs(305).saturating_sub(grace_start.elapsed()),
+    );
 
     let gc = base_cmd(home)
         .current_dir(home)
@@ -3091,6 +3168,12 @@ fn gh453_gc_reclaims_folded_segments_after_the_grace_period() {
         .env("CASS_AUTO_REFRESH", "0")
         .output()
         .expect("cass index --gc");
+    if let Some(publication_start) = recent_publication_start {
+        assert!(
+            publication_start.elapsed() < std::time::Duration::from_secs(300),
+            "GC must finish while the intervening publication is younger than the grace period"
+        );
+    }
     assert!(
         gc.status.success(),
         "{}",
@@ -3129,6 +3212,16 @@ fn gh453_gc_reclaims_folded_segments_after_the_grace_period() {
         hits["hits"].as_array().is_some_and(|hits| hits.len() >= 3),
         "{hits}"
     );
+    if publish_during_grace {
+        assert!(
+            hits["hits"].as_array().is_some_and(|hits| hits.iter().any(|hit| {
+                hit["source_path"]
+                    .as_str()
+                    .is_some_and(|path| path.ends_with("rollout-453-during-grace.jsonl"))
+            })),
+            "the intervening publication must remain searchable after GC: {hits}"
+        );
+    }
 }
 
 #[derive(Debug)]

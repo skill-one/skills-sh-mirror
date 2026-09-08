@@ -15,6 +15,7 @@ freee_api_get {
   "service": "accounting",
   "path": "/api/1/payment_requests",
   "query": {
+    "company_id": 123456,
     "status": "in_progress",
     "limit": 10
   }

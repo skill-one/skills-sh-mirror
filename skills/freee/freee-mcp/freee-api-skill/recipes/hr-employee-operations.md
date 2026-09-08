@@ -2,6 +2,10 @@
 
 freee人事労務APIを使った従業員情報・給与明細の取得ガイド。
 
+## company_id は必須
+
+クエリパラメータの `company_id` が必須。省略すると 401 が返るが、メッセージは権限エラー、コードは `expired_access_token` になるため、トークンの問題に見えて原因を取り違えやすい。
+
 ## 従業員一覧の使い分け
 
 - 対象年月に在籍している従業員: `GET /api/v1/employees`（指定年月に退職済みのユーザーは含まれない）
@@ -18,6 +22,7 @@ freee_api_get {
   "service": "hr",
   "path": "/api/v1/employees",
   "query": {
+    "company_id": 123456,
     "year": 2025,
     "month": 1
   }
@@ -40,6 +45,7 @@ freee_api_get {
   "service": "hr",
   "path": "/api/v1/salaries/employee_payroll_statements",
   "query": {
+    "company_id": 123456,
     "year": 2025,
     "month": 1
   }

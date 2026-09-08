@@ -24,7 +24,7 @@ anyhow = "1.0.102"
 thiserror = "2.0.18"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt", "ansi", "json"] }
-asupersync = { version = "=0.4.9", features = ["test-internals", "tls-native-roots"] }
+asupersync = { version = "=0.4.10", features = ["test-internals", "tls-native-roots"] }
 clap = { version = "4.6.1", features = ["derive", "cargo", "env", "unicode", "wrap_help"] }
 clap_complete = "4.6.5"
 clap_mangen = "0.3.0"
@@ -49,7 +49,7 @@ which = "8.0.2"
 shell-words = "1.1.1"
 dotenvy = "0.15.7"
 notify = "8.2.0"
-# fsqlite 0.3.13 at the exact source revision below carries the 0.3.0
+# The exact registry release below retains the fsqlite 0.3.13 and 0.3.0
 # asupersync-0.4.3 runtime migration
 # and bug-fix wave (GH#333 concurrent-open BusyRecovery retries, GH#334
 # FileIdentity re-derivation after file replacement — the cass#393
@@ -71,10 +71,16 @@ notify = "8.2.0"
 # writable open, bead g3zyo), the GH#405 FTS5 savepoint undo log
 # (savepoints no longer clone the whole table per statement), and the
 # GH#406 content-backed INSERT persisted as an incremental segment append.
-frankensqlite = { version = "=0.3.16", package = "fsqlite", features = ["fts5", "async-api"] }
+# 0.3.17 adds incremental WAL-tail folding, reserved lock-byte/freelist
+# repair (GH#410), FTS metadata and foreign-write visibility fixes (GH#408),
+# and prepared-read schema-retry transaction cleanup. 0.3.18 adds parameterized
+# rowid IN-list seeks (GH#415/cass#382), mutation-free read-only WAL readers,
+# reader-registration error propagation and I/O buffer lifetime fixes.
+# The async API and asupersync requirement remain unchanged.
+frankensqlite = { version = "=0.3.18", package = "fsqlite", features = ["fts5", "async-api"] }
 # The production storage-integrity probe calls FrankenSQLite's public VFS API
 # directly so it can inspect native writer locks without opening the pager.
-fsqlite-types = { version = "=0.3.16", package = "fsqlite-types" }
+fsqlite-types = { version = "=0.3.18", package = "fsqlite-types" }
 rayon = "1.12.0"
 crossbeam-channel = "0.5.15"
 parking_lot = "0.12.5"
@@ -124,8 +130,11 @@ bytemuck = "1.25.0"
 # Registry pin (gh#410): 0.4.2 adds the distinct opt-in multilingual native
 # embedding space to the Windows Quill publication line introduced in 0.4.1;
 # registry 0.3.2 was a stale same-version twin and must never be resolved.
+# 0.4.3 (gh#453 receipt-clocked segment sweep) needs Cx::is_cancelled,
+# published in asupersync 0.4.10. Validate that runtime update before
+# adopting the new search engine.
 frankensearch = { version = "=0.4.2", default-features = false, features = ["hash", "cass-compat", "quill", "ann", "native"] }
-franken-agent-detection = { version = "=0.2.2", features = ["connectors", "cursor", "chatgpt", "opencode", "crush", "goose", "hermes"] }
+franken-agent-detection = { version = "=0.2.3", features = ["connectors", "cursor", "chatgpt", "opencode", "crush", "goose", "hermes"] }
 wide = "1.4.0"  # Portable SIMD for P0 Opt 2: SIMD dot product
 arrayvec = "0.7.6"  # Stack-based arrays for P1 Opt 1.4: Edge N-gram optimization
 bloomfilter = "3.0.1"  # Probabilistic membership testing for P2 Opt 3.3: Workspace Cache
@@ -219,10 +228,10 @@ rand_chacha = "0.10"
 rusqlite = { version = "0.40.2", features = ["bundled", "modern_sqlite"] }
 # The manifest-policy build gate requires this explicit dev entry for compat
 # fixture assertions, even though production also uses the same pinned crate.
-fsqlite-types = { version = "=0.3.16", package = "fsqlite-types" }
+fsqlite-types = { version = "=0.3.18", package = "fsqlite-types" }
 
 # The fsqlite family resolves from the exact registry version for every direct
-# and transitive consumer. build.rs enforces a single 0.3.16 family source.
+# and transitive consumer. build.rs enforces a single 0.3.18 family source.
 
 [[bin]]
 name = "cass"
@@ -281,7 +290,7 @@ inherits = "release"
 debug = "line-tables-only"
 strip = false
 
-# The dependency graph is pinned to the asupersync 0.4.x line (0.4.9). Keep
+# The dependency graph is pinned to the asupersync 0.4.x line (0.4.10). Keep
 # the frankensqlite, frankensearch, and franken-agent-detection registry pins
 # aligned so Cargo.lock does not reintroduce a parallel asupersync 0.3.x stack.
 #
