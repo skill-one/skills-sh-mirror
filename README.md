@@ -52,7 +52,7 @@ Both files keep only what `skills.jsonl` does not already hold: `trending.json` 
 
 ## How to get the data
 
-Published daily to the [`dist` branch](../../tree/dist) — each commit is a complete snapshot at the branch root. Two ways in: fetch individual files straight from GitHub, or clone the whole snapshot.
+Published daily by the [`fetch-skills.yml`](.github/workflows/fetch-skills.yml) workflow to the [`dist` branch](../../tree/dist) — each commit is a complete snapshot at the branch root. Two ways in: fetch individual files straight from GitHub, or clone the whole snapshot.
 
 ### Fetch individual files
 
@@ -72,8 +72,9 @@ To pin to a day, swap `dist` for a `dist-<date>` tag (the newest 5 snapshots are
 
 ```bash
 # resolve the newest available tag, then swap it into any URL above
-latest=$(git ls-remote --tags https://github.com/skill-one/skills-sh-scraper.git 'dist-*' \
-         | awk -F/ '{print $NF}' | sort -V | tail -1)
+latest=$(git ls-remote --tags --refs --sort=-v:refname \
+         https://github.com/skill-one/skills-sh-scraper.git 'dist-*' \
+         | head -1 | awk -F/ '{print $NF}')
 curl -sO "https://raw.githubusercontent.com/skill-one/skills-sh-scraper/$latest/skills.jsonl"
 ```
 
@@ -93,4 +94,4 @@ To pin to a day, clone the `dist-<date>` tag instead (resolve the newest one as 
 git clone --depth 1 -b "$latest" https://github.com/skill-one/skills-sh-scraper.git
 ```
 
-Or produce the data yourself: `node scraper.mjs` — see [DEVELOPING.md](DEVELOPING.md).
+Snapshots are published by GitHub Actions — publish now with `gh workflow run fetch-skills.yml`. To produce the data yourself: `node scraper.mjs` — see [DEVELOPING.md](DEVELOPING.md).

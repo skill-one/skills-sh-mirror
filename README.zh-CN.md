@@ -52,7 +52,7 @@ English: [README.md](README.md) · 开发指南(运行 / 校验 / 扩展):[DEVEL
 
 ## 如何获取数据
 
-每日发布到 [`dist`](../../tree/dist) [分支](../../tree/dist)——每个提交都是分支根目录下的完整快照。两种取用方式:直接从 GitHub 获取单个文件,或克隆整份快照。
+由 [`fetch-skills.yml`](.github/workflows/fetch-skills.yml) 工作流每日发布到 [`dist` 分支](../../tree/dist)——每个提交都是分支根目录下的完整快照。两种取用方式:直接从 GitHub 获取单个文件,或克隆整份快照。
 
 ### 获取单个文件
 
@@ -72,8 +72,9 @@ GitHub 对这些 URL 有约 5 分钟的缓存,因此 `dist` 路径始终跟随�
 
 ```bash
 # 解析出最新的可用标签,替换到上面任意 URL 里
-latest=$(git ls-remote --tags https://github.com/skill-one/skills-sh-scraper.git 'dist-*' \
-         | awk -F/ '{print $NF}' | sort -V | tail -1)
+latest=$(git ls-remote --tags --refs --sort=-v:refname \
+         https://github.com/skill-one/skills-sh-scraper.git 'dist-*' \
+         | head -1 | awk -F/ '{print $NF}')
 curl -sO "https://raw.githubusercontent.com/skill-one/skills-sh-scraper/$latest/skills.jsonl"
 ```
 
@@ -93,4 +94,4 @@ git clone --depth 1 -b dist https://github.com/skill-one/skills-sh-scraper.git
 git clone --depth 1 -b "$latest" https://github.com/skill-one/skills-sh-scraper.git
 ```
 
-也可以自己生成:`node scraper.mjs` —— 见 [DEVELOPING.zh-CN.md](DEVELOPING.zh-CN.md)。
+快照由 GitHub Actions 发布——随时手动触发:`gh workflow run fetch-skills.yml`;也可以自己生成:`node scraper.mjs` —— 见 [DEVELOPING.zh-CN.md](DEVELOPING.zh-CN.md)。
