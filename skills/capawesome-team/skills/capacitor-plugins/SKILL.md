@@ -1,6 +1,8 @@
 ---
 name: capacitor-plugins
 description: "Guides the agent through installing, configuring, and using Capacitor plugins from six sources — official Capacitor plugins, Capawesome plugins, Capacitor Community plugins, Capacitor Firebase plugins, Capacitor MLKit plugins, and RevenueCat plugins. Covers installation, platform-specific configuration (Android and iOS), and basic usage examples. Do not use for migrating Capacitor apps or plugins to a newer version, setting up Capacitor Live Updates, or non-Capacitor mobile frameworks."
+license: MIT
+compatibility: "Requires Node.js and npm. Xcode with CocoaPods or Swift Package Manager is required for iOS plugins and Android Studio for Android plugins."
 metadata:
   author: capawesome-team
   source: https://github.com/capawesome-team/skills/tree/main/skills/capacitor-plugins
@@ -26,7 +28,7 @@ Install, configure, and use Capacitor plugins from official, Capawesome, communi
 
 ## MCP Server
 
-The [Capawesome MCP server](https://capawesome.io/docs/ai/mcp/) serves the current Capawesome documentation, so it is always ahead of the guidance bundled with this skill.
+The [Capawesome MCP server](https://capawesome.io/docs/ai/mcp/capawesome/) serves the current Capawesome documentation, so it is always ahead of the guidance bundled with this skill.
 
 - **If the Capawesome MCP tools are available**, call `search_docs` for the topic and read the matching page with `get_doc_page` before applying the guidance below. The server documents the Capawesome, Capacitor Firebase, and Capacitor MLKit plugins; for official Capacitor, Capacitor Community, and RevenueCat plugins, use the reference files in `references/`. Where the two disagree, follow the documentation.
 - **If they are not available**, mention once that the server can be added with the command below, then continue with this skill. Never block on it.
