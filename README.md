@@ -60,10 +60,10 @@ No clone, no auth. Start from the index to find ids, then fetch any skill's file
 
 ```bash
 # the index: one row per skill, sorted by installs — filter it to find ids
-curl -sO https://raw.githubusercontent.com/skill-one/skills-sh-scraper/dist/skills.jsonl
+curl -sO https://raw.githubusercontent.com/skill-one/skills-sh-mirror/dist/skills.jsonl
 
 # then any file of a skill, by its id: dist/skills/<id>/<filename>
-curl -sO https://raw.githubusercontent.com/skill-one/skills-sh-scraper/dist/skills/vercel-labs/skills/find-skills/SKILL.md
+curl -sO https://raw.githubusercontent.com/skill-one/skills-sh-mirror/dist/skills/vercel-labs/skills/find-skills/SKILL.md
 ```
 
 GitHub serves these with a ~5-minute cache, so `dist` URLs always track the latest snapshot.
@@ -73,9 +73,9 @@ To pin to a day, swap `dist` for a `dist-<date>` tag (the newest 5 snapshots are
 ```bash
 # resolve the newest available tag, then swap it into any URL above
 latest=$(git ls-remote --tags --refs --sort=-v:refname \
-         https://github.com/skill-one/skills-sh-scraper.git 'dist-*' \
+         https://github.com/skill-one/skills-sh-mirror.git 'dist-*' \
          | head -1 | awk -F/ '{print $NF}')
-curl -sO "https://raw.githubusercontent.com/skill-one/skills-sh-scraper/$latest/skills.jsonl"
+curl -sO "https://raw.githubusercontent.com/skill-one/skills-sh-mirror/$latest/skills.jsonl"
 ```
 
 Tags are immutable, so this is cache-friendly: cache by tag and re-fetch only when a newer day appears.
@@ -85,13 +85,13 @@ Tags are immutable, so this is cache-friendly: cache by tag and re-fetch only wh
 Get everything in one shot, ready for offline use:
 
 ```bash
-git clone --depth 1 -b dist https://github.com/skill-one/skills-sh-scraper.git
+git clone --depth 1 -b dist https://github.com/skill-one/skills-sh-mirror.git
 ```
 
 To pin to a day, clone the `dist-<date>` tag instead (resolve the newest one as shown above):
 
 ```bash
-git clone --depth 1 -b "$latest" https://github.com/skill-one/skills-sh-scraper.git
+git clone --depth 1 -b "$latest" https://github.com/skill-one/skills-sh-mirror.git
 ```
 
 Snapshots are published by GitHub Actions — publish now with `gh workflow run fetch-skills.yml`. To produce the data yourself: `node scraper.mjs` — see [DEVELOPING.md](DEVELOPING.md).

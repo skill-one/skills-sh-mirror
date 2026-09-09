@@ -60,10 +60,10 @@ English: [README.md](README.md) · 开发指南(运行 / 校验 / 扩展):[DEVEL
 
 ```bash
 # 索引:每个技能一行,按 installs 降序——先过滤它找到目标 id
-curl -sO https://raw.githubusercontent.com/skill-one/skills-sh-scraper/dist/skills.jsonl
+curl -sO https://raw.githubusercontent.com/skill-one/skills-sh-mirror/dist/skills.jsonl
 
 # 再按 id 取技能的任意文件:dist/skills/<id>/<文件名>
-curl -sO https://raw.githubusercontent.com/skill-one/skills-sh-scraper/dist/skills/vercel-labs/skills/find-skills/SKILL.md
+curl -sO https://raw.githubusercontent.com/skill-one/skills-sh-mirror/dist/skills/vercel-labs/skills/find-skills/SKILL.md
 ```
 
 GitHub 对这些 URL 有约 5 分钟的缓存,因此 `dist` 路径始终跟随最新快照。
@@ -73,9 +73,9 @@ GitHub 对这些 URL 有约 5 分钟的缓存,因此 `dist` 路径始终跟随�
 ```bash
 # 解析出最新的可用标签,替换到上面任意 URL 里
 latest=$(git ls-remote --tags --refs --sort=-v:refname \
-         https://github.com/skill-one/skills-sh-scraper.git 'dist-*' \
+         https://github.com/skill-one/skills-sh-mirror.git 'dist-*' \
          | head -1 | awk -F/ '{print $NF}')
-curl -sO "https://raw.githubusercontent.com/skill-one/skills-sh-scraper/$latest/skills.jsonl"
+curl -sO "https://raw.githubusercontent.com/skill-one/skills-sh-mirror/$latest/skills.jsonl"
 ```
 
 标签不可变,因此缓存友好:按标签缓存,只有出现更新的日期才需要重新拉取。
@@ -85,13 +85,13 @@ curl -sO "https://raw.githubusercontent.com/skill-one/skills-sh-scraper/$latest/
 一次拿到全部数据,适合离线使用:
 
 ```bash
-git clone --depth 1 -b dist https://github.com/skill-one/skills-sh-scraper.git
+git clone --depth 1 -b dist https://github.com/skill-one/skills-sh-mirror.git
 ```
 
 要固定到某天,改为克隆 `dist-<日期>` 标签(最新标签的解析方法见上):
 
 ```bash
-git clone --depth 1 -b "$latest" https://github.com/skill-one/skills-sh-scraper.git
+git clone --depth 1 -b "$latest" https://github.com/skill-one/skills-sh-mirror.git
 ```
 
 快照由 GitHub Actions 发布——随时手动触发:`gh workflow run fetch-skills.yml`;也可以自己生成:`node scraper.mjs` —— 见 [DEVELOPING.zh-CN.md](DEVELOPING.zh-CN.md)。
