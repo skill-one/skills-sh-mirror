@@ -1,6 +1,8 @@
+# ignore every dotfile/dotdir, then re-include what must be committed
+.*
+!.gitignore
+!.gitattributes
+!.github/
+
 node_modules/
 data/
-.env.local
-.vercel/
-.vercel
-.env*
