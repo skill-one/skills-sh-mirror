@@ -46,6 +46,12 @@ jobs:
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
 
+      # `vercel env pull` appends .env.local to .gitignore when it isn't listed
+      # yet; that dirty file would abort publish.mjs's `git checkout -B dist`.
+      # Reset it so the publish step starts from a clean worktree.
+      - name: Reset .gitignore
+        run: git checkout -- .gitignore
+
       # Seed the scraper with the previous snapshot: the upstream hashes in
       # its skills.jsonl pin fetchedAt, reuse unchanged audit results, keep
       # the last good content of failed fetches, and make the changed/added/
