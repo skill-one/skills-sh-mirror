@@ -8,7 +8,7 @@ argument-hint: "[optional: feature description, requirements doc path, plan path
 
 **Note: The current year is 2026.**
 
-**Outcome:** a plan an implementer can start from confidently — a few sentences in chat, a chat brief, or a durable plan artifact — handed off through its owning terminal workflow. `ce-brainstorm` defines **WHAT** to build as a requirements-only unified plan; `ce-plan` enriches it with **HOW**; `ce-work` executes it. A prior brainstorm is useful but never required.
+**Outcome:** a plan for carrying out and checking the agreed work while preserving its outcome and constraints. Resolve technical choices from evidence; leave adequate instructions unchanged. Use the selected output form and handoff. `ce-brainstorm` defines **WHAT**, `ce-plan` plans **HOW**, and `ce-work` executes. A prior brainstorm is optional.
 
 **An explicit invocation always produces a plan.** Never classify a direct invocation as "not a planning task" and route out. It may select any output contract below, and the smallest valid plan is a few sentences in chat.
 
@@ -46,7 +46,7 @@ Phases run in order unless an owner routes out or short-circuits. Read a phase's
 
 ### Phases 1-4: Research and Compose
 
-4. Read `references/research.md` before gathering context. It owns local and external research, agent-native triage, consolidation, depth reclassification, and flow analysis.
+4. Read `references/research.md` before gathering context. It owns local and external research, agent-native triage, consolidation, depth reclassification, flow analysis, and requested Bake-offs.
 5. Read `references/structure.md` before resolving questions or structuring the plan. It owns settled-decision handling, stable U-IDs, technical design, depth, and planning boundaries.
 6. Compose from `references/plan-sections.md` plus the format-rendering reference selected by `output-mode.md`.
 

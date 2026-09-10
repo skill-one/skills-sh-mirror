@@ -387,6 +387,7 @@ Ingests history from 26 local agents, normalizing them into a unified `Conversat
 - **ChatGPT**: `~/Library/Application Support/com.openai.chat` (v1 unencrypted JSON; v2/v3 encrypted—see Environment)
 - **Aider**: `~/.aider.chat.history.md` and per-project `.aider.chat.history.md` files (Markdown)
 - **Pi-Agent**: `~/.pi/agent/sessions` (Session JSONL with thinking content)
+- **Prime Agent (`prime_agent`)**: `~/.prime/agent/sessions/<session-id>.jsonl` (versions 1–3). Indexes the active branch with omission counts for abandoned siblings; preserves thinking, tool results and context summaries. Overrides, in precedence order: `PRIME_AGENT_SESSION_DIR`, legacy `PRIME_AGENT_CODING_AGENT_SESSION_DIR`, then `PRIME_AGENT_CODING_AGENT_DIR` (with `/sessions` appended). Prime retains its own agent identity.
 - **Oh My Pi (`omp`)**: OMP v18's default `~/.omp/agent/sessions`, named profiles under `~/.omp/profiles/<name>/agent/sessions`, XDG stores under `$XDG_DATA_HOME/omp`, and explicit OMP-only archive roots via `CASS_OMP_DATA_ROOT` (pi-family JSONL, including per-session sub-agent transcripts)
 - **GitHub Copilot Chat**: VS Code global storage under `github.copilot-chat` (JSON)
 - **Copilot CLI**: `~/.copilot/session-state`, legacy `~/.copilot/history-session-state`, and `gh copilot` config paths (JSONL/JSON)
@@ -394,6 +395,7 @@ Ingests history from 26 local agents, normalizing them into a unified `Conversat
 - **Goose**: `~/.local/share/goose/sessions/sessions.db` (SQLite, v1.20+), plus the earlier per-session `*.jsonl` layout under `~/.goose/sessions`
 - **Crush**: `~/.crush/crush.db` and per-project `.crush/crush.db` (SQLite)
 - **Hermes**: `~/.hermes/state.db` and project-local `.hermes/state.db` (SQLite)
+- **Devin CLI**: `~/.local/share/devin/cli/sessions.db` (SQLite; override with `CASS_DEVIN_DATA_ROOT`). Indexes visible local sessions along their active parent chain, preserving tool messages and excluding abandoned branches and inline image payloads. Cloud-only sessions are outside this connector's scope.
 - **Kimi Code**: `$KIMI_CODE_HOME/sessions/*/*/agents/*/wire.jsonl` (default `~/.kimi-code`; sub-agents index as `<sessionId>:<agentId>`), plus the legacy `~/.kimi/sessions/*/*/wire.jsonl` layout (Session JSONL)
 - **Muse Code**: `~/.local/share/muse/sessions/<YYYY>/<MM>/<DD>/<session-id>/session.jsonl`, including nested `subagent/*/session.jsonl` transcripts (override with `CASS_MUSE_DATA_ROOT`)
 - **Qwen Code**: `~/.qwen/tmp/*/chats/session-*.json` (Chat JSON)
@@ -473,7 +475,7 @@ cass sources setup
 cass sources setup
 
 # Configure specific hosts only
-cass sources setup --hosts css,csd,yto
+cass sources setup --hosts laptop,workstation,build-server
 
 # Preview without making changes
 cass sources setup --dry-run
@@ -486,6 +488,61 @@ cass sources setup --non-interactive --hosts myserver --skip-install
 ```
 
 **Resumable state:** If setup is interrupted (Ctrl+C, connection lost), state is saved to the cache directory (`~/.cache/cass/setup_state.json` on Linux). Resume with `--resume`.
+
+#### Testing your real fleet
+
+Tailscale discovery is optional: `cass sources discover --tailscale --json` adds
+online tailnet peers to SSH-config discovery, and `cass sources setup --tailscale`
+offers them in setup. It reads local `tailscale status --json` with a five-second
+deadline; a missing CLI, stopped daemon, or login failure produces a warning and
+leaves SSH-config discovery available. Explicit `setup --hosts` skips discovery.
+Connections use ordinary SSH over assigned Tailscale IPv4 addresses, so MagicDNS
+is not required. Matching SSH aliases retain their user/key configuration;
+otherwise SSH uses its normal defaults. IPv6-only peers are currently omitted.
+Tailscale ACLs, SSH authorization and host-key checks still apply; discovery does
+not log in, install Tailscale, or change either SSH or tailnet configuration.
+
+The local fixture and Docker tests do not prove that your machines can sync and
+search each other's sessions. The opt-in live harness uses actual SSH connections
+and `cass sources discover`, `sources add`, `sources sync`, and `search`. It creates isolated synthetic
+Codex sessions on each machine, checks source provenance and filters, repeats a
+sync to detect duplicates, and appends messages. It checks both lexical and default
+hybrid search, requires one JSON response per sync, holds the real indexing lock to
+test busy refusal, and recovers transferred sessions through `sources reingest`.
+A refused SSH connection must leave the other sources searchable.
+
+Keep the inventory and SSH configuration **outside this repository**. For example,
+create a mode-0600 JSON file containing:
+
+```json
+{
+  "ssh_config": "/private/path/to/ssh_config",
+  "hosts": [{"ssh": "workstation"}, {"ssh": "laptop"}]
+}
+```
+
+Then run with an explicit binary:
+
+```bash
+python3 scripts/e2e/live_fleet_search.py \
+  --inventory /private/path/to/fleet.json \
+  --cass-bin /path/to/cass
+```
+
+Python 3 and authenticated SSH access are required on the remote machines.
+The Unix runner needs Python 3.9+, rsync, and a CASS binary supporting the tested
+commands. Each inventory alias must appear in the supplied SSH configuration;
+included configuration files are supported. Host-key verification stays enabled.
+To exercise actual tailnet discovery and transport, add `--tailscale` to the
+harness command and use tailnet IPv4 addresses as the private inventory targets.
+Keep any required SSH users, keys and trusted host-key aliases in the private SSH
+configuration. For a discovery test independent of explicit aliases, use SSH
+`Match originalhost` entries rather than literal `Host` entries for those addresses.
+The harness retains fresh test directories and raw
+receipts privately outside git; it never changes existing session archives or
+deletes test data. Console results use ordinal labels. An unreachable machine
+keeps the overall result failed, even if the other machines pass. Do not attach
+raw receipts or inventories to public issues: they contain machine identities.
 
 #### Remote Installation Methods
 
@@ -1339,6 +1396,13 @@ cass index --full --json --robot-trace-ingest 2>/tmp/cass-ingest-trace.jsonl
 | `--idempotency-key KEY` | Safe retries: same key + params returns cached result (24h TTL) |
 | `--json` | JSON output with stats |
 | `--gc` | Reclaim merge-retired lexical segment files and exit: runs the engine's grace-period garbage sweep (a folded segment file is unlinked only once no published MANIFEST generation has referenced it for 300 s) and reports files/bytes reclaimed. Every incremental `cass index` performs the same sweep at open; `doctor --json` reports the reclaimable bytes under `storage_pressure.full_rebuild_readiness` (GH #453) |
+
+When `health --json` or `status --json` reports `index.status: "hollow"`, the
+live Quill generation serves fewer than half the documents certified by its
+completed rebuild checkpoint. `index.live_documents` reports the served count.
+Run `cass index` to let its pre-scan repair rebuild from the canonical archive;
+`cass index --full` also rescans the session sources. A missing count provides
+no hollow-generation verdict.
 
 ### Robot Documentation System
 
@@ -3187,6 +3251,7 @@ Update check state is stored in the data directory:
 - **Cache debug**: set `CASS_DEBUG_CACHE_METRICS=1` to emit cache hit/miss/shortfall/reload stats via tracing (debug level).
 
 - **Temporary scan exclusions**: `CASS_EXCLUDE_PATHS` accepts comma- or newline-delimited file paths or directory prefixes to skip during source discovery and parsing. While exclusions are active, CASS preserves scan/watch watermarks so excluded active session files are picked up after the exclusion is removed.
+- **Active session retries**: continuous watch mode retains paths skipped because they are still being written, including during startup, and retries them after the normal watch cooldown even without another filesystem event. `CASS_ACTIVE_SESSION_RECENT_WRITE_WINDOW_SECS` controls the recent-write window (default 120 seconds, maximum 3600); writer and advisory-lock checks still apply.
 
 - **Watch testing (dev only)**: `cass index --watch --watch-once path1,path2` triggers a single reindex without filesystem notify (also respects `CASS_TEST_WATCH_PATHS` for backward compatibility); useful for deterministic tests/smoke runs.
 
@@ -3233,6 +3298,7 @@ Update check state is stored in the data directory:
 | `CASS_WARM_DEBOUNCE_MS` | 120 | Warm-up search debounce |
 | `CASS_DEBUG_CACHE_METRICS` | unset | Enable cache hit/miss logging |
 | `CASS_QUILL_QUERY_FUEL_BUDGET` | Quill default (10000000) | Escape hatch for Quill's deterministic per-query work ceiling (GH #441). Zero or unparseable values keep the engine default. When fuel runs out on a hybrid query the lexical leg is dropped, the semantic leg still answers, and `_meta.lexical_degrade_reason` reports `query_fuel_exhausted`; lexical-only queries return an actionable hint. The durable fix for fuel exhaustion is a consolidated index (an incremental `cass index` folds fragmented generations in its maintenance pass; `--full` rebuilds from scratch), and cass now publishes Quill snapshots only on its own commits (no per-second visibility seals), which is what let segment counts grow into the hundreds on append-only archives |
+| `CASS_LEXICAL_MERGE_MAX_OUTPUT_BYTES` | 1073741824 (1 GiB) | Maximum estimated output per lexical merge run, including the covered document-ID range. Oversized singleton segments remain unmerged. This is a merge-planning limit, not a total-process RSS ceiling. Positive byte values accept underscores; zero or invalid values keep the default. |
 | **Semantic Search** | | |
 | `CASS_SEMANTIC_EMBEDDER` | auto | Force embedder: `hash`, `minilm`, or explicit `multilingual-minilm` |
 | `CASS_SEMANTIC_PROGRESS_JSONL` | unset | Absolute path to a JSONL file the semantic backfill appends one event per transition to (`selection_*`, `packet_replay_*`, `embed_batch_*`, `staging_write_*`, `checkpoint_save_*`, `publish_*`, `error`, `cancelled`, `complete`). Each line carries timestamp, phase + sub-phase, batch/row counters, byte counts, elapsed-since-start, and a cheap RSS estimate. Silent when unset. Best-effort writes — failures log at debug and never crash a backfill. See [cass#257](https://github.com/Dicklesworthstone/coding_agent_session_search/issues/257). |
@@ -3275,7 +3341,7 @@ Update check state is stored in the data directory:
 | `frankensqlite` / `fsqlite-types` | crates.io `=0.3.18` (updated 2026-09-07; adds parameterized rowid IN-list seeks for GH#415/cass#382, read-only WAL byte/timestamp preservation, reader-registration error propagation, I/O buffer lifetime fixes, and WAL-mode transition and scalar-query corrections). Retains 0.3.17's WAL-tail indexing, reserved lock-byte/freelist repair, FTS metadata/visibility and prefix-BM25 fixes, plus earlier FTS5 savepoint undo, incremental content-backed INSERT, read-only integrity preflight and Windows close repairs. The whole family resolves from one exact registry version; `build.rs` rejects any fsqlite-family registry patch, duplicate package resolution, wrong version, or non-crates.io lockfile source. The async facade and asupersync requirement are unchanged; `src/franken_sync.rs` preserves cass's synchronous call shape via a current-thread asupersync `block_on` bridge. This version does not resolve upstream GH#411's mixed-engine concurrent-WAL limitation. |
 | `franken-agent-detection` | crates.io `=0.2.3` (2026-09-07; the Antigravity connector probes the IDE store `~/.gemini/antigravity` as well as the `agy` CLI store (cass#454), Claude Code detection honors `CLAUDE_CONFIG_DIR`/`XDG_CONFIG_HOME` (cass#448), Codex token usage is read from real rollouts, Claude tool results survive as `role:"tool"` messages, Cursor/OpenCode mirrors dedupe, the 100 MB scan cap applies everywhere, and Shelley discovery names the canonical database path like scan; the Shelley connector and ChatGPT/OMP injection seams are published). Retains 0.2.2's Cursor/Antigravity/Grok scan-root scoping and Aider, Copilot CLI, Amp, OpenCode, ClawdBot and Muse session-loss fixes. Aligned with fsqlite 0.3.x + asupersync 0.4.x. |
 | `asupersync` | `=0.4.10` (publishes `Cx::is_cancelled`, required by Quill 0.2.3; runtime validation is pending. fsqlite 0.3.x names the 0.4.x types in its public API.) |
-| `frankensearch` | crates.io `=0.4.2` (2026-08-28, cass#410/frankensearch#40). Adds the explicit multilingual MiniLM embedding space and preserves the Windows Quill publication, `cass-compat` differential oracle, pure-Rust `native` embeddings, architecture-safe HNSW, consumer-owned `TwoTierIndexPaths`, non-mutating lexical admission and generation-pinned hydration. The published 0.4.3 / Quill 0.2.3 segment-sweep update (cass#453) awaits validation of Asupersync 0.4.10, whose published archive does contain `Cx::is_cancelled`; the prior claim that every registry version lacked it was incorrect. Registry `0.3.2` is a stale same-version twin without quill/cass-compat/native, so exact pins remain required. Frankentorch resolves as `frankentorch-*`, HNSW as `frankenhnsw 0.3.5`, and Tantivy as `=0.26.1`. RUSTSEC-2026-0253 on Tantivy's lru requires a panicking key destructor under `catch_unwind`; Tantivy's cache keys are trivially droppable. |
+| `frankensearch` | crates.io `=0.4.3` / Quill `0.2.3` (cass#453). Segment collection uses retirement-receipt age so subsequent publication does not restart the grace period; `Cx::is_cancelled` comes from Asupersync `0.4.10`. Preserves the explicit multilingual MiniLM embedding space, Windows Quill publication, `cass-compat` → `lexical-tantivy` differential oracle, pure-Rust `native` embeddings, architecture-safe HNSW, consumer-owned `TwoTierIndexPaths`, non-mutating lexical admission and generation-pinned hydration. Registry `0.3.2` is a stale same-version twin without quill/cass-compat/native, so exact pins remain required. Frankentorch resolves as `frankentorch-*`, HNSW as `frankenhnsw 0.3.5`, and Tantivy as `=0.26.1`. RUSTSEC-2026-0253 on Tantivy's lru requires a panicking key destructor under `catch_unwind`; Tantivy's cache keys are trivially droppable. |
 | `frankentui` (`ftui`, `ftui-runtime`, `ftui-tty`, `ftui-extras`) | crates.io `=0.5.0` (2026-08-21; previously git `5f78cfa0` / 0.3.1 — the 0.5 API compiled with zero call-site changes) |
 | `toon` (`tru`) | crates.io `=0.2.4` (2026-08-24; production sources byte-identical to the previously pinned git rev `d7185c78` — registry 0.2.3 was rejected because its tree differs from the rev in real source despite the matching version field) |
 

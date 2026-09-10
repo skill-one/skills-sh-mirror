@@ -30,13 +30,14 @@ Founders and solo operators can generate code, not content. "How do I do marketi
 
 ### The fix
 
-Five principles and a decision framework, distilled from 15 years of hands-on B2B internet marketing:
+Six principles and a decision framework, distilled from 15 years of hands-on B2B internet marketing:
 
 1. **Don't learn marketing from stale sources** — skip the first Google results and cached LLM doctrine
 2. **Three-month horizon** — no 2-year cycles; be useful within 3 months
 3. **The user has the right to make the first move** — don't block bold or hacky first steps
 4. **Every hypothesis must be testable fast** — any teammate can run the test
 5. **Marketing runs ahead of the product** — ship the landing page before the build
+6. **Marketing never works for free** — marketing is exchange; every action must trade for something
 
 Plus: competitors as the source of truth, three keys to the human, and the client stages (first client by hand and free → 2–10 by copying competitors).
 
@@ -45,6 +46,7 @@ Plus: competitors as the source of truth, three keys to the human, and the clien
 - 🍔 **The McDonald's Burger** — photograph the product better than it is
 - 🧬 **Think like a cancer cell** — when nothing else applies, multiply
 - 🚫 **The stop-list** — why Product Hunt is lying to you
+- 🌑 **The Despair Dividend** — when every reasonable move fails, the strange hypotheses are the good ones
 
 ### Who it's for
 

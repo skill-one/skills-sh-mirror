@@ -296,6 +296,13 @@ them fire.
   not enumerated). Process exhaust (reading the user's prompt, glancing at
   obvious entry points, restating prose) → omit. Surface inline next to the
   KTD or unit it justifies, or as a dedicated section — both shapes work.
+  A constraint adopted from a Compound Pack file is cited inline as
+  `(pack: <id>, <path within the pack>)` after the requirement, KTD, constraint,
+  or risk it shaped. The path is relative to the pack's own directory, so it
+  is stable for path- and git-sourced packs alike. Cite the pack text; do not
+  restate it. That marker is reserved for pack files; `<root>/solutions/`
+  learnings keep the ordinary path citation, so a reader can tell a
+  prescriptive pack rule from a retrospective learning.
 
 ## Agent agency
 
@@ -326,6 +333,8 @@ contradictions hide and the implementing agent loses the thread. A deep plan
 earns length through coverage (more units, more traced requirements, real
 risks), never through wordiness around that coverage.
 
+Write every kept section through the `ce-noslop` skill.
+
 Hold every kept section to these:
 
 - **Lead with the decision or outcome.** Put the conclusion first, then the
@@ -334,22 +343,13 @@ Hold every kept section to these:
   goal beneath its rationale. This does not override section roles — Summary
   stays proposal-only, Problem Frame stays motivation-only and never restates
   the remedy.
-- **Use an ASD-STE100 Simplified Technical English (STE)-inspired style for
-  technical plan content.** Write short, direct sentences. Keep one decision,
-  action, or condition per sentence, and use one consistent term for each
-  concept. Preserve exact identifiers, paths, commands, protocol names, and
-  domain terms. Shorten sentences, not content: preserve every distinct
-  requirement, qualification, and test scenario. A Summary is a handful of
-  sentences, not one sentence with five semicolons and four parentheticals. A
-  KTD's rationale is the load-bearing reason, not every reason.
+- **A Summary is a handful of sentences**, not one sentence with five
+  semicolons and four parentheticals. A KTD's rationale is the load-bearing
+  reason, not every reason.
 - **A requirement or unit is one sentence of intent plus at most one
   qualifier.** When it would specify two outcomes ("either A or B, the
   implementer decides"), state the intent and send the fork to Open Questions —
   don't write both arms in full inside the item.
-- **Cut hedges and intensifiers.** "Critically", "deliberately", "explicitly",
-  "genuinely", "actually", "simply" carry nothing the implementer acts on.
-- **Prefer the verb to the nominalization.** "Demote the grid", not "the
-  demotion of the grid is the deliberate change in this plan".
 
 Precision is not padding: keep file paths, IDs, dates, domain terms,
 conditionals, and exact thresholds verbatim; when a concrete anchor is knowable

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Code Craft"
+  short_description: "For writing, reviewing, or refactoring code"
+  default_prompt: "Use $code-craft while writing or reviewing this code."

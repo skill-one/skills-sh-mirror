@@ -106,6 +106,430 @@ fn index_creates_db_and_index() {
     assert!(index_path.exists(), "index dir created");
 }
 
+/// Requires the GH459 FAD parser revision. A registry-0.2.3 run must fail this
+/// acceptance check; an unpublished dependency overlay is not release proof.
+#[test]
+fn gh459_full_scan_repairs_cursor_workspace_without_reinserting_messages() {
+    use coding_agent_search::model::types::{Agent, AgentKind, Conversation, Message, MessageRole};
+    use coding_agent_search::search::model_manager::load_hash_semantic_context_strict;
+    use frankensqlite::compat::RowExt;
+    use serde_json::{Value, json};
+    use std::time::{Duration, UNIX_EPOCH};
+
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path();
+    let data_dir = home.join("cass-data");
+    fs::create_dir_all(&data_dir).unwrap();
+    let correct = home.join("parent-project/my-app");
+    let wrong = home.join("parent/project/my/app");
+    // Existence cannot resolve this ambiguity: both candidates exist.
+    fs::create_dir_all(&correct).unwrap();
+    fs::create_dir_all(&wrong).unwrap();
+    let encoded_project = correct
+        .to_string_lossy()
+        .trim_start_matches(['/', '\\'])
+        .replace(['/', '\\', ':'], "-");
+    assert_eq!(
+        encoded_project,
+        wrong
+            .to_string_lossy()
+            .trim_start_matches(['/', '\\'])
+            .replace(['/', '\\', ':'], "-")
+    );
+    let project = home.join(".cursor/projects").join(&encoded_project);
+    let transcript_dir = project.join("agent-transcripts/gh459-session");
+    fs::create_dir_all(&transcript_dir).unwrap();
+    let transcript = transcript_dir.join("gh459-session.jsonl");
+    fs::write(&transcript, "{\"role\":\"user\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"gh459needle retained chat\"}]}}\n").unwrap();
+    fs::File::open(&transcript)
+        .unwrap()
+        .set_times(fs::FileTimes::new().set_modified(UNIX_EPOCH + Duration::from_secs(100)))
+        .unwrap();
+    let source_bytes = fs::read(&transcript).unwrap();
+    let source_mtime = fs::metadata(&transcript).unwrap().modified().unwrap();
+    let db_path = data_dir.join("agent_search.db");
+    let storage = SqliteStorage::open(&db_path).unwrap();
+    let agent_id = storage
+        .ensure_agent(&Agent {
+            id: None,
+            slug: "cursor".into(),
+            name: "Cursor".into(),
+            version: None,
+            kind: AgentKind::Cli,
+        })
+        .unwrap();
+    let workspace_id = storage.ensure_workspace(&wrong, None).unwrap();
+    let correct_workspace_id = storage.ensure_workspace(&correct, None).unwrap();
+    let canonical = Conversation {
+        id: None,
+        agent_slug: "cursor".into(),
+        workspace: Some(wrong.clone()),
+        external_id: Some("gh459-session".into()),
+        title: Some("retained title".into()),
+        source_path: transcript.clone(),
+        started_at: Some(100_000),
+        ended_at: Some(100_000),
+        approx_tokens: None,
+        metadata_json: json!({"source":"cursor", "cursor_format":"agent", "retained":{"canonical":true}}),
+        messages: vec![Message {
+            id: None,
+            idx: 0,
+            role: MessageRole::User,
+            author: None,
+            created_at: None,
+            content: "gh459needle retained chat".into(),
+            extra_json: json!({"retained":true}),
+            snippets: vec![],
+        }],
+        source_id: "local".into(),
+        origin_host: None,
+    };
+    let seeded = storage
+        .insert_conversations_batched(&[(agent_id, Some(workspace_id), &canonical)])
+        .unwrap();
+    assert_eq!(seeded.len(), 1);
+    let original = &seeded[0];
+    let messages =
+        serde_json::to_value(storage.fetch_messages(original.conversation_id).unwrap()).unwrap();
+    storage.close().unwrap();
+
+    // Observe stored measurements after the real CLI repair. Comparing every
+    // non-workspace column catches accidental re-extraction or token/cost loss.
+    let analytics_snapshot = |expected_workspace: Option<i64>| {
+        let storage = SqliteStorage::open_readonly(&db_path).unwrap();
+        let measurements =
+            [("message_metrics", 5), ("token_usage", 4)].map(|(table, workspace_column)| {
+                let rows = storage
+                    .raw()
+                    .query(&format!("SELECT * FROM {table}"))
+                    .unwrap();
+                assert_eq!(rows.len(), 1, "the seeded {table} row must survive");
+                let workspace: Option<i64> = rows[0].get_typed(workspace_column).unwrap();
+                assert_eq!(
+                    workspace,
+                    if table == "message_metrics" {
+                        Some(expected_workspace.unwrap_or(0))
+                    } else {
+                        expected_workspace
+                    },
+                    "{table} attribution after CLI indexing"
+                );
+                rows[0]
+                    .values()
+                    .iter()
+                    .enumerate()
+                    .filter(|(column, _)| *column != workspace_column)
+                    .map(|(_, value)| value.clone())
+                    .collect::<Vec<_>>()
+            });
+        let rollups = ["usage_hourly", "usage_daily", "usage_models_daily"].map(|table| {
+            let rows = storage.raw().query(&format!(
+                "SELECT workspace_id, message_count, content_tokens_est_total, api_tokens_total FROM {table}"
+            )).unwrap();
+            let mut total = [0_i64; 3];
+            for row in rows {
+                let amounts = [1, 2, 3].map(|column| row.get_typed::<i64>(column).unwrap());
+                assert!(
+                    amounts.iter().all(|amount| *amount >= 0),
+                    "{table} must not contain negative measurements"
+                );
+                if amounts.iter().any(|amount| *amount > 0) {
+                    assert_eq!(
+                        row.get_typed::<i64>(0).unwrap(),
+                        expected_workspace.unwrap_or(0),
+                        "{table} must attribute activity to the current workspace"
+                    );
+                }
+                for (sum, amount) in total.iter_mut().zip(amounts) {
+                    *sum += amount;
+                }
+            }
+            assert_eq!(total[0], 1, "{table} must preserve the one actual message");
+            total
+        });
+        storage.close().unwrap();
+        (measurements, rollups)
+    };
+    let original_analytics = analytics_snapshot(Some(workspace_id));
+
+    let run_index = |canonical_only: bool, semantic: bool| {
+        let mut cmd = base_cmd(home);
+        cmd.env("CASS_AUTO_REFRESH", "0")
+            .env("CASS_IGNORE_SOURCES_CONFIG", "1")
+            .args(["index", "--full", "--json", "--data-dir"])
+            .arg(&data_dir)
+            .timeout(Duration::from_secs(180));
+        if canonical_only {
+            cmd.arg("--force-rebuild");
+        }
+        if semantic {
+            cmd.args(["--semantic", "--embedder", "hash"]);
+        }
+        let output = cmd.output().unwrap();
+        assert!(
+            output.status.success(),
+            "index failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    let search_payload = |mode: &str, workspace: Option<&std::path::Path>| {
+        let mut cmd = base_cmd(home);
+        cmd.env("CASS_AUTO_REFRESH", "0")
+            .env("CASS_SEMANTIC_EMBEDDER", "hash")
+            .args([
+                "search",
+                "gh459needle",
+                "--agent",
+                "cursor",
+                "--mode",
+                mode,
+                "--no-maintenance",
+                "--json",
+                "--robot-meta",
+                "--data-dir",
+            ])
+            .arg(&data_dir)
+            .timeout(Duration::from_secs(30));
+        if let Some(workspace) = workspace {
+            cmd.arg("--workspace").arg(workspace);
+        }
+        let output = cmd.output().unwrap();
+        assert!(
+            output.status.success(),
+            "search failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice::<Value>(&output.stdout).unwrap()
+    };
+    let search_count = |workspace: Option<&std::path::Path>| {
+        search_payload("lexical", workspace)["hits"]
+            .as_array()
+            .expect("search hits")
+            .len()
+    };
+    let semantic_debts = || {
+        let storage = SqliteStorage::open_readonly(&db_path).unwrap();
+        let rows = storage.raw().query("SELECT value FROM meta WHERE key IN ('semantic_fast_identity_rebuild_v1', 'semantic_quality_identity_rebuild_v1') ORDER BY key").unwrap();
+        let debts: Vec<String> = rows.iter().map(|row| row.get_typed(0).unwrap()).collect();
+        storage.close().unwrap();
+        debts
+    };
+    let assert_hash_ready = || {
+        let setup = load_hash_semantic_context_strict(&data_dir, &db_path);
+        assert!(
+            setup.availability.can_search(),
+            "hash vector admission: {:?}",
+            setup.availability
+        );
+        let context = setup.context.expect("actual hash vector context");
+        assert_eq!(
+            context
+                .artifacts
+                .iter()
+                .map(|artifact| artifact.index().record_count())
+                .sum::<usize>(),
+            1
+        );
+    };
+    run_index(true, true);
+    assert_eq!(analytics_snapshot(Some(workspace_id)), original_analytics);
+    assert_hash_ready();
+    assert_eq!(
+        search_payload("semantic", Some(&wrong))["hits"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        search_count(Some(&wrong)),
+        1,
+        "legacy association must really be published"
+    );
+    assert_eq!(search_count(Some(&correct)), 0);
+    let sidecar = project.join(".workspace-trusted");
+    fs::write(&sidecar, json!({"workspacePath":correct}).to_string()).unwrap();
+    fs::File::open(&sidecar)
+        .unwrap()
+        .set_times(fs::FileTimes::new().set_modified(UNIX_EPOCH + Duration::from_secs(100)))
+        .unwrap();
+    let mut trusted_debts = Vec::new();
+    for replay in 0..2 {
+        run_index(false, false);
+        let storage = SqliteStorage::open_readonly(&db_path).unwrap();
+        let rows = storage.list_conversations(10, 0).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, Some(original.conversation_id));
+        assert_eq!(rows[0].workspace.as_ref(), Some(&correct));
+        let current_workspace: i64 = storage
+            .raw()
+            .query("SELECT workspace_id FROM conversations")
+            .unwrap()[0]
+            .get_typed(0)
+            .unwrap();
+        assert_eq!(current_workspace, correct_workspace_id);
+        assert_eq!(rows[0].metadata_json["retained"]["canonical"], true);
+        assert_eq!(
+            rows[0].metadata_json["cursor_workspace_attribution"],
+            "workspace_trusted"
+        );
+        assert_eq!(
+            serde_json::to_value(storage.fetch_messages(original.conversation_id).unwrap())
+                .unwrap(),
+            messages
+        );
+        storage.close().unwrap();
+        assert_eq!(
+            analytics_snapshot(Some(current_workspace)),
+            original_analytics
+        );
+        assert_eq!(search_count(Some(&correct)), 1);
+        assert_eq!(search_count(Some(&wrong)), 0);
+        assert_eq!(fs::read(&transcript).unwrap(), source_bytes);
+        assert_eq!(
+            fs::metadata(&transcript).unwrap().modified().unwrap(),
+            source_mtime
+        );
+        let debts = semantic_debts();
+        assert_eq!(debts.len(), 2);
+        assert_ne!(debts[0], "complete");
+        assert_eq!(debts[0], debts[1]);
+        if replay == 0 {
+            trusted_debts = debts;
+        } else {
+            assert_eq!(debts, trusted_debts);
+        }
+        let setup = load_hash_semantic_context_strict(&data_dir, &db_path);
+        assert!(setup.context.is_none());
+        assert!(
+            setup.availability.is_index_stale(),
+            "old workspace vectors must not remain admitted: {:?}",
+            setup.availability
+        );
+        let fallback = search_payload("hybrid", Some(&correct));
+        assert_eq!(fallback["hits"].as_array().unwrap().len(), 1);
+        assert_eq!(fallback["_meta"]["search_mode"], "lexical");
+        assert_eq!(fallback["_meta"]["semantic_refinement"], false);
+    }
+    run_index(false, true);
+    assert_hash_ready();
+    assert_eq!(
+        analytics_snapshot(Some(correct_workspace_id)),
+        original_analytics
+    );
+    assert_eq!(
+        semantic_debts(),
+        vec!["complete".to_string(), trusted_debts[1].clone()],
+        "fast publication must retain quality-tier debt"
+    );
+    assert_eq!(
+        search_payload("semantic", Some(&correct))["hits"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        search_payload("semantic", Some(&wrong))["hits"]
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
+    fs::write(&sidecar, "{malformed").unwrap();
+    fs::File::open(&sidecar)
+        .unwrap()
+        .set_times(fs::FileTimes::new().set_modified(UNIX_EPOCH + Duration::from_secs(100)))
+        .unwrap();
+    let mut unresolved_debts = Vec::new();
+    for replay in 0..2 {
+        run_index(false, false);
+        let storage = SqliteStorage::open_readonly(&db_path).unwrap();
+        let rows = storage.list_conversations(10, 0).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, Some(original.conversation_id));
+        assert_eq!(rows[0].workspace, None);
+        assert_eq!(
+            rows[0].metadata_json["cursor_workspace_attribution"],
+            "unresolved"
+        );
+        assert_eq!(rows[0].metadata_json["retained"]["canonical"], true);
+        assert_eq!(
+            serde_json::to_value(storage.fetch_messages(original.conversation_id).unwrap())
+                .unwrap(),
+            messages
+        );
+        storage.close().unwrap();
+        assert_eq!(analytics_snapshot(None), original_analytics);
+        assert_eq!(search_count(Some(&correct)), 0);
+        assert_eq!(search_count(Some(&wrong)), 0);
+        assert_eq!(search_count(None), 1);
+        assert_eq!(fs::read(&transcript).unwrap(), source_bytes);
+        assert_eq!(
+            fs::metadata(&transcript).unwrap().modified().unwrap(),
+            source_mtime
+        );
+        let debts = semantic_debts();
+        assert_eq!(debts.len(), 2);
+        assert_eq!(debts[0], debts[1]);
+        assert_ne!(debts[0], "complete");
+        assert_ne!(debts, trusted_debts);
+        if replay == 0 {
+            unresolved_debts = debts;
+        } else {
+            assert_eq!(debts, unresolved_debts);
+        }
+        let setup = load_hash_semantic_context_strict(&data_dir, &db_path);
+        assert!(setup.context.is_none());
+        assert!(setup.availability.is_index_stale());
+    }
+    run_index(false, true);
+    assert_hash_ready();
+    assert_eq!(
+        semantic_debts(),
+        vec!["complete".to_string(), unresolved_debts[1].clone()]
+    );
+    assert_eq!(
+        search_payload("semantic", Some(&correct))["hits"]
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
+    assert_eq!(
+        search_payload("semantic", Some(&wrong))["hits"]
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
+    assert_eq!(
+        search_payload("semantic", None)["hits"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    let storage = SqliteStorage::open_readonly(&db_path).unwrap();
+    assert_eq!(
+        storage.list_conversations(10, 0).unwrap()[0].id,
+        Some(original.conversation_id)
+    );
+    assert_eq!(
+        serde_json::to_value(storage.fetch_messages(original.conversation_id).unwrap()).unwrap(),
+        messages
+    );
+    storage.close().unwrap();
+    assert_eq!(analytics_snapshot(None), original_analytics);
+    assert_eq!(fs::read(&transcript).unwrap(), source_bytes);
+    assert_eq!(
+        fs::metadata(&transcript).unwrap().modified().unwrap(),
+        source_mtime
+    );
+}
+
 #[test]
 fn full_index_worker_overrides_the_linux_default_stack_for_franken_open()
 -> Result<(), Box<dyn std::error::Error>> {
@@ -2227,6 +2651,17 @@ fn gh413_paged_fts_shadow_repair_stops_at_its_page_budget_without_failing_the_ru
 /// marker.
 #[test]
 fn gh413_fts_shadow_over_its_corpus_bound_is_dropped_and_recreated_once_it_fits() {
+    assert_gh413_fts_shadow_bound(false);
+}
+
+#[test]
+fn gh413_legacy_readonly_resume_drops_oversized_shadow_before_opening_readers() {
+    assert_gh413_fts_shadow_bound(true);
+}
+
+fn assert_gh413_fts_shadow_bound(legacy_checkpoint: bool) {
+    use frankensqlite::compat::RowExt;
+
     let tmp = TempDir::new().unwrap();
     let home = tmp.path();
     let data_dir = home.join("cass_data");
@@ -2255,6 +2690,63 @@ fn gh413_fts_shadow_over_its_corpus_bound_is_dropped_and_recreated_once_it_fits(
         String::from_utf8_lossy(&seed.stderr)
     );
 
+    let db_path = data_dir.join("agent_search.db");
+    let canonical_rows = || {
+        let storage = SqliteStorage::open_readonly(&db_path).unwrap();
+        let rows = ["conversations", "messages"].map(|table| {
+            storage
+                .raw()
+                .query(&format!("SELECT * FROM {table} ORDER BY id"))
+                .unwrap()
+                .into_iter()
+                .map(|row| row.values().to_vec())
+                .collect::<Vec<_>>()
+        });
+        storage.close_without_checkpoint().unwrap();
+        rows
+    };
+    let canonical_before = canonical_rows();
+    assert_eq!(canonical_before[0].len(), 2);
+    assert!(canonical_before[1].len() > 1);
+    {
+        let storage = SqliteStorage::open_readonly(&db_path).unwrap();
+        let shadow_rows = storage
+            .raw()
+            .query("SELECT COUNT(*) FROM fts_messages")
+            .unwrap();
+        assert!(
+            shadow_rows[0].get_typed::<i64>(0).unwrap() > 1,
+            "the bounded run must start with a populated oversized shadow"
+        );
+        storage.close_without_checkpoint().unwrap();
+    }
+
+    let checkpoint_path = coding_agent_search::search::tantivy::expected_index_dir(&data_dir)
+        .join(".lexical-rebuild-state.json");
+    let initial_checkpoint: serde_json::Value =
+        serde_json::from_slice(&fs::read(&checkpoint_path).unwrap()).unwrap();
+    assert_eq!(initial_checkpoint["completed"], true);
+    if legacy_checkpoint {
+        // The original GH #413 archive had a matching-path v2 checkpoint
+        // without execution_mode. A copied checkpoint with the old path takes
+        // the ordinary writable route and cannot exercise this regression.
+        let mut legacy = initial_checkpoint.clone();
+        assert_eq!(legacy["version"], 2);
+        assert_eq!(
+            legacy["db"]["db_path"].as_str().unwrap(),
+            fs::canonicalize(&db_path).unwrap().to_str().unwrap()
+        );
+        legacy["completed"] = false.into();
+        legacy["committed_offset"] = 0.into();
+        legacy["processed_conversations"] = 0.into();
+        legacy["indexed_docs"] = 0.into();
+        legacy["committed_conversation_id"] = serde_json::Value::Null;
+        legacy["committed_meta_fingerprint"] = serde_json::Value::Null;
+        legacy["pending"] = serde_json::Value::Null;
+        legacy.as_object_mut().unwrap().remove("execution_mode");
+        fs::write(&checkpoint_path, serde_json::to_vec(&legacy).unwrap()).unwrap();
+    }
+
     let bounded = base_cmd(home)
         .current_dir(home)
         .args(["index", "--json", "--no-progress-events", "--data-dir"])
@@ -2262,11 +2754,54 @@ fn gh413_fts_shadow_over_its_corpus_bound_is_dropped_and_recreated_once_it_fits(
         .env("CASS_AUTO_REFRESH", "0")
         .env("CASS_FTS_SHADOW_MAX_MESSAGES", "1")
         .output()
-        .expect("run an incremental index under a 1-byte shadow bound");
+        .expect("run an incremental index under a one-message shadow bound");
     assert!(
         bounded.status.success(),
         "dropping an oversized shadow must not fail the run: {}",
         String::from_utf8_lossy(&bounded.stderr)
+    );
+
+    let bounded_json: serde_json::Value =
+        serde_json::from_slice(&bounded.stdout).expect("bounded index output is JSON");
+    let strategy_reason = &bounded_json["indexing_stats"]["lexical_strategy_reason"];
+    if legacy_checkpoint {
+        assert_eq!(
+            strategy_reason, "readonly_fast_resume_incomplete_nonresumable_lexical_rebuild",
+            "the legacy fixture must exercise the readonly restart: {bounded_json}"
+        );
+    } else {
+        assert_ne!(
+            strategy_reason, "readonly_fast_resume_incomplete_nonresumable_lexical_rebuild",
+            "the original test must retain ordinary-path coverage: {bounded_json}"
+        );
+    }
+    // Inspect completion before search, which can repair a stale generation.
+    let checkpoint: serde_json::Value =
+        serde_json::from_slice(&fs::read(&checkpoint_path).unwrap()).unwrap();
+    assert_eq!(checkpoint["completed"], true, "{checkpoint}");
+    assert_eq!(
+        checkpoint["execution_mode"], "shared_writer",
+        "{checkpoint}"
+    );
+    for field in ["db_path", "total_conversations", "storage_fingerprint"] {
+        assert_eq!(
+            checkpoint["db"][field], initial_checkpoint["db"][field],
+            "the completed checkpoint must preserve canonical {field}: {checkpoint}"
+        );
+    }
+    assert_eq!(
+        checkpoint["db"]["total_messages"].as_u64().unwrap(),
+        canonical_before[1].len() as u64,
+        "the completed checkpoint must retain the exact canonical message count"
+    );
+    assert_eq!(
+        checkpoint["indexed_docs"],
+        initial_checkpoint["indexed_docs"]
+    );
+    assert_eq!(
+        canonical_rows(),
+        canonical_before,
+        "shadow preflight and lexical rebuild must preserve every canonical row and field"
     );
 
     let status = base_cmd(home)
@@ -2591,6 +3126,7 @@ fn gh439_parked_post_publish_fts_repair_still_aborts_with_the_index_stalled_enve
 /// proves the resume contract, not its scale.
 #[test]
 fn gh440_plain_index_resumes_a_force_rebuild_killed_between_commit_and_checkpoint() {
+    use std::io::Write;
     use std::process::{Command as StdCommand, Stdio};
 
     let tmp = TempDir::new().unwrap();
@@ -2600,12 +3136,26 @@ fn gh440_plain_index_resumes_a_force_rebuild_killed_between_commit_and_checkpoin
     let codex_root = home.join(".codex");
     let sessions = 6_usize;
     for n in 0..sessions {
-        make_codex_session(
+        let source = make_codex_session(
             &codex_root,
             "2026/09/02",
             &format!("rollout-resume-{n}.jsonl"),
             &format!("resumeprobe session {n}"),
         );
+        // Canonical history also contains acknowledgements omitted from the
+        // lexical index. Resume must not substitute indexed-doc counts for
+        // these canonical rows (the September 4 GH #440 follow-up).
+        let acknowledgement = serde_json::json!({
+            "timestamp": "2026-09-02T12:00:00Z",
+            "type": "response_item",
+            "payload": {"type":"message", "role":"assistant",
+                "content":[{"type":"output_text", "text":"OK"}]}
+        });
+        writeln!(
+            OpenOptions::new().append(true).open(source).unwrap(),
+            "{acknowledgement}"
+        )
+        .unwrap();
     }
 
     // A live generation first, so the force-rebuild builds into staging.
@@ -2627,6 +3177,15 @@ fn gh440_plain_index_resumes_a_force_rebuild_killed_between_commit_and_checkpoin
         "initial index failed: stdout={} stderr={}",
         String::from_utf8_lossy(&initial.stdout),
         String::from_utf8_lossy(&initial.stderr)
+    );
+    let checkpoint_path = coding_agent_search::search::tantivy::expected_index_dir(&data_dir)
+        .join(".lexical-rebuild-state.json");
+    let initial_checkpoint: serde_json::Value =
+        serde_json::from_slice(&fs::read(&checkpoint_path).unwrap()).unwrap();
+    assert!(
+        initial_checkpoint["db"]["total_messages"].as_u64().unwrap()
+            > initial_checkpoint["indexed_docs"].as_u64().unwrap(),
+        "fixture must contain canonical messages excluded from lexical search: {initial_checkpoint}"
     );
 
     // Force-rebuild with one commit per conversation and park after the
@@ -2714,6 +3273,42 @@ fn gh440_plain_index_resumes_a_force_rebuild_killed_between_commit_and_checkpoin
         "plain index after an interrupted force-rebuild must exit 0 (GH #440); \
          stdout={stdout}\nstderr={stderr}"
     );
+
+    // Search can heal a stale checkpoint. Check resume and the unchanged
+    // incremental pass first, so that repair cannot hide incomplete work.
+    for round in 0..2 {
+        let checkpoint: serde_json::Value =
+            serde_json::from_slice(&fs::read(&checkpoint_path).unwrap()).unwrap();
+        assert_eq!(checkpoint["completed"], true, "{checkpoint}");
+        assert_eq!(
+            checkpoint["db"], initial_checkpoint["db"],
+            "resume must replace its pending fingerprint and retain canonical counts: {checkpoint}"
+        );
+        let status = base_cmd(home)
+            .current_dir(home)
+            .args([
+                "status",
+                "--json",
+                "--stale-threshold",
+                "3600",
+                "--data-dir",
+            ])
+            .arg(&data_dir)
+            .output()
+            .expect("status after resume");
+        let status: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
+        assert_eq!(status["healthy"], true, "{status}");
+        assert_eq!(status["index"]["status"], "ready", "{status}");
+        if round == 0 {
+            base_cmd(home)
+                .current_dir(home)
+                .args(["index", "--json", "--no-progress-events", "--data-dir"])
+                .arg(&data_dir)
+                .env("CASS_AUTO_REFRESH", "0")
+                .assert()
+                .success();
+        }
+    }
 
     let search = base_cmd(home)
         .current_dir(home)
@@ -3157,9 +3752,7 @@ fn gh453_assert_reclamation_after_grace(publish_during_grace: bool) {
     } else {
         None
     };
-    std::thread::sleep(
-        std::time::Duration::from_secs(305).saturating_sub(grace_start.elapsed()),
-    );
+    std::thread::sleep(std::time::Duration::from_secs(305).saturating_sub(grace_start.elapsed()));
 
     let gc = base_cmd(home)
         .current_dir(home)
@@ -3214,11 +3807,13 @@ fn gh453_assert_reclamation_after_grace(publish_during_grace: bool) {
     );
     if publish_during_grace {
         assert!(
-            hits["hits"].as_array().is_some_and(|hits| hits.iter().any(|hit| {
-                hit["source_path"]
-                    .as_str()
-                    .is_some_and(|path| path.ends_with("rollout-453-during-grace.jsonl"))
-            })),
+            hits["hits"]
+                .as_array()
+                .is_some_and(|hits| hits.iter().any(|hit| {
+                    hit["source_path"]
+                        .as_str()
+                        .is_some_and(|path| path.ends_with("rollout-453-during-grace.jsonl"))
+                })),
             "the intervening publication must remain searchable after GC: {hits}"
         );
     }

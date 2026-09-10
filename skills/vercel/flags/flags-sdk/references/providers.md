@@ -27,9 +27,9 @@ pnpm i flags @flags-sdk/vercel
 
 ### Setup
 
-> **Prerequisite**: The `vercel flags` commands require the Vercel CLI to be installed and authenticated. If the Vercel CLI is not installed, run `pnpm i -g vercel`. For authentication or linking issues, follow the `vercel-cli` skill if it's already available. If it isn't, suggest the user install it with `npx skills add vercel/vercel@vercel-cli` (don't auto-install it) and rely on `vercel <command> --help` in the meantime.
+> **Prerequisite**: The Vercel CLI must be installed and authenticated. If it is not installed, run `pnpm i -g vercel`. For authentication or linking issues, follow the `vercel-cli` skill if it's already available. If it isn't, suggest the user install it with `npx skills add vercel/vercel@vercel-cli` (don't auto-install it) and rely on `vercel <command> --help` in the meantime.
 
-Before running any `vercel flags` command, verify the project is linked to Vercel. Check for a `.vercel` directory in the project root. If it doesn't exist, run `vercel link` first.
+The following steps integrate a flag into an app and need a linked project for `vercel env pull`; verify the link as described in [Project targeting](../SKILL.md#project-targeting). To only inspect or change remote flags, follow [CLI-only flag management](../SKILL.md#cli-only-flag-management) instead.
 
 1. Create a flag in the Vercel dashboard or via CLI: `vercel flags create <flag-key> --kind boolean --description "<description>"`
 2. Pull env vars: run `vercel env pull` to write the Vercel OIDC token and the Development `FLAGS_SECRET` to `.env.local` ([Pull environment variables](../SKILL.md#pull-environment-variables)). See [Authentication](#how-the-cli-connects-to-the-sdk) for SDK keys.
@@ -114,9 +114,28 @@ export const exampleFlag = flag({
 
 Outside Vercel, pass the SDK key: `createClient(process.env.FLAGS)`. Unlike `vercelAdapter()`, `createClient()` does not read `FLAGS` on its own.
 
+### Core client in other frameworks (for example, Express)
+
+For frameworks without a Flags SDK entrypoint, use `@vercel/flags-core` directly. Create a shared client at module scope, but call `evaluate()` or `bulkEvaluate()` inside a request handler. Both initialize the client automatically; do not add a module-scope `client.initialize()` call or cache its promise for handlers to await.
+
+```ts
+// src/flags.ts
+import { createClient } from '@vercel/flags-core';
+
+const client = createClient();
+
+// Call from a request handler, not during module loading.
+export async function getVersion(): Promise<number> {
+  const result = await client.evaluate<number>('version', 0);
+  return result.value;
+}
+```
+
+With Vercel OIDC, the token can come from request context and may not exist during module loading. Even embedded definitions require OIDC to select the entry by the token's `project_id`. Local `.env.local` credentials can hide this timing problem. Explicit initialization is optional and must wait until authentication is available; awaiting an already-started initialization promise later does not move it into request context. See the [core client README](https://github.com/vercel/flags/tree/main/packages/vercel-flags-core#initialization-and-request-scoped-oidc).
+
 ### `vercel flags` CLI
 
-Manage Vercel Flags from the terminal. Install, link, and `vercel env pull` requirements are in [Setup](#setup) above.
+Manage Vercel Flags from the terminal with an authenticated CLI and a targeted project ([Project targeting](../SKILL.md#project-targeting)). SDK installation and `vercel env pull` are app-development steps, not CLI prerequisites (see [Setup](#setup)).
 
 For the current subcommand list and options, run `vercel flags --help` or `vercel flags <cmd> --help`. For CLI-wide contracts (linking, `--non-interactive`, `--yes`, parsing stdout) follow the `vercel-cli` skill. This section covers only what `--help` cannot tell you.
 

@@ -1,9 +1,18 @@
-# Local dev notes — never pushed
-CLAUDE.md
+# Cache
+cache/
 
 # Python
 __pycache__/
 *.pyc
 
-# Cache (downloaded at runtime)
-cache/
+# Claude Code
+CLAUDE.md
+
+# IDE & OS
+.DS_Store
+.idea/
+.vscode/
+
+# Environment
+.env
+.venv
