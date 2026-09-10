@@ -68,7 +68,7 @@ curl -sO https://raw.githubusercontent.com/skill-one/skills-sh-mirror/dist/skill
 
 GitHub 对这些 URL 有约 5 分钟的缓存,因此 `dist` 路径始终跟随最新快照。
 
-要固定到某天,把 URL 中的 `dist` 换成 `dist-<日期>` 标签(最近 5 个快照有标签)。标签名刻意不含 `/`:raw URL 里的 `dist/<日期>` 会与 `dist` 分支产生歧义而无法解析。
+要固定到某天,把 URL 中的 `dist` 换成 `dist-<日期>` 标签(最近 30 个快照,约一个月,有标签)。标签名刻意不含 `/`:raw URL 里的 `dist/<日期>` 会与 `dist` 分支产生歧义而无法解析。
 
 ```bash
 # 解析出最新的可用标签,替换到上面任意 URL 里

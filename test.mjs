@@ -20,8 +20,9 @@
 // trending top 100 and the curated owners written as id-only lists (every
 // per-skill field the index drops is dropped here too), a missing
 // GITHUB_TOKEN aborting the run, verifier rejection of tampered datasets, and
-// the dist publisher (one commit per day via same-day amend, prune re-rooting
-// that preserves the original commit dates, and the dist-<date> tag window).
+// the dist publisher (one commit per day via same-day amend, the --window-driven
+// prune re-rooting that preserves the original commit dates and the dist-<date>
+// tag window, and a bad --window aborting before the snapshot is touched).
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -809,13 +810,29 @@ test("publish: one commit per day, date-preserving prune, tag window", async () 
         await writeFile(path.join(data, f), `{"day":"${day}"}\n`);
       }
     };
-    const publish = (day) => spawnSync(process.execPath, [PUBLISH, "--date", day], { cwd: work, encoding: "utf8" });
+    // The retained-history length is a parameter, so the mechanism is exercised
+    // with a 3-commit window rather than the production default (30 days).
+    const WINDOW = 3;
+    const publish = (day, win = WINDOW) =>
+      spawnSync(process.execPath, [PUBLISH, "--date", day, "--window", String(win)], {
+        cwd: work,
+        encoding: "utf8",
+      });
     const distLog = (fmt) => sh(`git fetch -q origin dist && git log --format=${fmt} origin/dist`, work);
     const distTip = (fmt) => sh(`git fetch -q origin dist && git log -1 --format=${fmt} origin/dist`, work);
     const remoteTag = (tag) => sh(`git ls-remote origin refs/tags/${tag}`, work);
 
     await scrape("d1", "first");
-    let r = publish("d1");
+    // A bad --window aborts up front: `count > NaN` is false, so an unguarded
+    // value would silently publish without ever pruning. It must fail before
+    // the snapshot is moved out of data/.
+    let r = publish("d1", "abc");
+    assert.equal(r.status, 1, r.stderr);
+    assert.match(r.stderr, /--window must be a positive integer/);
+    await access(path.join(work, "data", "skills.jsonl"));
+    assert.equal(sh("git rev-parse --verify --quiet origin/dist || true", work), "");
+
+    r = publish("d1");
     assert.equal(r.status, 0, r.stderr);
     // First publish: an orphan dist branch with a single day-one commit, tagged.
     assert.equal(distLog("%s"), "skills.sh data — d1");
@@ -835,36 +852,38 @@ test("publish: one commit per day, date-preserving prune, tag window", async () 
     assert.equal(sh("git show origin/dist:skills.jsonl", work), `{"day":"d1","body":"second"}`);
     assert.match(remoteTag("dist-d1"), new RegExp(`^${distLog("%H")}`));
 
-    // Five more days fill the window; the sixth overflows it and re-roots.
-    // The author date of each day's commit is captured right after its publish
-    // (git dates have 1s resolution, so runs inside the same second can tie).
+    // The remaining days fill the window; publishing one more overflows it and
+    // re-roots, pushing d1 out. The author date of each day's commit is
+    // captured right after its publish (git dates have 1s resolution, so runs
+    // inside the same second can tie).
+    const days = ["d2", "d3", "d4"];
     const authorDates = {};
-    for (const day of ["d2", "d3", "d4", "d5", "d6"]) {
+    for (const day of days) {
       await scrape(day, day);
       r = publish(day);
       assert.equal(r.status, 0, r.stderr);
       authorDates[day] = distTip("%aD");
     }
-    assert.equal(distLog("%H").split("\n").length, 5);
+    assert.equal(distLog("%H").split("\n").length, WINDOW);
     // The pruned (re-rooted) commits keep their real per-run timeline — the
     // rewrite does not stamp them all with the rewrite moment — and their
     // subjects name their days (newest first in the log).
     const shas = distLog("%H%x7C%s%x7C%aD").split("\n");
     assert.deepEqual(
       shas.map((l) => l.split("|")[1]),
-      ["skills.sh data — d6", "skills.sh data — d5", "skills.sh data — d4", "skills.sh data — d3", "skills.sh data — d2"],
+      [...days].reverse().map((d) => `skills.sh data — ${d}`),
     );
     for (const line of shas) {
       const [, subject, authorDate] = line.split("|");
       assert.equal(authorDate, authorDates[subject.slice(-2)]);
     }
 
-    // Tags mirror the window: d1 fell out and its tag was deleted, d2–d6
-    // remain, each pointing at its own day's commit.
+    // Tags mirror the window: d1 fell out and its tag was deleted, every day
+    // still in the window keeps a tag pointing at its own commit.
     assert.match(remoteTag("dist-d1"), /^$/);
-    for (const day of ["d2", "d3", "d4", "d5", "d6"]) {
-      const sha = shas[4 - ["d2", "d3", "d4", "d5", "d6"].indexOf(day)].split("|")[0];
-      assert.match(remoteTag(`dist-${day}`), new RegExp(`^${sha}`), day);
+    for (const line of shas) {
+      const [sha, subject] = line.split("|");
+      assert.match(remoteTag(`dist-${subject.slice(-2)}`), new RegExp(`^${sha}`), subject);
     }
   } finally {
     await rm(root, { recursive: true, force: true });

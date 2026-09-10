@@ -1,16 +1,17 @@
 // Publishes the scraped snapshot in data/ to the dist branch. The workflow
 // runs this after scrape + verify; it is also runnable by hand:
 //
-//   node publish.mjs [--date YYYY-MM-DD]   (date defaults to today, UTC)
+//   node publish.mjs [--date YYYY-MM-DD] [--window N]   (date defaults to today, UTC)
 //
 // Publishing means: one commit per day — a same-day rerun amends the day's
 // commit instead of stacking a second one, so the commit window can never be
-// filled by a single day — history pruned to the newest 5 commits, and each
-// retained snapshot tagged dist-<date> (from the commit subject, not the
-// commit dates: pruning re-roots commits, which resets them). Tags mirror the
-// 5-commit window and tags for days that fell out of it are deleted, so the
-// pruned objects stay unreachable and the repo does not grow. The tag name is
-// deliberately slash-free: dist/<date> in a raw.githubusercontent.com URL
+// filled by a single day — history pruned to the newest N commits (N = --window,
+// default 30; one commit per day, so the window is about a month of
+// snapshots), and each retained snapshot tagged dist-<date> (from the commit
+// subject, not the commit dates: pruning re-roots commits, which resets them).
+// Tags mirror the window and tags for days that fell out of it are deleted, so
+// the pruned objects stay unreachable and the repo stays bounded. The tag name
+// is deliberately slash-free: dist/<date> in a raw.githubusercontent.com URL
 // resolves as the dist branch plus a path (the shorter ref wins) and 404s,
 // while dist-<date> is unambiguous and works in single-file raw URLs.
 
@@ -18,7 +19,7 @@ import { renameSync, rmSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { argValue } from "./lib.mjs";
 
-const WINDOW = 5;
+const DEFAULT_WINDOW = 30;
 const SNAPSHOT = ["skills", "skills.jsonl", "trending.json", "curated.json", "stats.json"];
 
 const git = (args, opts = {}) => {
@@ -28,7 +29,15 @@ const git = (args, opts = {}) => {
 };
 const hasRef = (...args) => spawnSync("git", args, { encoding: "utf8" }).status === 0;
 
-const date = argValue(process.argv.slice(2), "--date") ?? new Date().toISOString().slice(0, 10);
+const argv = process.argv.slice(2);
+const date = argValue(argv, "--date") ?? new Date().toISOString().slice(0, 10);
+// Validated up front: a non-numeric window would make the prune test
+// `count > keep` always false and silently stop pruning, so reject it before
+// the snapshot is moved into place.
+const keep = Number(argValue(argv, "--window") ?? DEFAULT_WINDOW);
+if (!Number.isInteger(keep) || keep < 1) {
+  throw new Error(`--window must be a positive integer, got "${argValue(argv, "--window")}"`);
+}
 const subject = `skills.sh data — ${date}`;
 const dayOf = (sha) => git(["log", "-1", "--format=%s", sha]).replace(/^.*—\s*/, "");
 
@@ -51,12 +60,12 @@ if (hasRef("rev-parse", "-q", "--verify", "HEAD") && dayOf("HEAD") === date) {
   git(["commit", "-q", "-m", subject]);
 }
 
-if (Number(git(["rev-list", "--count", "HEAD"])) > WINDOW) {
-  // Re-root the newest 5 commits (no diff replay). commit-tree would stamp
+if (Number(git(["rev-list", "--count", "HEAD"])) > keep) {
+  // Re-root the newest `keep` commits (no diff replay). commit-tree would stamp
   // every rebuilt commit with the rewrite moment — one same-second publish —
   // so carry the original author and committer dates over instead.
   let parent = "";
-  for (let i = WINDOW - 1; i >= 0; i--) {
+  for (let i = keep - 1; i >= 0; i--) {
     const args = [
       "commit-tree",
       git(["rev-parse", `HEAD~${i}^{tree}`]),
@@ -83,7 +92,7 @@ try {
   git(["fetch", "-q", "origin", "+refs/tags/dist-*:refs/tags/dist-*"]);
 } catch {}
 const kept = [];
-const n = Math.min(Number(git(["rev-list", "--count", "HEAD"])), WINDOW);
+const n = Math.min(Number(git(["rev-list", "--count", "HEAD"])), keep);
 for (let i = n - 1; i >= 0; i--) {
   const sha = git(["rev-parse", `HEAD~${i}`]);
   const tag = `dist-${dayOf(sha)}`;

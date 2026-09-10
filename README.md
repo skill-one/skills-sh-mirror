@@ -68,7 +68,7 @@ curl -sO https://raw.githubusercontent.com/skill-one/skills-sh-mirror/dist/skill
 
 GitHub serves these with a ~5-minute cache, so `dist` URLs always track the latest snapshot.
 
-To pin to a day, swap `dist` for a `dist-<date>` tag (the newest 5 snapshots are tagged). The tag name is deliberately slash-free: `dist/<date>` in a raw URL is ambiguous with the `dist` branch and fails to resolve.
+To pin to a day, swap `dist` for a `dist-<date>` tag (the newest 30 snapshots — about a month — are tagged). The tag name is deliberately slash-free: `dist/<date>` in a raw URL is ambiguous with the `dist` branch and fails to resolve.
 
 ```bash
 # resolve the newest available tag, then swap it into any URL above
