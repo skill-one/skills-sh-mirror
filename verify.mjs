@@ -7,7 +7,8 @@
  *   - required fields well-formed (id, installs, stars, url, fetchedAt, hash,
  *     audits, description)
  *   - no two rows share a sanitized directory name
- *   - description matches the SKILL.md frontmatter on disk
+ *   - every content directory's SKILL.md carries a description that matches
+ *     the index row
  *   - rows and content directories match exactly, in both directions: every
  *     row has a non-empty directory (its files mirror the upstream skill
  *     verbatim, including files like _meta.json that skills may ship) and
@@ -95,8 +96,9 @@ if (text === null) {
     }
     const entries = await readdir(dir, { recursive: true, withFileTypes: true });
     if (!entries.some((e) => e.isFile())) problem(`${label}: content directory is empty`);
-    if (row.description !== skillDescription(await readFile(path.join(dir, "SKILL.md"), "utf8").catch(() => null)))
-      problem(`${label}: description does not match SKILL.md`);
+    const description = skillDescription(await readFile(path.join(dir, "SKILL.md"), "utf8").catch(() => null));
+    if (description === null) problem(`${label}: SKILL.md missing or has no description`);
+    if (row.description !== description) problem(`${label}: description does not match SKILL.md`);
     dirCount++;
   }
   // Every directory under skills/ must be a row's content directory (whose

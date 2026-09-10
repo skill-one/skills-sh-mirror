@@ -8,7 +8,7 @@
 2. `GET /api/v1/skills?view=trending&per_page=200` —— 单次请求拉取 trending 榜单;200 的深度足以在跳过 well-known 条目(与排行榜一致)后仍覆盖前 100 个 GitHub 来源的截断点。以 id 数组(按上游榜单顺序)写入 `trending.json`,id 与排行榜一样做规范化处理。
 3. `GET /api/v1/skills/curated` —— 官方精选的技能,按 owner 分组。写入 `curated.json`:owner 聚合数据与顶层计数原样保留(不做来源过滤——精选名单由上游决定),每个技能条目精简为规范化 id。
 4. `GET https://api.github.com/repos/{owner}/{repo}` —— 获取每个去重后仓库的 `stargazers_count`(约 1200 次请求:大量技能共享同一仓库)。仓库 404(已删除)时该仓库的 `stars` 置为 `null`;其他失败则保留上一轮的值。
-5. `GET /api/v1/skills/{source}/{skill}` —— 获取每个技能的文件(`files` 数组携带完整文本)。文件先写临时目录再原子重命名到位,因此「目录存在」就意味着「内容完整」。
+5. `GET /api/v1/skills/{source}/{skill}` —— 获取每个技能的文件(`files` 数组携带完整文本)。SKILL.md 中没有 `description` 的技能会被跳过;其余文件先写临时目录再原子重命名到位,因此「目录存在」就意味着「内容完整」。
 6. 元数据合并成唯一的 `skills.jsonl` —— 每个已保存内容的技能一行,按 installs 降序,运行结束时原子写入。
 7. 写入 `stats.json` —— 本次运行的统计,随数据集一起发布。只保留无法从其他字段直接推导的信息:
 
@@ -24,7 +24,7 @@
 | `indexedRows` | `skills.jsonl` 的行数 |
 | `changed` | 本次内容版本发生变化的行数(首次抓取或上游 hash 变化)——恰好就是 `fetchedAt` 被重新打点的那些行 |
 | `added`、`removed` | 进入 / 离开索引的技能数:上游新上榜的,以及已下架的(行与内容目录一并删除;仅全量运行——`--limit` 运行会把未评估的行原样保留) |
-| `dropped`、`failed`、`carriedOver` | 各结果计数;`failedIds` 列出失败技能的 id |
+| `dropped`、`failed`、`carriedOver` | 各结果计数(`dropped` = 重复 / 上游无快照 / SKILL.md 无 description);`failedIds` 列出失败技能的 id |
 
 ## 前置条件
 
@@ -51,7 +51,7 @@ node scraper.mjs --audits                 # 同时抓取安全审计结果(请�
 - skills.sh 限速 600 次/分钟,GitHub 认证 REST API 限速 5000 次/小时;脚本分别以 590 次/分钟和 80 次/分钟自限(共享并发 10),按 `Retry-After` 重试 `429` 和 `5xx` 及瞬时网络错误;`4xx` 一律不重试——它们是确定性的。
 - 每次运行都全量重新下载并重写全部内容(约 8400 次 skills.sh 请求)。上次的 `skills.jsonl` 只用来固定 `fetchedAt`:上游 hash 未变化的技能保留「首次抓取该内容版本那一次运行」的 `fetchedAt`。中断重跑可续抓,上游内容变更会被自动跟进。
 - star 数每次运行按去重后的仓库全量重抓(约 1200 次 GitHub 请求)。仓库请求失败的技能沿用上一轮的值(或 `null`);carried over 的行(抓取失败、`--limit`)同样沿用旧的 `stars`。仓库 404 时 `stars` 置为 `null`。
-- 索引只包含 GitHub 来源且内容已落盘的技能:well-known(域名)来源在排行榜阶段即被跳过(计入 `nonGithub`);重复技能、上游无快照的技能不会出现在索引中(记录日志、计入 `Done:` 汇总、下次自动重试)。抓取失败的技能会沿用上一次的索引行和内容目录,镜像继续提供最后一份可用内容,且「行 ⟺ 目录」不变式不被破坏;从未成功抓取过的技能则不进索引。使用 `--limit` 时,limit 之外的技能同样沿用上一轮的索引行(limit 只约束抓取什么,不约束索引;下次全量运行会重新评估它们)。以上均计入 `carried over`。进程仅在系统性故障(鉴权、排行榜、索引写入)时以非零码退出。
+- 索引只包含 GitHub 来源且内容已落盘的技能:well-known(域名)来源在排行榜阶段即被跳过(计入 `nonGithub`);重复技能、上游无快照的技能、以及 SKILL.md 中没有 `description` 的技能不会出现在索引中(记录日志、计入 `Done:` 汇总、下次自动重试)。抓取失败的技能会沿用上一次的索引行和内容目录,镜像继续提供最后一份可用内容,且「行 ⟺ 目录」不变式不被破坏;从未成功抓取过的技能则不进索引。使用 `--limit` 时,limit 之外的技能同样沿用上一轮的索引行(limit 只约束抓取什么,不约束索引;下次全量运行会重新评估它们)。以上均计入 `carried over`。进程仅在系统性故障(鉴权、排行榜、索引写入)时以非零码退出。
 - 使用 `--audits` 时,只对内容 hash 变化的技能重新抓取审计结果;hash 未变的技能直接沿用上一次的结果,不发请求。
 - slug 规范化:上游的 slug 本身可能含 `/`(如 `claude-office-skills/skills/facebook/meta-ads`)。skills.sh 以 `${source}/${slug}`(slug 中的 `/` 去掉,如 `…/facebookmeta-ads`)作为这类技能的键——这是其详情 API 对多段 slug 唯一能寻址的形式。因此爬虫在去重之前,把每个 GitHub 来源条目的 id 规范化为 `${source}/${去斜杠的 slug}`(`lib.mjs` 中的 `canonicalId`);两个原始 id 理论上可能去斜杠后相同,此时保留先出现的那个。slug 本身不含 `/` 的 id(绝大多数)原样通过。
 

@@ -25,8 +25,9 @@
  *                                           counts, failed ids
  *
  * The index lists exactly the skills with content on disk: one row if and
- * only if the skill's directory exists. Duplicate skills and skills without
- * an upstream snapshot are left out (and retried on the next run). A skill
+ * only if the skill's directory exists. Duplicate skills, skills without
+ * an upstream snapshot, and skills whose SKILL.md carries no description
+ * are left out (and retried on the next run). A skill
  * whose fetch fails keeps its previous snapshot — index row and content
  * directory — until a later run fetches it again; skills never fetched
  * successfully stay out of the index. A skill that disappears from the
@@ -264,6 +265,9 @@ async function fetchSkill(skill, prev) {
     return null; // no upstream snapshot; retried next run
   }
   const skillMd = detail.files.find((f) => f.path === "SKILL.md");
+  if (!skillDescription(skillMd?.contents)) {
+    return null; // SKILL.md missing or carries no description; retried next run
+  }
 
   const dirExists = await exists(dir);
   // Write to a temp dir and swap it in via rename(2), so "directory exists"

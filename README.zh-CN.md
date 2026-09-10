@@ -34,7 +34,7 @@ English: [README.md](README.md) · 开发指南(运行 / 校验 / 扩展):[DEVEL
 | --------------------- | ---------------------------------------------------------------------- |
 | `id`、`installs`、`url` | 来自 skills.sh 排行榜(id 已编码 source 和 slug:`{owner}/{repo}/{slug}`)         |
 | `stars`               | 所在 GitHub 仓库的 star 数(id 的前两段即仓库);仓库已删除或未知时为 `null`                     |
-| `description`         | 取自技能 `SKILL.md` 的 frontmatter;没有时为 `null`                              |
+| `description`         | 取自技能 `SKILL.md` 的 frontmatter;SKILL.md 中没有 `description` 的技能不会被镜像                              |
 | `hash`                | 技能文件内容的 SHA-256;未知时为 `null`                                            |
 | `fetchedAt`           | 当前内容版本首次抓取的时间                                                          |
 | `audits`              | 使用 `--audits` 时:合作方审计结果(`provider`、`status`、`riskLevel`…);`[]` = 尚无人审计 |
