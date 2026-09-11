@@ -16,32 +16,74 @@ Repository: <https://github.com/Dicklesworthstone/coding_agent_session_search>
 ---
 
 Scope window: this update covers the changes after the 2026-08-31 v0.7.1
-binary release, through the 0.8.0 release candidate. Earlier version entries
-retain their existing scope. Git commits, release metadata, and Beads supply
+binary release, through the 2026-09-10 v0.8.0 binary release. Earlier version
+entries retain their existing scope. Git commits, release metadata, and Beads supply
 the evidence; [CHANGELOG_RESEARCH.md](CHANGELOG_RESEARCH.md) records coverage.
 
 ## Release Timeline
 
 | Version | Date | Publication state |
 |---------|------|-------------------|
-| 0.8.0 | Pending | Release gate green and artifacts building; publication blocked on the Linux glibc floor (see below) |
+| [v0.8.0](https://github.com/Dicklesworthstone/coding_agent_session_search/releases/tag/v0.8.0) | 2026-09-10 | Published GitHub Release: Linux x86_64/arm64, macOS arm64, Windows x86_64 |
 | [v0.7.1](https://github.com/Dicklesworthstone/coding_agent_session_search/releases/tag/v0.7.1) | 2026-08-31 | Published GitHub Release and binary baseline for the changes below |
 
 ## [Unreleased]
 
-## [v0.8.0] -- Unreleased
+### Fixed
 
-> **Publication blocked (2026-09-10).** The release gate is green and the
-> Linux artifacts build, but a `cass` built on the current Linux release host
-> (glibc 2.43) requires `GLIBC_2.43` -- `acosf`, `asinf`, `coshf`, `log10f`
-> and `sinhf` pick up glibc 2.43's new single-precision libm symbol version.
-> v0.7.1 topped out at `GLIBC_2.39` only because it was built on an older
-> host. `install.sh` admits any host at `MIN_GLIBC=2.38`, so such a binary
-> would install cleanly on Ubuntu 24.04 LTS (glibc 2.39), 25.04 (2.41) and
-> 25.10 (2.42) and then fail at load. Publishing waits on pinning the ABI
-> floor at build time (`cargo zigbuild --target x86_64-unknown-linux-gnu.2.28`;
-> zig is present on the release host) rather than inheriting the host's glibc.
-> macOS and Windows artifacts are unaffected.
+- Explicit Prime watch requests keep the selected file scope and classify
+  `.prime/agent/sessions` correctly (#388).
+- Current-schema archive opens avoid the engine's whole-database hydration
+  path for already migrated archives, retaining required migration and schema
+  repair checks (#443, #450).
+- Semantic backfill rebuilds the known legacy hash-vector format. On Unix,
+  unchanged completed backfills can skip canonical replay and publication;
+  the cache checks archive, WAL, vector and producer identity, and changes
+  still trigger reconciliation (#458).
+- `sources reingest --source` restricts ingestion to the selected remote
+  mirrors and rejects unknown names even when mixed with valid names. Reingest
+  preserves local scan watermarks, so later ordinary indexing still discovers
+  local history. Mirror previews no longer open the database before the index
+  lock, and mirror lookup uses the same configured path keys as sync, including
+  a bare `~` (bead `av59c`).
+- The private fleet test harness resolves its artifact directory before
+  checking repository containment. A `TMPDIR` symlink into the checkout can no
+  longer place the private inventory there.
+
+## [v0.8.0] -- 2026-09-10
+
+### Known open at release
+
+Two tests are red on this tree and are shipped knowingly; both are reporting
+defects, not indexing or search defects.
+
+- `swarm_proof_debt_cli_prioritizes_and_suppresses_debt`. The swarm evidence
+  redactor's `absolute_path_with_spaces` rule excludes quotes and newlines from
+  its character class but not spaces, so once it matches a private path it
+  consumes the rest of the line. On a proof whose recorded shape is
+  `rch exec -- env CARGO_TARGET_DIR=/data/tmp/cass-proof cargo clippy
+  --all-targets -- -D warnings` the output is
+  `rch exec -- env CARGO_TARGET_DIR=/data[REDACTED_PATH]` -- the path is hidden
+  and so is the command. The proof-debt classifier keys on `cargo clippy`
+  without `cargo test`/`cargo check`, so it can no longer see the shape it is
+  meant to flag and the `incomplete-proof-command-set` debt goes unreported.
+  This is over-redaction with information loss rather than a privacy hole. The
+  fix is a redaction-engine change, not a pattern tweak: a space may only
+  continue a path when the following token still looks like a path, and Rust's
+  `regex` has no lookahead to express that, so it has to move out of the
+  pattern. Left for a change that can be reviewed on its own. The operations
+  dashboard hit the same rule and is fixed below, because there the command had
+  already cleared a strict allow-list.
+- `timed_out_search_returns_before_slow_operation_and_names_shed_sections`. The
+  scoped search-timeout retry advice is mid-flight work whose own tracker entry
+  is still open; the surrounding behavior -- the retry preserving database,
+  filters, time bounds and pagination -- is in this release.
+
+Two further tests are order-dependent rather than broken --
+`search_cursor_manifest_marks_rebuilding_generation_best_effort` (a concurrent
+index run makes a parallel search exit `index-busy`) and
+`devin_cli_indexes_searches_and_reopens_without_duplicates`. Both pass when run
+alone; neither indicates a product defect.
 
 Indexing, archive diagnostics, answer packs, maintenance commands, and dependency
 updates from the reality-check bridge work. Existing archive corruption and
@@ -203,6 +245,34 @@ mean that every acceptance row, platform, or reporter archive has been verified.
   40-segment generation is folded by a plain `cass index`).
 
 ### Fixed
+
+- The operations dashboard's "next proof" command is runnable again. Every
+  dynamic field on that surface went through the swarm path redactor, so the
+  one field whose entire purpose is to be copied and executed came out as
+  `CARGO_TARGET_DIR=[REDACTED_PATH]` on any host with a matching path root --
+  and looked correct on a developer machine that had none. The command is
+  rendered verbatim now. It is not a redaction hole: it is only rendered at all
+  after clearing an allow-list that rejects every shell metacharacter and then
+  admits exactly two shapes, a pinned read-only `cass` subcommand carrying
+  `--json`/`--robot` with no mutating flag, or `rch exec -- env
+  CARGO_TARGET_DIR=/data/tmp/cass-<suffix> cargo test|check|clippy|bench|fmt`
+  -- a path prefix the validator itself hard-codes. Neighbouring free-text
+  fields keep the redactor, and HTML escaping is unchanged.
+- Fleet discovery keeps `Match` options out of preceding SSH host metadata,
+  handles quoted aliases and comments, and retains first-value precedence.
+  `--skip-existing` compares connection targets instead of source labels; the
+  displayed add-source command uses valid positional and option syntax.
+- Setup probes share a bounded budget for optional health, statistics and
+  directory measurements, so large archives do not consume the whole SSH
+  deadline. Missing measurements remain unknown, and an incomplete index
+  inspection does not trigger remote reindexing. On hosts without `timeout`
+  or `gtimeout`, setup retains detected paths and skips these measurements.
+- Tailscale status output is bounded during pipe collection, with child cleanup
+  on collection errors. Null or missing peer address lists are treated as empty,
+  so a peer without addresses does not disable discovery. The live fleet harness
+  refuses optimized Python runs
+  that would disable its checks, protects private initialization errors, and
+  compares global and source-filtered content and provenance.
 
 - A pre-scan authoritative lexical repair no longer strands its own run's
   checkpoint. The repair rebuilds the lexical index from the canonical database
@@ -455,6 +525,19 @@ mean that every acceptance row, platform, or reporter archive has been verified.
   duplicating it.
 
 ### Changed
+- **Linux release binaries are cross-built with `cargo zigbuild` at a pinned
+  `GLIBC_2.28` ABI floor** instead of natively on the release host. A native
+  build inherits the host's glibc, and every build host now runs 2.42/2.43:
+  `acosf`, `asinf`, `coshf`, `log10f` and `sinhf` picked up glibc 2.43's new
+  single-precision libm symbol version, so the binary demanded `GLIBC_2.43`.
+  `install.sh` admitted any host at the old `MIN_GLIBC=2.38`, which meant
+  Ubuntu 24.04 LTS (2.39), 25.04 (2.41) and 25.10 (2.42) would have installed
+  it and then failed at load. `MIN_GLIBC` now reads `2.28` to match the
+  measured artifacts, which also restores prebuilt support for Debian 12
+  (2.36), Ubuntu 22.04 LTS (2.35), RHEL/Rocky 9 (2.34) and Amazon Linux 2023
+  (2.34) -- all of which the old floor pushed to a source build. Verified with
+  `objdump -p` and `readelf -V` on both shipped Linux binaries. macOS and
+  Windows artifacts are unaffected.
 - The lockfile adopts `chacha20` 0.10.2 and `libssh2-sys` 0.3.3; crypto
   vectors, round-trip properties, and the real Docker SFTP fallback passed
   with these patch updates.

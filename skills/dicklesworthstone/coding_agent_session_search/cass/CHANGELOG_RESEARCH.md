@@ -1,5 +1,121 @@
 # CASS 0.8.0 changelog research
 
+Original issue implementation follow-up (2026-09-11 UTC, unreleased): Prime
+explicit-file routing, migration-aware schema-only storage admission, known
+legacy hash-space rebuilding, and completed-backfill no-op caching are under
+combined remote validation. The cache is a maintenance skip hint, never search
+serving authority; Unix descriptor identity and DB/WAL/vector change stamps
+bind it to the completed artifact. Changed archives still require canonical
+reconciliation, and concurrent indexing is still excluded. New tests include
+same-tail edits, symlink WAL routing, old read transactions, replaced archive
+paths, legacy wrong-vector replacement, and real Prime watcher notifications.
+No native large-archive performance or remaining issue closure is claimed.
+The fleet-only follow-up gate below timed out after1800s during Clippy and
+executed no Rust tests; the combined candidate uses the supported10800s RCH
+transport limit without changing behavioral assertions or scanner policy.
+
+Reingest follow-up (2026-09-11 UTC, original `av59c`, unreleased): reviewed the
+source after `b65e6803` and the retained two-mirror reproducer below. The source
+filter previously narrowed only the report. The new scan entry point selects
+remote roots, suppresses local discovery and historical salvage, forces mirror
+recovery past unchanged-file fingerprints, and preserves global/per-connector
+local watermarks in both streaming and batch ingestion. Mixed valid/unknown
+filters fail before archive creation; preview discovery no longer opens the
+database before the index lock. Both configured and database-fallback mirror
+discovery now hash the exact configured path, matching sync for a bare `~`.
+Real CLI regressions cover selective/full/replay/all-mirror ingestion, missing
+mirrors, watermark preservation and subsequent local indexing; execution is
+pending. A separate synthetic harness reproduction proved the TMPDIR symlink
+privacy bypass: one inventory was written inside an isolated fake checkout
+before the fix; after resolving the artifact root, the same case exits 2 with
+no inventory inside, while normal external initialization still succeeds.
+The first remote validation snapshot omitted `.gitattributes`, so all-target
+Clippy failed at its existing `include_str!`; that attempt is retained and
+cannot certify the gate. Final validation and the unchanged all-ten-host
+authentication/strict-UBS acceptance remain pending. GitHub metadata was checked:
+v0.8.0 is published at 2026-09-10 16:11:54 UTC; these fixes are unreleased.
+
+Bounded setup probe follow-up (2026-09-10, original `av59c`): commit `7459cdeb`
+limits optional health/stats/du/find measurements to a shared two-second budget.
+Directory presence remains useful when measurements are unavailable; estimates
+remain null rather than becoming false zeros. `InstalledUnknown` retains the
+installed version, remains selectable for sync, and does not request indexing
+solely because the optional check failed. A real ten-machine baseline at the
+same 10-second deadline found eight reachable; both Mac probes timed out.
+The remote gate passed formatting, all-target Clippy and 146 tests (76 library,
+two setup CLI, 68 unchanged goldens; zero failed or ignored). UBS completed with
+three critical and 320 warning findings, so `STAGE=ubs EXIT=1` remains red.
+The three critical findings are pre-existing: two panics in the test-fixture
+loader and an integer session-count comparison misidentified as a secret
+comparison. The warning inventory is not waived or claimed fully resolved.
+All 1040 CASS and 77 FAD inputs were unchanged after the gate, and the three
+canonical files match its manifest. Gate log SHA256:
+`665898d6e40e200dd8fb5cc09b2ec9d69c95150961466e35b75b453698661b08`.
+The matched live comparison improved reachability from eight to nine of the
+same ten machines at the same 10-second deadline. The previously failing newer
+Mac completed in 2548 ms and exposed 27 session roots. Every previously reachable
+host remained reachable and retained all previously detected paths. The older
+Mac still timed out; the CLI's exit 0 for partial setup is not an all-ten pass.
+Executable SHA256: `8a7b8db232cddd048733cba950ba4f72fe1d04f387b7a3eeb943d4267cae3197`.
+Private ordinal summary SHA256: `7ac5fa4b436ec022ea51203f9b1c214e6572925321c4c98b3f893623dd2ce861`.
+This is setup-probe validation; the full sync/search lifecycle was tested in the
+preceding fleet run below, not repeated for this executable.
+Separately, an isolated two-mirror CLI reproducer confirms that
+`sources reingest --source alpha` also ingests beta while reporting only alpha;
+the original bead retains that unresolved scope defect.
+The gate's first
+payload failed before compilation because a concurrent commit made the exported
+HEAD diff empty; the replacement patch uses verified baseline hashes. No result
+is credited to that failed attempt. GitHub metadata reports v0.8.0 published at
+16:11:54 UTC targeting `96510ff5`, which contains the runtime change; this later
+verification is not evidence that its published binaries passed this gate.
+
+Fresh-eye fleet review (2026-09-10, `av59c`): the previous executable reproduced
+three discovery defects with isolated generic configuration: `Match` overwrote
+the preceding host's address, a reused source label falsely marked a different
+target configured, and an existing target under a different label was not skipped.
+The patch fixes these, quoted/commented aliases, first-value precedence, the
+invalid printed add command, and zero-transfer `will_reindex` metadata. It also
+bounds child output during collection and keeps timeout/error cleanup, rather
+than checking size only after allocating the entire Tailscale response.
+
+The final schema pass additionally found that JSON `null` for an empty Tailscale
+address slice rejected the entire provider response. The amended parser treats
+null/missing addresses as empty and skips that peer; the existing mixed-peer test
+now covers this case. The final amendment passed formatting, all-target Clippy,
+and all 91 selected tests, with no failures or ignored tests. The rebuilt binary
+repeated the complete live workflow successfully on nine authenticated machines;
+the tenth still requires authentication, so the overall harness exits 1.
+The final gate ended at 02:45 UTC with `STAGE=ubs EXIT=1` after a 300-second
+`MODULE_TIMEOUT`. All 1040 CASS and 77 FAD source inputs were unchanged after
+execution; the four reviewed Rust files match the build manifest and the live
+binary matches the executable receipt. This does not clear the release gate.
+Final executable SHA256: `7241298dc93353fe3aef6456c092bef5ac87c36831e43a84b9c6f990551268d4`.
+Final private ordinal summary SHA256: `0d3f4478760e1a4d8825196c952772e48ba483391bc9a441df1eed02234b5cdd`.
+Final gate log SHA256: `fb3b916cc07a1e12ad36b73102b509a7b7a409782e7232f3e74ba974a4193b43`.
+The following comparison receipts describe the preceding review build, retained
+separately from this final amendment.
+
+The harness now rejects Python `-O` (observed exit 2), avoids private-path
+tracebacks for invalid input (observed exit 2), and compares content and host
+provenance across global, source-scoped and default-hybrid results. Formatting,
+all-target Clippy and 91 tests passed (nine library, six sources CLI, two setup,
+six index JSON, 68 unchanged goldens). Three same-invocation before/after CLI
+comparisons confirm the discovery defects fail on the previous binary and pass
+on this one. Three additional malformed/private-input cases exit 2 without
+tracebacks or path leakage.
+
+The strengthened live harness passed all workflow checks on nine authenticated
+machines: initial/replay/busy counts 18, mirror recovery 27, appended/offline
+counts 36. Content and host provenance agree across all query scopes. A zero-file
+replay now reports `will_reindex=false` (previous binary reported true). The tenth
+host still requires authentication, so the overall live result is failed. That
+gate ended with a 300-second UBS timeout and unchanged source inputs; this is
+not release clearance.
+Reviewed executable SHA256: `2a861819bb08f8caf51496a67a31b5fdb9a688736028c16e4e192496b806cd0a`.
+Reviewed harness SHA256: `9aec231f6d19fd24f07df46471c7f5b65b6a57c5ebd32e8eeca406c9e4526dc4`.
+Private ordinal summary SHA256: `7f27406adf5966f6b7ca0fa3c0786445ce82c4222ca488d5fa5a322ee7264c97`.
+
 Optional Tailscale discovery (2026-09-09, original bead `av59c`): owner-requested
 `--tailscale` is wired through both discovery and setup. Local status is bounded
 to five seconds; online peer IPv4 addresses merge with configured SSH aliases,

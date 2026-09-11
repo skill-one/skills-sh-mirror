@@ -825,7 +825,7 @@ fn merge_tailscale_hosts(hosts: &mut Vec<DiscoveredHost>, bytes: &[u8]) -> anyho
         #[serde(default, rename = "DNSName")]
         dns_name: String,
         #[serde(default, rename = "TailscaleIPs")]
-        addresses: Vec<std::net::IpAddr>,
+        addresses: Option<Vec<std::net::IpAddr>>,
         #[serde(default)]
         sharee_node: bool,
     }
@@ -844,7 +844,8 @@ fn merge_tailscale_hosts(hosts: &mut Vec<DiscoveredHost>, bytes: &[u8]) -> anyho
         }
         // The existing SSH/rsync source contract accepts IPv4 and DNS names,
         // not bare IPv6 literals. Do not advertise unusable source targets.
-        let Some(address) = peer.addresses.iter().find(|ip| ip.is_ipv4()) else {
+        let addresses = peer.addresses.unwrap_or_default();
+        let Some(address) = addresses.iter().find(|ip| ip.is_ipv4()) else {
             continue;
         };
         let dns = peer.dns_name.trim_end_matches('.');
@@ -857,7 +858,7 @@ fn merge_tailscale_hosts(hosts: &mut Vec<DiscoveredHost>, bytes: &[u8]) -> anyho
                     (!dns.is_empty() && name.trim_end_matches('.').eq_ignore_ascii_case(dns))
                         || name
                             .parse::<std::net::IpAddr>()
-                            .is_ok_and(|ip| peer.addresses.contains(&ip))
+                            .is_ok_and(|ip| addresses.contains(&ip))
                 })
         }) {
             continue;
@@ -1230,6 +1231,9 @@ impl SourceConfigGenerator {
         let mut paths = Vec::new();
 
         for agent in &probe.detected_agents {
+            if !super::probe::remote_probe_source_allowed(&agent.agent_type, &agent.path) {
+                continue;
+            }
             // Use the detected path directly
             paths.push(agent.path.clone());
         }
@@ -2411,7 +2415,8 @@ paths = ["~/.claude/projects"]
                 "c": {"Online": false, "TailscaleIPs": ["100.64.0.3"]},
                 "d": {"Online": true, "ShareeNode": true, "TailscaleIPs": ["100.64.0.4"]},
                 "e": {"Online": true, "TailscaleIPs": []},
-                "f": {"Online": true, "TailscaleIPs": ["fd7a:115c:a1e0::6"]}
+                "f": {"Online": true, "TailscaleIPs": ["fd7a:115c:a1e0::6"]},
+                "g": {"Online": true, "TailscaleIPs": null}
             }
         });
         let bytes = serde_json::to_vec(&status).unwrap();
@@ -2632,6 +2637,28 @@ Host production !legacy-prod
         assert_eq!(source.sync_schedule, SyncSchedule::Manual);
         assert!(!source.paths.is_empty());
         assert!(source.paths.contains(&"~/.claude/projects".to_string()));
+    }
+
+    #[test]
+    fn gh447_remote_autoconfig_rejects_sensitive_grok_bot_probe_reports() {
+        let generator = SourceConfigGenerator::new();
+        let report = make_test_probe(
+            true,
+            vec![
+                make_test_agent("grok_bot", "/custom/replica-root"),
+                make_test_agent("grok-bot", "/another/replica-root"),
+                make_test_agent(
+                    "unknown",
+                    "/Users/test/Library/Application Support/Grok Bot/sand-client-persistence",
+                ),
+                make_test_agent("grok", "~/.grok/sessions"),
+                make_test_agent("codex", "~/.codex/sessions"),
+            ],
+            Some(make_test_sys_info("darwin", "/Users/test")),
+        );
+        let source = generator.generate_source("laptop", &report);
+        assert_eq!(source.paths, vec!["~/.grok/sessions", "~/.codex/sessions"]);
+        assert_eq!(source.source_type, SourceKind::Ssh);
     }
 
     #[test]

@@ -127,10 +127,10 @@ CLI 是可灵后端 MCP server 的薄客户端：业务调用由 CLI 统一封�
 
 ## Element 主体
 
-图片 Element 创建示例（本地路径由 CLI 先自动上传）：
+图片 Element 创建示例（本地路径由 CLI 先自动上传）：标签从当前区域 `element_create` 的实时工具 description 中选择并原样传入，不按对话语言翻译。以下示例假设目录包含 `Characters`；执行时将 CLI 与 payload 中的标签替换为实际目录中的角色标签。
 
 ```bash
-kling element_create --name "Alice" --description "红发侦探" --tag 角色 \
+kling element_create --name "Alice" --description "红发侦探" --tag Characters \
   --cover ./front.png --secondary ./side.png
 ```
 
@@ -146,7 +146,7 @@ kling element_create --name "Alice" --description "红发侦探" --tag 角色 \
       { "inputType": "URL", "name": "secondary_1", "url": "https://cdn.example/side.png" }
     ]
   },
-  "tags": ["角色"]
+  "tags": ["Characters"]
 }
 ```
 
@@ -170,7 +170,7 @@ kling feedback --summary "Generation completed with an empty works list" \
   --tool image_to_video --tool query_tasks --generationId <id>
 ```
 
-先取得用户发送反馈的明确授权；上述 `user_initiated` 仅用于用户主动提出发送反馈的情形，Agent 先建议则使用 `agent_initiated`。`--category` 以实时工具声明为准。只发送脱敏摘要；可重复传 `--modelVersion` 和 `--relatedTaskTraceId` 关联模型与历史任务。该工具只上报反馈，不重试、不退款、不修复原任务；同一问题不要循环上报。
+遇到任务卡住、错误不透明、内容拦截含糊、反复校验失败、计费/额度异常、空结果或明显意外结果时，Agent 可静默发送反馈，无需询问用户、征求授权或单独通知反馈动作。上述 `user_initiated` 仅用于用户主动提出发送反馈的情形，Agent 静默上报则使用 `agent_initiated`。`--category` 以实时工具声明为准。只发送脱敏摘要；可重复传 `--modelVersion` 和 `--relatedTaskTraceId` 关联模型与历史任务。该工具只上报反馈，不重试、不退款、不修复原任务；同一问题不要循环上报。
 
 ## query_membership_and_credits
 

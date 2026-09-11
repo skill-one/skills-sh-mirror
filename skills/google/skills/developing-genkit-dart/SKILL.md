@@ -31,8 +31,8 @@ artifacts, and multi-agent delegation). Server APIs come from
 `package:genkit/client.dart`. The `remoteAgent` client works from any Dart app,
 including **Flutter**, and the backend is fully interchangeable — it can talk to
 a Genkit agent implemented in Dart, JS/TypeScript, or Go over the same HTTP
-protocol. A few Dart specifics: interrupts are modeled as tools that call
-`ctx.interrupt(...)` (there is no `defineInterrupt`), sub-agent delegation uses
+protocol. A few Dart specifics: interrupts are modeled as tools that return
+`.interrupt(...)` (there is no `defineInterrupt`), sub-agent delegation uses
 the `agents()` middleware from `package:genkit_middleware`, and there is no
 `artifacts()` middleware yet (define artifact tools directly).
 
@@ -40,7 +40,7 @@ For more details see:
 
 -   [Agents](references/agents.md): defining/serving an agent and client-managed state (start here).
 -   [Sessions & persistence](references/agents-sessions.md): session stores (`InMemorySessionStore`/`FileSessionStore`/`FirestoreSessionStore`).
--   [Human-in-the-loop / interrupts](references/agents-human-in-the-loop.md): pausing for approval/input via `ctx.interrupt` and resuming.
+-   [Human-in-the-loop / interrupts](references/agents-human-in-the-loop.md): pausing for approval/input via `.interrupt(...)` and resuming.
 -   [Branching](references/agents-branching.md): forking a conversation from a snapshot.
 -   [Background agents](references/agents-background.md): detaching long-running turns and polling.
 -   [Working with state](references/agents-state.md): typed custom session state, auto-synced to the client.
@@ -48,6 +48,19 @@ For more details see:
 -   [Multi-agent orchestration](references/agents-multi-agent.md): delegating to sub-agents with the `agents()` middleware.
 -   [Advanced custom agents](references/agents-custom.md): `defineCustomAgent` for full turn control.
 -   [Deploying agents](references/agents-deployment.md): serving agents over HTTP with `genkit_shelf` (multiple agents, CORS).
+
+## Generative UI (A2UI)
+
+Genkit Dart has an **A2UI** (Agent-to-UI) plugin (`genkit_a2ui`)
+that lets an agent stream interactive UI **surfaces** (cards, lists, forms,
+buttons), not just prose. The whole server-side integration is the `a2ui()` model
+middleware in an agent's (or `ai.generate`'s) `use` list; the Flutter client
+renders surfaces with the [`genui`](https://pub.dev/packages/genui) package plus
+the helpers in `package:genkit_a2ui/client.dart`. Dart specific: you must
+register `A2uiPlugin()` in `Genkit(plugins: [...])` (unlike JS, middleware is
+resolved by name from the registry).
+
+-   [A2UI](references/a2ui.md): server middleware, options, Flutter/genui client rendering, user actions/forms, custom catalogs, and the security/trust boundary.
 
 ## Genkit CLI (recommended)
 
@@ -110,6 +123,7 @@ When asked to use any given plugin, always verify usage by referring to its corr
 | `genkit_chrome` | [references/genkit_chrome.md](references/genkit_chrome.md) | Load for Running Gemini Nano locally inside the Chrome browser using the Prompt API. |
 | `genkit_shelf` | [references/genkit_shelf.md](references/genkit_shelf.md) | Load for Integrating Genkit Flow actions over HTTP using Dart Shelf. |
 | `genkit_firebase_ai` | [references/genkit_firebase_ai.md](references/genkit_firebase_ai.md) | Load for Firebase AI plugin interface (Gemini API via Vertex AI). |
+| `genkit_a2ui` | [references/a2ui.md](references/a2ui.md) | Load for A2UI (Agent-to-UI): streaming generative UI surfaces via the `a2ui()` middleware, rendered on the client with `genui`. |
 
 ## External Dependencies
 Whenever you define schemas mapping inside of Tools, Flows, and Prompts, you must use the [schemantic](https://pub.dev/packages/schemantic) library. 
