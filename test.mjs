@@ -21,8 +21,9 @@
 // per-skill field the index drops is dropped here too), a missing
 // GITHUB_TOKEN aborting the run, verifier rejection of tampered datasets, and
 // the dist publisher (one commit per day via same-day amend, the --window-driven
-// prune re-rooting that preserves the original commit dates and the dist-<date>
-// tag window, and a bad --window aborting before the snapshot is touched).
+// prune re-rooting that preserves the original commit dates, the dist-<date>
+// tag window, the one-line `latest` pointer every snapshot carries naming its
+// own tag, and a bad --window aborting before the snapshot is touched).
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -820,6 +821,7 @@ test("publish: one commit per day, date-preserving prune, tag window", async () 
       });
     const distLog = (fmt) => sh(`git fetch -q origin dist && git log --format=${fmt} origin/dist`, work);
     const distTip = (fmt) => sh(`git fetch -q origin dist && git log -1 --format=${fmt} origin/dist`, work);
+    const distShow = (file) => sh(`git fetch -q origin dist && git show origin/dist:${file}`, work);
     const remoteTag = (tag) => sh(`git ls-remote origin refs/tags/${tag}`, work);
 
     await scrape("d1", "first");
@@ -839,6 +841,11 @@ test("publish: one commit per day, date-preserving prune, tag window", async () 
     const d1Sha = distLog("%H");
     assert.match(remoteTag("dist-d1"), new RegExp(`^${d1Sha}`));
 
+    // The snapshot carries the pointer a consumer resolves the newest tag from:
+    // one line holding this snapshot's own tag.
+    const pointerOf = () => distShow("latest");
+    assert.equal(pointerOf(), "dist-d1");
+
     // Same-day rerun amends the day's commit instead of stacking a second one,
     // re-points the tag at the amended sha, and keeps the original author date.
     const authorDate = distTip("%aD");
@@ -851,6 +858,7 @@ test("publish: one commit per day, date-preserving prune, tag window", async () 
     assert.equal(distLog("%aD"), authorDate);
     assert.equal(sh("git show origin/dist:skills.jsonl", work), `{"day":"d1","body":"second"}`);
     assert.match(remoteTag("dist-d1"), new RegExp(`^${distLog("%H")}`));
+    assert.equal(pointerOf(), "dist-d1"); // the amended commit's pointer still names the day's tag
 
     // The remaining days fill the window; publishing one more overflows it and
     // re-roots, pushing d1 out. The author date of each day's commit is
@@ -879,11 +887,15 @@ test("publish: one commit per day, date-preserving prune, tag window", async () 
     }
 
     // Tags mirror the window: d1 fell out and its tag was deleted, every day
-    // still in the window keeps a tag pointing at its own commit.
+    // still in the window keeps a tag pointing at its own commit — and every
+    // retained snapshot's pointer still names exactly that tag, so the
+    // prune/re-tag round trip never leaves a snapshot describing another one.
     assert.match(remoteTag("dist-d1"), /^$/);
     for (const line of shas) {
       const [sha, subject] = line.split("|");
-      assert.match(remoteTag(`dist-${subject.slice(-2)}`), new RegExp(`^${sha}`), subject);
+      const day = subject.slice(-2);
+      assert.match(remoteTag(`dist-${day}`), new RegExp(`^${sha}`), subject);
+      assert.equal(sh(`git show ${sha}:latest`, work), `dist-${day}`, subject);
     }
   } finally {
     await rm(root, { recursive: true, force: true });

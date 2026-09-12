@@ -3,24 +3,32 @@
 //
 //   node publish.mjs [--date YYYY-MM-DD] [--window N]   (date defaults to today, UTC)
 //
-// Publishing means: one commit per day — a same-day rerun amends the day's
-// commit instead of stacking a second one, so the commit window can never be
-// filled by a single day — history pruned to the newest N commits (N = --window,
-// default 30; one commit per day, so the window is about a month of
-// snapshots), and each retained snapshot tagged dist-<date> (from the commit
-// subject, not the commit dates: pruning re-roots commits, which resets them).
-// Tags mirror the window and tags for days that fell out of it are deleted, so
-// the pruned objects stay unreachable and the repo stays bounded. The tag name
-// is deliberately slash-free: dist/<date> in a raw.githubusercontent.com URL
-// resolves as the dist branch plus a path (the shorter ref wins) and 404s,
-// while dist-<date> is unambiguous and works in single-file raw URLs.
+// Publishing means: the scraped snapshot plus a generated pointer file at the
+// branch root, one commit per day — a same-day rerun amends the day's commit
+// instead of stacking a second one, so the commit window can never be filled by
+// a single day — history pruned to the newest N commits (N = --window, default
+// 30; one commit per day, so the window is about a month of snapshots), and each
+// retained snapshot tagged dist-<date> (from the commit subject, not the commit
+// dates: pruning re-roots commits, which resets them). Tags mirror the window
+// and tags for days that fell out of it are deleted, so the pruned objects stay
+// unreachable and the repo stays bounded. The tag name is deliberately
+// slash-free: dist/<date> in a raw.githubusercontent.com URL resolves as the
+// dist branch plus a path (the shorter ref wins) and 404s, while dist-<date> is
+// unambiguous and works in single-file raw URLs.
+//
+// latest is generated here, not scraped: a snapshot's own name only exists at
+// publish time. It holds that tag on one line — the whole pointer file — so a
+// consumer resolves the newest snapshot with a single plain-text fetch, no git
+// and no GitHub API; it also keeps every day's commit non-empty even when the
+// dataset itself is unchanged.
 
-import { renameSync, rmSync } from "node:fs";
+import { renameSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { argValue } from "./lib.mjs";
 
 const DEFAULT_WINDOW = 30;
 const SNAPSHOT = ["skills", "skills.jsonl", "trending.json", "curated.json", "stats.json"];
+const POINTER = "latest";
 
 const git = (args, opts = {}) => {
   const r = spawnSync("git", args, { encoding: "utf8", ...opts });
@@ -52,7 +60,11 @@ if (hasRef("fetch", "-q", "origin", "dist")) {
 for (const f of SNAPSHOT) rmSync(f, { recursive: true, force: true });
 for (const f of SNAPSHOT) renameSync(`data-fresh/${f}`, f);
 rmSync("data-fresh", { recursive: true, force: true });
-git(["add", "-f", ...SNAPSHOT]);
+
+// Names the tag this commit will get — both derive from `date`, so they cannot
+// drift (checked against the committed tree at the end).
+writeFileSync(POINTER, `dist-${date}\n`);
+git(["add", "-f", ...SNAPSHOT, POINTER]);
 
 if (hasRef("rev-parse", "-q", "--verify", "HEAD") && dayOf("HEAD") === date) {
   git(["commit", "-q", "--amend", "-m", subject]);
@@ -110,4 +122,19 @@ for (const tag of kept) {
   // "+" force: a day re-published onto an amended commit re-points its tag,
   // and a non-fast-forward tag update needs it.
   git(["push", "-q", "--force", "origin", `+refs/tags/${tag}:refs/tags/${tag}`]);
+}
+
+// Self-check on the published state: the pointer is written before the commit
+// and the tag created after it, so re-read it from the committed tree and prove
+// what a consumer would resolve is what was actually tagged.
+const expectedTag = `dist-${date}`;
+const pointer = git(["show", `HEAD:${POINTER}`]);
+if (pointer !== expectedTag) {
+  throw new Error(`${POINTER} holds "${pointer}", expected "${expectedTag}"`);
+}
+if (!hasRef("rev-parse", "-q", "--verify", `refs/tags/${expectedTag}`)) {
+  throw new Error(`${POINTER} names tag ${expectedTag}, which this run did not create`);
+}
+if (git(["rev-parse", `${expectedTag}^{commit}`]) !== git(["rev-parse", "HEAD"])) {
+  throw new Error(`tag ${expectedTag} does not point at the published snapshot HEAD`);
 }

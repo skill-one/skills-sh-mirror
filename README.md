@@ -11,6 +11,7 @@ A daily snapshot of every GitHub-sourced skill on [skills.sh](https://www.skills
 ├── trending.json  the trending view's first 100 GitHub-sourced ids, in rank order
 ├── curated.json   the officially featured skills' ids, grouped by owner
 ├── stats.json     the producing run's stats (counts, changes, failed ids)
+├── latest         the newest tag, one line — read it to pin
 └── skills/        one directory per skill, named after its id
     └── vercel-labs/skills/find-skills/   ({owner}/{repo}/{slug})
         └── SKILL.md
@@ -46,39 +47,26 @@ Two guarantees, integrity-checked after every run:
 
 Edge cases (failed fetches, `--limit` runs, delisted skills) are covered in [DEVELOPING.md](DEVELOPING.md).
 
-`trending.json` is the trending leaderboard's first 100 GitHub-sourced ids, re-fetched on every run from `/api/v1/skills?view=trending&per_page=200` — one request, deep enough that its first 100 GitHub-sourced entries cover the top-100 cutoff after well-known (domain) sources are skipped like at the leaderboard. It is a plain JSON array in upstream rank order — the same canonical id form as the index — so a skill's rank is its array index.
+`trending.json` is an array of the trending leaderboard's first 100 GitHub-sourced ids, in upstream rank order — the array index is the rank. `curated.json` is the officially featured list, grouped by owner: each `data[]` entry carries `owner` / `totalInstalls` / `featuredRepo` / `featuredSkill` and `skills` (an id list), with `totalOwners` / `totalSkills` / `generatedAt` at the top level.
 
-Both files keep only what `skills.jsonl` does not already hold: `trending.json` and the per-owner `skills` arrays in `curated.json` are plain id lists (every per-skill field the index deliberately drops — `installs`, `url`, and the redundant display data `slug`, `name`, `source`, `sourceType`, `installUrl` — is dropped here too), with the same canonical id form as the index. `curated.json` comes from `/api/v1/skills/curated` and additionally keeps what only that endpoint has: per-owner `owner` / `totalInstalls` / `featuredRepo` / `featuredSkill` grouping (no source filtering — the list is curated upstream) and the top-level `totalOwners` / `totalSkills` / `generatedAt`. Upstream may feature the same skill under several owners, so ids can repeat across groups.
+Both use the same id form as the index, so they join straight back into `skills.jsonl`. `curated.json` is not source-filtered: it can hold ids the index does not, and the same skill may appear under several owners.
 
 ## How to get the data
 
-Published daily by the [`fetch-skills.yml`](.github/workflows/fetch-skills.yml) workflow to the [`dist` branch](../../tree/dist) — each commit is a complete snapshot at the branch root. Two ways in: fetch individual files straight from GitHub, or clone the whole snapshot.
+Published daily by the [`fetch-skills.yml`](.github/workflows/fetch-skills.yml) workflow to the [`dist` branch](../../tree/dist) — each commit is a complete snapshot at the branch root.
 
 ### Fetch individual files
 
-No clone, no auth. Start from the index to find ids, then fetch any skill's files by path:
+No clone, no auth. `dist` always serves the newest snapshot; swap it for a `dist-<date>` tag to pin a day (the newest 30 are tagged, and the name is slash-free — `dist/<date>` 404s as a URL ref):
 
 ```bash
-# the index: one row per skill, sorted by installs — filter it to find ids
-curl -sO https://raw.githubusercontent.com/skill-one/skills-sh-mirror/dist/skills.jsonl
-
-# then any file of a skill, by its id: dist/skills/<id>/<filename>
-curl -sO https://raw.githubusercontent.com/skill-one/skills-sh-mirror/dist/skills/vercel-labs/skills/find-skills/SKILL.md
+BASE=https://raw.githubusercontent.com/skill-one/skills-sh-mirror
+latest=$(curl -s $BASE/dist/latest)
+curl -sO $BASE/$latest/skills.jsonl                    # the index: one row per skill
+curl -sO $BASE/$latest/skills/vercel-labs/skills/find-skills/SKILL.md   # any skill file, by id
 ```
 
-GitHub serves these with a ~5-minute cache, so `dist` URLs always track the latest snapshot.
-
-To pin to a day, swap `dist` for a `dist-<date>` tag (the newest 30 snapshots — about a month — are tagged). The tag name is deliberately slash-free: `dist/<date>` in a raw URL is ambiguous with the `dist` branch and fails to resolve.
-
-```bash
-# resolve the newest available tag, then swap it into any URL above
-latest=$(git ls-remote --tags --refs --sort=-v:refname \
-         https://github.com/skill-one/skills-sh-mirror.git 'dist-*' \
-         | head -1 | awk -F/ '{print $NF}')
-curl -sO "https://raw.githubusercontent.com/skill-one/skills-sh-mirror/$latest/skills.jsonl"
-```
-
-Tags are immutable, so this is cache-friendly: cache by tag and re-fetch only when a newer day appears.
+`latest` is one line of plain text holding the tag (`dist-2026-09-11`) — cache by tag, since it is what changes when a new day lands. Resolve it from `dist`: raw's ~5-minute cache is the worst-case lag, and nothing busts it; via jsDelivr instead, it is a 12-hour branch cache (7 days in the browser).
 
 ### Clone the whole snapshot
 

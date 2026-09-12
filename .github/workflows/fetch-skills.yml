@@ -82,7 +82,8 @@ jobs:
       # about a month of snapshots), each retained snapshot tagged
       # dist-<date>. The mechanics live in publish.mjs so tests can exercise
       # them offline; the snapshot sits at the branch root: skills/,
-      # skills.jsonl, trending.json, curated.json and stats.json.
+      # skills.jsonl, trending.json, curated.json, stats.json and latest
+      # (a one-line pointer holding the snapshot's own tag).
       - name: Publish to dist branch
         run: |
           git config user.name "github-actions[bot]"
