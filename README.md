@@ -12,7 +12,7 @@ A daily snapshot of every GitHub-sourced skill on [skills.sh](https://www.skills
 ├── owners.jsonl   one row per repository owner (avatar URL + local copy's path)
 ├── avatars/       the owners' GitHub avatars, saved as {owner}.png|jpg
 ├── trending.json  the trending view's first 100 GitHub-sourced ids, in rank order
-├── curated.json   the officially featured skills' ids, grouped by owner
+├── curated.jsonl  the officially featured skills, one row per owner
 ├── stats.json     the producing run's stats (counts, changes, failed ids)
 ├── latest         the newest tag, one line — read it to pin
 └── skills/        one directory per skill, named after its id
@@ -73,9 +73,13 @@ Two guarantees, integrity-checked after every run:
 
 Edge cases (failed fetches, `--limit` runs, delisted skills) are covered in [DEVELOPING.md](DEVELOPING.md).
 
-`trending.json` is an array of the trending leaderboard's first 100 GitHub-sourced ids, in upstream rank order — the array index is the rank. `curated.json` is the officially featured list, grouped by owner: each `data[]` entry carries `owner` / `totalInstalls` / `featuredRepo` / `featuredSkill` and `skills` (an id list), with `totalOwners` / `totalSkills` / `generatedAt` at the top level.
+`trending.json` is an array of the trending leaderboard's first 100 GitHub-sourced ids, in upstream rank order — the array index is the rank. `curated.jsonl` is the officially featured list, one row per owner:
 
-Both use the same id form as the index, so they join straight back into `skills.jsonl`. `curated.json` is not source-filtered: it can hold ids the index does not, and the same skill may appear under several owners.
+```json
+{"owner": "vercel-labs", "totalInstalls": 12345, "featuredRepo": "vercel-labs/skills", "featuredSkill": "find-skills", "skills": ["vercel-labs/skills/find-skills", "mintlify.com/mintlify"]}
+```
+
+Both use the same id form as the index, so they join straight back into `skills.jsonl`. `curated.jsonl` is not source-filtered: it can hold ids the index does not, and the same skill may appear under several owners.
 
 ## How to get the data
 

@@ -21,8 +21,9 @@
 // changed/added/removed rows, failed ids, nonGithub/githubRepos), upstream
 // delisting (row and content directory removed) and re-listing, slug-with-
 // slash ids normalized to skills.sh's canonical (slash-stripped) form, the
-// trending top 100 and the curated owners written as id-only lists (every
-// per-skill field the index drops is dropped here too), a missing
+// trending top 100 written as an id-only list and the curated owners as one
+// row per owner (every per-skill field the index drops is dropped there
+// too), a missing
 // GITHUB_TOKEN aborting the run, verifier rejection of tampered datasets, and
 // the dist publisher (one commit per day via same-day amend, the --window-driven
 // prune re-rooting that preserves the original commit dates, the dist-<date>
@@ -156,9 +157,10 @@ const CURATED = {
 // The trending fetch must request the top-200 cutoff in a single request.
 const TRENDING_PER_PAGE = "200";
 
-// What the scraper writes: CURATED with each per-skill entry reduced to its
-// canonical id.
-const CURATED_REDUCED = { ...CURATED, data: CURATED.data.map((o) => ({ ...o, skills: o.skills.map(canonicalId) })) };
+// What the scraper writes: one curated row per owner, each per-skill entry
+// reduced to its canonical id (the wrapper's generatedAt / totalOwners /
+// totalSkills are dropped — the counts are derivable from the rows).
+const CURATED_REDUCED = CURATED.data.map((o) => ({ ...o, skills: o.skills.map(canonicalId) }));
 
 // Mock GitHub API: repo -> { stars, description, pushed_at, ownerLogin }
 // (null = repo gone, 404). The scraper maps these onto repos.jsonl's stars/description/
@@ -328,6 +330,7 @@ test("scraper end-to-end against mock API", async () => {
   const readRows = async (out) => (await readFile(path.join(out, "skills.jsonl"), "utf8")).split("\n").filter(Boolean).map(JSON.parse);
   const readRepos = async (out) => (await readFile(path.join(out, "repos.jsonl"), "utf8")).split("\n").filter(Boolean).map(JSON.parse);
   const readOwners = async (out) => (await readFile(path.join(out, "owners.jsonl"), "utf8")).split("\n").filter(Boolean).map(JSON.parse);
+  const readCurated = async (out) => (await readFile(path.join(out, "curated.jsonl"), "utf8")).split("\n").filter(Boolean).map(JSON.parse);
   const readStats = async (out) => JSON.parse(await readFile(path.join(out, "stats.json"), "utf8"));
   const pathExists = (p) => access(p).then(() => true, () => false);
   const dir = (out, ...p) => path.join(out, "skills", ...p);
@@ -354,31 +357,12 @@ test("scraper end-to-end against mock API", async () => {
     ]);
     assert.equal(await pathExists(path.join(out1, "trending.json.tmp")), false);
 
-    // curated.json: the curated payload verbatim except the per-skill
-    // entries, which are reduced to canonical ids (well-known entries kept —
-    // the list is curated upstream)
-    assert.deepEqual(JSON.parse(await readFile(path.join(out1, "curated.json"), "utf8")), {
-      generatedAt: "2026-05-28T04:12:23.313Z",
-      totalOwners: 2,
-      totalSkills: 3,
-      data: [
-        {
-          owner: "vercel-labs",
-          totalInstalls: 12345,
-          featuredRepo: "vercel-labs/skills",
-          featuredSkill: "find-skills",
-          skills: ["vercel-labs/skills/find-skills", "mintlify.com/mintlify"],
-        },
-        {
-          owner: "claude-office-skills",
-          totalInstalls: 7,
-          featuredRepo: "claude-office-skills/skills",
-          featuredSkill: "facebook/meta-ads",
-          skills: ["claude-office-skills/skills/facebookmeta-ads"],
-        },
-      ],
-    });
-    assert.equal(await pathExists(path.join(out1, "curated.json.tmp")), false);
+    // curated.jsonl: one row per owner — the rows verbatim except the
+    // per-skill entries, which are reduced to canonical ids (well-known
+    // entries kept — the list is curated upstream); the wrapper's
+    // generatedAt / totalOwners / totalSkills are dropped (derivable)
+    assert.deepEqual(await readCurated(out1), CURATED_REDUCED);
+    assert.equal(await pathExists(path.join(out1, "curated.jsonl.tmp")), false);
 
     const rows1 = await readRows(out1);
     assert.deepEqual(
@@ -639,6 +623,7 @@ test("scraper end-to-end against mock API", async () => {
     const GOOD_STATS = JSON.parse(await readFile(path.join(out1, "stats.json"), "utf8"));
     const GOOD_REPOS = await readRepos(out1);
     const GOOD_OWNERS = await readOwners(out1);
+    const GOOD_CURATED = await readCurated(out1);
     const baseRows = await readRows(out1); // == rows6: 5 rows including bad-id
     const writeIndex = async (rows) =>
       writeFile(path.join(out1, "skills.jsonl"), rows.map((r) => JSON.stringify(r)).join("\n") + "\n");
@@ -677,6 +662,15 @@ test("scraper end-to-end against mock API", async () => {
       pattern,
       setup: () => writeOwners(owners),
       cleanup: () => writeOwners(GOOD_OWNERS),
+    });
+    // curated.jsonl cases: rows are JSON lines, one owner per line.
+    const writeCurated = (rows) =>
+      writeFile(path.join(out1, "curated.jsonl"), rows.map((r) => JSON.stringify(r)).join("\n") + "\n");
+    const curCase = (name, pattern, rows) => ({
+      name,
+      pattern,
+      setup: () => writeCurated(rows),
+      cleanup: () => writeCurated(GOOD_CURATED),
     });
 
     const tamperCases = [
@@ -726,11 +720,20 @@ test("scraper end-to-end against mock API", async () => {
       jsonCase("trending.json", "trending.json is unparseable", /trending\.json: invalid JSON/, "{", GOOD_TRENDING),
       jsonCase("trending.json", "trending.json holds something else than an array of ids", /trending\.json: not an array of ids/, { top: 1 }, GOOD_TRENDING),
       jsonCase("trending.json", "trending.json repeats an id", /trending\.json: duplicate id: a\/b\/c/, ["a/b/c", "a/b/c"], GOOD_TRENDING),
-      jsonCase("curated.json", "curated.json is unparseable", /curated\.json: invalid JSON/, "{", CURATED_REDUCED),
-      jsonCase("curated.json", "curated.json's data is not an array of owners with skill ids", /curated\.json: data is not an array of owners with skill ids/, { data: [{ owner: "x" }] }, CURATED_REDUCED),
+      // curated.jsonl cases: rows are JSON lines, one owner per line.
+      {
+        name: "curated.jsonl is unparseable",
+        pattern: /curated\.jsonl line 1: invalid JSON/,
+        setup: () => writeFile(path.join(out1, "curated.jsonl"), "{\n" + GOOD_CURATED.map((r) => JSON.stringify(r)).join("\n") + "\n"),
+        cleanup: () => writeCurated(GOOD_CURATED),
+      },
+      curCase("curated.jsonl's rows are not owner/totalInstalls/featuredRepo/featuredSkill/skills shaped", /curated\.jsonl: rows must carry/, [{ owner: "x" }, ...GOOD_CURATED]),
       // Upstream genuinely features the same skill under several owners, so
-      // repeated ids across curated groups are accepted.
-      jsonCase("curated.json", "curated.json may repeat an id across owners", null, { data: [{ owner: "x", skills: ["a/b/c"] }, { owner: "y", skills: ["a/b/c"] }] }, CURATED_REDUCED),
+      // repeated ids across curated rows are accepted.
+      curCase("curated.jsonl may repeat an id across owners", null, [
+        { owner: "x", totalInstalls: 1, featuredRepo: null, featuredSkill: null, skills: ["a/b/c"] },
+        { owner: "y", totalInstalls: 1, featuredRepo: null, featuredSkill: null, skills: ["a/b/c"] },
+      ]),
       {
         name: "repos.jsonl is unparseable",
         pattern: /repos\.jsonl line 1: invalid JSON/,
@@ -931,7 +934,7 @@ test("publish: one commit per day, date-preserving prune, tag window", async () 
       await mkdir(path.join(data, "avatars"), { recursive: true });
       await writeFile(path.join(data, "avatars", "o.png"), "o");
       await writeFile(path.join(data, "skills.jsonl"), `{"day":"${day}","body":"${body}"}\n`);
-      for (const f of ["repos.jsonl", "owners.jsonl", "trending.json", "curated.json", "stats.json"]) {
+      for (const f of ["repos.jsonl", "owners.jsonl", "trending.json", "curated.jsonl", "stats.json"]) {
         await writeFile(path.join(data, f), `{"day":"${day}"}\n`);
       }
     };

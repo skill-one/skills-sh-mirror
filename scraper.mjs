@@ -17,9 +17,9 @@
  *   data/trending.json                      the trending view's first 100
  *                                           github-sourced ids, in upstream
  *                                           rank order
- *   data/curated.json                       the official curated partners and
- *                                           their skills' ids, verbatim
- *                                           grouping
+ *   data/curated.jsonl                      the official curated partners,
+ *                                           one row per owner, their skills
+ *                                           reduced to ids
  *   data/skills/{owner}/{repo}/{slug}/      pure skill files, nothing else
  *                                           (mirrors the id segment by segment)
  *   data/repos.jsonl                        one row per GitHub repository
@@ -87,7 +87,7 @@ const repoMeta = new Map();
 // carries it) and consumed by the avatar phase.
 const ownerAvatars = new Map();
 
-// Every JSON artifact (trending.json, curated.json, skills.jsonl, stats.json)
+// Every JSON artifact (trending.json, curated.jsonl, skills.jsonl, stats.json)
 // is written to `<path>.tmp` first and swapped in via rename(2), so a crash
 // can never leave a half-updated artifact behind (verify.mjs flags leftovers).
 const atomicWrite = async (p, contents) => {
@@ -228,25 +228,20 @@ async function fetchTrending(api) {
   return { ids, nonGithub };
 }
 
-// The curated view: officially featured skills grouped by owner, with the
-// owner's aggregate installs and featured repo/skill plus top-level counts
-// and the list's generation timestamp — all unique to this endpoint, kept
-// verbatim. Per-skill entries are reduced to their canonical ids. No source
-// filtering: the list is curated upstream.
+// The curated view: officially featured skills grouped by owner. One row per
+// owner, kept verbatim except the per-skill entries, which are reduced to
+// canonical ids (the wrapper's generatedAt / totalOwners / totalSkills are
+// dropped — the counts are derivable from the rows). No source filtering:
+// the list is curated upstream.
 async function fetchCurated(api) {
   const raw = await api("/api/v1/skills/curated");
-  return {
-    generatedAt: raw.generatedAt ?? null,
-    totalOwners: raw.totalOwners ?? null,
-    totalSkills: raw.totalSkills ?? null,
-    data: (raw.data ?? []).map((owner) => ({
-      owner: owner.owner,
-      totalInstalls: owner.totalInstalls,
-      featuredRepo: owner.featuredRepo ?? null,
-      featuredSkill: owner.featuredSkill ?? null,
-      skills: (owner.skills ?? []).map(canonicalId),
-    })),
-  };
+  return (raw.data ?? []).map((owner) => ({
+    owner: owner.owner,
+    totalInstalls: owner.totalInstalls,
+    featuredRepo: owner.featuredRepo ?? null,
+    featuredSkill: owner.featuredSkill ?? null,
+    skills: (owner.skills ?? []).map(canonicalId),
+  }));
 }
 
 // Previous run's index drives resume: for skills whose directory is already
@@ -402,24 +397,26 @@ const githubApi = makeApiGet({
 await rm(path.join(OUT_DIR, ".tmp"), { recursive: true, force: true });
 await mkdir(path.join(OUT_DIR, "skills"), { recursive: true });
 
-console.error(`[1/5] Fetching leaderboard from ${API_BASE} ...`);
+console.error(`[1/6] Fetching leaderboard from ${API_BASE} ...`);
 const { skills, nonGithub } = await fetchLeaderboard(skillsApi);
 const prevIndex = await loadPrevIndex();
 const prevRepos = await loadPrevRepos();
 const prevOwners = await loadPrevOwners();
 
-console.error(`[2/5] Fetching trending top ${TRENDING_COUNT} (github-sourced) from ${API_BASE} ...`);
+console.error(`[2/6] Fetching trending top ${TRENDING_COUNT} (github-sourced) from ${API_BASE} ...`);
 const { ids: trending, nonGithub: trendingNonGithub } = await fetchTrending(skillsApi);
 // Written atomically, like the index; independent of the rest of the run.
 const trendingPath = path.join(OUT_DIR, "trending.json");
 await atomicWrite(trendingPath, JSON.stringify(trending, null, 2) + "\n");
 console.error(`  trending: ${trending.length}${trendingNonGithub ? ` (${trendingNonGithub} non-github skipped)` : ""}`);
 
-console.error(`[3/5] Fetching curated skills from ${API_BASE} ...`);
+console.error(`[3/6] Fetching curated skills from ${API_BASE} ...`);
 const curated = await fetchCurated(skillsApi);
-const curatedPath = path.join(OUT_DIR, "curated.json");
-await atomicWrite(curatedPath, JSON.stringify(curated, null, 2) + "\n");
-console.error(`  curated: ${curated.data.length} owners / ${curated.totalSkills} skills`);
+await atomicWrite(
+  path.join(OUT_DIR, "curated.jsonl"),
+  curated.map((row) => JSON.stringify(row)).join("\n") + (curated.length ? "\n" : ""),
+);
+console.error(`  curated: ${curated.length} owners / ${curated.reduce((n, o) => n + o.skills.length, 0)} skills`);
 
 const targets = Number.isFinite(DETAIL_LIMIT) ? skills.slice(0, DETAIL_LIMIT) : skills;
 
@@ -430,7 +427,7 @@ const targets = Number.isFinite(DETAIL_LIMIT) ? skills.slice(0, DETAIL_LIMIT) : 
 // all fields to null; any other failure keeps the previous entry (or, on a
 // repo's first fetch, no entry until the next run succeeds).
 const repos = [...new Set(targets.map((s) => repoOfId(s.id)).filter(Boolean))];
-console.error(`[4/5] Fetching repository metadata for ${repos.length} repositories from ${GITHUB_API_BASE} ...`);
+console.error(`[4/6] Fetching repository metadata for ${repos.length} repositories from ${GITHUB_API_BASE} ...`);
 let reposDone = 0;
 let repoIndex = 0;
 const starWorker = async () => {

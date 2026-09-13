@@ -18,7 +18,8 @@
  *     verbatim, including files like _meta.json that skills may ship) and
  *     every directory belongs to a row
  *   - stats.json parses and its indexedRows count matches the index
- *   - trending.json / curated.json are well-shaped id lists
+ *   - trending.json is a well-shaped id list; curated.jsonl holds well-shaped
+ *     per-owner rows
  *   - no .tmp / skills.jsonl.tmp leftovers from interrupted runs
  *
  * Usage: node verify.mjs [--out data]
@@ -164,27 +165,35 @@ if (text === null) {
   }
   if (await exists(path.join(OUT_DIR, "trending.json.tmp"))) problem("trending.json.tmp leftover from an interrupted run");
 
-  // curated.json: officially featured skills grouped by owner, per-skill
-  // entries reduced to ids. The list is kept verbatim — upstream
-  // legitimately repeats a skill under several owners, so ids are not
-  // required to be unique across groups.
-  const curatedRaw = await readFile(path.join(OUT_DIR, "curated.json"), "utf8").catch(() => null);
+  // curated.jsonl: officially featured skills grouped by owner, one row per
+  // owner, per-skill entries reduced to ids. The rows are kept verbatim —
+  // upstream legitimately repeats a skill under several owners, so ids are
+  // not required to be unique across rows.
+  const curatedRaw = await readFile(path.join(OUT_DIR, "curated.jsonl"), "utf8").catch(() => null);
   if (curatedRaw === null) {
-    problem("curated.json not found");
+    problem("curated.jsonl not found");
   } else {
-    try {
-      const curated = JSON.parse(curatedRaw);
-      const owners = curated?.data;
-      const shaped =
-        Array.isArray(owners) &&
-        owners.every((o) => o && typeof o === "object" && Array.isArray(o.skills) && o.skills.every((s) => typeof s === "string" && s));
-      if (!shaped) problem("curated.json: data is not an array of owners with skill ids");
-      else curatedOwners = owners.length;
-    } catch {
-      problem("curated.json: invalid JSON");
+    const rows = [];
+    for (const [i, line] of curatedRaw.split("\n").entries()) {
+      if (!line.trim()) continue;
+      try {
+        rows.push(JSON.parse(line));
+      } catch {
+        problem(`curated.jsonl line ${i + 1}: invalid JSON`);
+      }
     }
+    const shaped = rows.every((r) =>
+      r !== null && typeof r === "object" && !Array.isArray(r) &&
+      typeof r.owner === "string" && r.owner &&
+      Number.isFinite(r.totalInstalls) &&
+      (r.featuredRepo === null || typeof r.featuredRepo === "string") &&
+      (r.featuredSkill === null || typeof r.featuredSkill === "string") &&
+      Array.isArray(r.skills) && r.skills.every((s) => typeof s === "string" && s),
+    );
+    if (!shaped) problem("curated.jsonl: rows must carry owner/totalInstalls/featuredRepo/featuredSkill/skills");
+    else curatedOwners = rows.length;
   }
-  if (await exists(path.join(OUT_DIR, "curated.json.tmp"))) problem("curated.json.tmp leftover from an interrupted run");
+  if (await exists(path.join(OUT_DIR, "curated.jsonl.tmp"))) problem("curated.jsonl.tmp leftover from an interrupted run");
 
   // repos.jsonl: one row per repository behind the indexed skills, sorted by
   // repo asc. Must match the index's repositories exactly in both directions,

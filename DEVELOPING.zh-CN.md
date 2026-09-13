@@ -6,14 +6,14 @@
 
 1. `GET /api/v1/skills?per_page=500&page=N` —— 分页遍历排行榜(全站约 17 次请求)。只保留 GitHub 来源的条目(`sourceType: "github"`);well-known(域名)来源没有可归属的仓库,直接跳过并计入 `nonGithub`。
 2. `GET /api/v1/skills?view=trending&per_page=200` —— 单次请求拉取 trending 榜单;200 的深度足以在跳过 well-known 条目(与排行榜一致)后仍覆盖前 100 个 GitHub 来源的截断点。以 id 数组(按上游榜单顺序)写入 `trending.json`,id 与排行榜一样做规范化处理。
-3. `GET /api/v1/skills/curated` —— 官方精选的技能,按 owner 分组。写入 `curated.json`:owner 聚合数据与顶层计数原样保留(不做来源过滤——精选名单由上游决定),每个技能条目精简为规范化 id。
+3. `GET /api/v1/skills/curated` —— 官方精选的技能,按 owner 分组。写入 `curated.jsonl`(每个 owner 一行,行内容原样保留——不做来源过滤,精选名单由上游决定),每个技能条目精简为规范化 id;外层的 `generatedAt` / `totalOwners` / `totalSkills` 被去掉(计数可由行推导)。
 4. `GET https://api.github.com/repos/{owner}/{repo}` —— 获取每个去重后仓库的元信息(约 1200 次请求:大量技能共享同一仓库)。响应本身就携带 `repos.jsonl` 记录的全部字段(`stargazers_count`、`description`、`pushed_at`),外加头像阶段需要的 `owner` 信息,因此这一步不产生额外请求。仓库 404(已删除)时三个字段全部置为 `null`;其他失败则保留上一轮的行。
 5. `GET /api/v1/skills/{source}/{skill}` —— 获取每个技能的文件(`files` 数组携带完整文本)。SKILL.md 中没有 `description` 的技能会被跳过;其余文件先写临时目录再原子重命名到位,因此「目录存在」就意味着「内容完整」。
 6. 同步 owner 头像 —— 对索引背后每个仓库的 owner,把 GitHub 头像下载到 `avatars/{owner}.png|jpg`(扩展名取自响应的 content-type,`size=96` 控制体积),并写入 `owners.jsonl`(每个 owner 一行,含上游 URL 和本地路径)。owner 信息搭在第 4 步的仓库响应上,下载走头像 CDN(无需 token、不受 API 限速),两者都不产生额外的 GitHub API 成本。行的 URL 未变化(GitHub 仅在头像变更时更新其 `?v=` 参数)且文件在盘时不发任何下载;下载失败沿用上一轮的行。
 7. 元数据合并成唯一的 `skills.jsonl` —— 每个已保存内容的技能一行,按 installs 降序,运行结束时原子写入。
 8. 写入 `stats.json` —— 本次运行的统计,随数据集一起发布。只保留无法从其他字段直接推导的信息:
 
-`trending.json` 与 `curated.json` 中按 owner 分组的 `skills` 数组都是纯 id 列表:索引刻意丢弃的每个技能级字段(`installs`、`url`,以及冗余的展示字段 `slug`、`name`、`source`、`sourceType`、`installUrl`)在这里同样丢弃,只留下规范化 id——关联回 `skills.jsonl` 的键。
+`trending.json` 与 `curated.jsonl` 中每行的 `skills` 数组都是纯 id 列表:索引刻意丢弃的每个技能级字段(`installs`、`url`,以及冗余的展示字段 `slug`、`name`、`source`、`sourceType`、`installUrl`)在这里同样丢弃,只留下规范化 id——关联回 `skills.jsonl` 的键。
 
 | 字段 | 含义 |
 |---|---|
@@ -78,7 +78,7 @@ node scraper.mjs --audits                 # 同时抓取安全审计结果(请�
 | 2. 产物校验器 | 数据集是否完整? | 无(不联网) | `node verify.mjs --out data` |
 | 3. 真实 API 运行 | 线上接口行为是否未变? | token | `node scraper.mjs --limit 5 && node verify.mjs` |
 
-`verify.mjs` 是数据集被信任或上传前的门禁:每行可解析、id 唯一、按 installs 降序(并列时按 id 升序)、字段格式正确、无两行映射到同一目录名、索引行与磁盘目录双向严格对应(每行都有目录、无孤儿目录)、`stats.json` 存在且可解析并与索引一致、`trending.json` / `curated.json` 是格式正确的 id 列表、`repos.jsonl` 格式正确、按 repo 排序且与索引的仓库集合精确一致、`owners.jsonl` + `avatars/` 格式正确且与索引的 owner 集合一致(每个被引用的头像文件都存在、无孤儿文件)、无 `.tmp` 残留。本地快速上手:
+`verify.mjs` 是数据集被信任或上传前的门禁:每行可解析、id 唯一、按 installs 降序(并列时按 id 升序)、字段格式正确、无两行映射到同一目录名、索引行与磁盘目录双向严格对应(每行都有目录、无孤儿目录)、`stats.json` 存在且可解析并与索引一致、`trending.json` 是格式正确的 id 列表、`curated.jsonl` 是格式正确的每 owner 一行、`repos.jsonl` 格式正确、按 repo 排序且与索引的仓库集合精确一致、`owners.jsonl` + `avatars/` 格式正确且与索引的 owner 集合一致(每个被引用的头像文件都存在、无孤儿文件)、无 `.tmp` 残留。本地快速上手:
 
 ```bash
 npm test                          # 快速,无需密钥

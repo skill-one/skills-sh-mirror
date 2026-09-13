@@ -12,7 +12,7 @@ English: [README.md](README.md) · 开发指南(运行 / 校验 / 扩展):[DEVEL
 ├── owners.jsonl   每个仓库的 owner 一行(头像 URL + 本地副本路径)
 ├── avatars/       owner 们的 GitHub 头像,保存为 {owner}.png|jpg
 ├── trending.json  trending 榜单中前 100 个 GitHub 来源 id,按榜单顺序
-├── curated.json   官方精选技能的 id,按 owner 分组
+├── curated.jsonl  官方精选技能,每个 owner 一行
 ├── stats.json     产出该快照那一次运行的统计(条目数、变化数、失败明细)
 ├── latest         最新 tag,一行 —— 读它就能 pin
 └── skills/        每个技能一个目录,目录名即技能 id
@@ -73,9 +73,13 @@ English: [README.md](README.md) · 开发指南(运行 / 校验 / 扩展):[DEVEL
 
 边缘情况(抓取失败、`--limit` 运行、技能下架)见 [DEVELOPING.zh-CN.md](DEVELOPING.zh-CN.md)。
 
-`trending.json` 是 trending 榜单中前 100 个 GitHub 来源技能的 id,按上游榜单顺序——下标即名次。`curated.json` 是官方精选名单,按 owner 分组:`data[]` 每项含 `owner` / `totalInstalls` / `featuredRepo` / `featuredSkill` 与 `skills`(id 列表),顶层为 `totalOwners` / `totalSkills` / `generatedAt`。
+`trending.json` 是 trending 榜单中前 100 个 GitHub 来源技能的 id,按上游榜单顺序——下标即名次。`curated.jsonl` 是官方精选名单,每个 owner 一行:
 
-两者都用与索引相同的 id 形式,可直接 join 回 `skills.jsonl`;`curated.json` 不做来源过滤,因此可能含索引里没有的 id,且同一技能可出现在多个 owner 名下。
+```json
+{"owner": "vercel-labs", "totalInstalls": 12345, "featuredRepo": "vercel-labs/skills", "featuredSkill": "find-skills", "skills": ["vercel-labs/skills/find-skills", "mintlify.com/mintlify"]}
+```
+
+两者都用与索引相同的 id 形式,可直接 join 回 `skills.jsonl`;`curated.jsonl` 不做来源过滤,因此可能含索引里没有的 id,且同一技能可出现在多个 owner 名下。
 
 ## 如何获取数据
 
