@@ -30,7 +30,8 @@
 // the dist publisher (one commit per day via same-day amend, the --window-driven
 // prune re-rooting that preserves the original commit dates, the dist-<date>
 // tag window, the one-line `latest` pointer every snapshot carries naming its
-// own tag, and a bad --window aborting before the snapshot is touched).
+// own tag, pruning of entries tracked on dist but no longer in the publish
+// set, and a bad --window aborting before the snapshot is touched).
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -1002,6 +1003,30 @@ test("publish: one commit per day, date-preserving prune, tag window", async () 
     assert.equal(sh("git show origin/dist:skills.jsonl", work), `{"day":"d1","body":"second"}`);
     assert.match(remoteTag("dist-d1"), new RegExp(`^${distLog("%H")}`));
     assert.equal(pointerOf(), "dist-d1"); // the amended commit's pointer still names the day's tag
+
+    // Entries tracked on dist but no longer in the publish set cannot ride
+    // along: simulate the pre-rename era (repos.json/curated.json) amended
+    // into the day's commit — exactly how a renamed output used to survive —
+    // then publish again: the same-day amend must drop them while keeping
+    // every published entry, and history stays one commit per day.
+    sh(
+      "git fetch -q origin dist && git checkout -q -B dist origin/dist" +
+        " && echo old > repos.json && echo old > curated.json" +
+        " && git add repos.json curated.json && git commit -q --amend -m 'skills.sh data — d1'" +
+        " && git push -q --force origin dist",
+      work,
+    );
+    await scrape("d1", "third");
+    r = publish("d1");
+    assert.equal(r.status, 0, r.stderr);
+    const distHas = (file) =>
+      sh(`git show origin/dist:${file} >/dev/null 2>&1 && echo yes || echo no`, work) === "yes";
+    assert.equal(distHas("repos.json"), false);
+    assert.equal(distHas("curated.json"), false);
+    assert.equal(distHas("repos.jsonl"), true);
+    assert.equal(distHas("skills.jsonl"), true);
+    assert.equal(sh("git show origin/dist:skills.jsonl", work), `{"day":"d1","body":"third"}`);
+    assert.equal(distLog("%H").split("\n").length, 1); // still one commit for the day
 
     // The remaining days fill the window; publishing one more overflows it and
     // re-roots, pushing d1 out. The author date of each day's commit is

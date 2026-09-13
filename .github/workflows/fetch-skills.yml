@@ -56,12 +56,15 @@ jobs:
       # its skills.jsonl pin fetchedAt, reuse unchanged audit results, keep
       # the last good content of failed fetches, and make the changed/added/
       # removed counters describe this run instead of the empty workspace.
+      # repos.jsonl + owners.jsonl/avatars seed the GitHub-metadata carry-over:
+      # a failed repo request or avatar download keeps the previous row, and
+      # avatars whose URL (its ?v=) is unchanged are not re-downloaded.
       # No-op on the very first run (no dist branch yet).
       - name: Restore previous snapshot
         run: |
           if git fetch -q origin dist; then
             mkdir -p data
-            git archive origin/dist -- skills skills.jsonl stats.json | tar -x -C data
+            git archive origin/dist -- skills skills.jsonl stats.json repos.jsonl owners.jsonl avatars | tar -x -C data
           fi
 
       - name: Scrape all skills
@@ -82,8 +85,9 @@ jobs:
       # about a month of snapshots), each retained snapshot tagged
       # dist-<date>. The mechanics live in publish.mjs so tests can exercise
       # them offline; the snapshot sits at the branch root: skills/,
-      # skills.jsonl, trending.json, curated.json, stats.json and latest
-      # (a one-line pointer holding the snapshot's own tag).
+      # skills.jsonl, repos.jsonl, owners.jsonl, avatars/, trending.json,
+      # curated.jsonl, stats.json and latest (a one-line pointer holding the
+      # snapshot's own tag).
       - name: Publish to dist branch
         run: |
           git config user.name "github-actions[bot]"

@@ -6,7 +6,9 @@
 // Publishing means: the scraped snapshot plus a generated pointer file at the
 // branch root, one commit per day — a same-day rerun amends the day's commit
 // instead of stacking a second one, so the commit window can never be filled by
-// a single day — history pruned to the newest N commits (N = --window, default
+// a single day — entries tracked on the branch but no longer in the publish
+// set are pruned (a renamed output cannot ride along as a stale leftover), and
+// history pruned to the newest N commits (N = --window, default
 // 30; one commit per day, so the window is about a month of snapshots), and each
 // retained snapshot tagged dist-<date> (from the commit subject, not the commit
 // dates: pruning re-roots commits, which resets them). Tags mirror the window
@@ -60,6 +62,18 @@ if (hasRef("fetch", "-q", "origin", "dist")) {
 for (const f of SNAPSHOT) rmSync(f, { recursive: true, force: true });
 for (const f of SNAPSHOT) renameSync(`data-fresh/${f}`, f);
 rmSync("data-fresh", { recursive: true, force: true });
+
+// The checkout restores every entry the branch ever tracked into the index,
+// and only the SNAPSHOT names are replaced above — so an entry dropped from
+// the publish set (e.g. the pre-repos.jsonl repos.json, after a rename in
+// SNAPSHOT) would otherwise ride along in every later commit, amends included.
+// Prune the index to exactly the publish set. HEAD does not exist yet on the
+// orphan path, whose index is already empty.
+if (hasRef("rev-parse", "-q", "--verify", "HEAD")) {
+  const KEEP = new Set([...SNAPSHOT, POINTER]);
+  const stale = git(["ls-tree", "--name-only", "HEAD"]).split("\n").filter((f) => f && !KEEP.has(f));
+  if (stale.length) git(["rm", "-rqf", "--ignore-unmatch", ...stale]);
+}
 
 // Names the tag this commit will get — both derive from `date`, so they cannot
 // drift (checked against the committed tree at the end).
