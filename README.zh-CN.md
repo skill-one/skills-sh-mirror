@@ -9,6 +9,8 @@ English: [README.md](README.md) · 开发指南(运行 / 校验 / 扩展):[DEVEL
 ```
 ├── skills.jsonl   每个技能一行,按 installs 降序 —— 查询 / 筛选 / 排行在这里
 ├── repos.jsonl    索引中技能所在的 GitHub 仓库,每个仓库一行(star 数、About、最近推送时间)
+├── owners.jsonl   每个仓库的 owner 一行(头像 URL + 本地副本路径)
+├── avatars/       owner 们的 GitHub 头像,保存为 {owner}.png|jpg
 ├── trending.json  trending 榜单中前 100 个 GitHub 来源 id,按榜单顺序
 ├── curated.json   官方精选技能的 id,按 owner 分组
 ├── stats.json     产出该快照那一次运行的统计(条目数、变化数、失败明细)
@@ -51,6 +53,18 @@ English: [README.md](README.md) · 开发指南(运行 / 校验 / 扩展):[DEVEL
 | `stars`       | 仓库的 star 数;仓库已删除或未知时为 `null`                                              |
 | `description` | 仓库 GitHub 页面的 About 说明;未设置或未知时为 `null`                                   |
 | `pushedAt`    | 仓库最近一次代码推送时间(`pushed_at`);仓库已删除时为 `null`。注意它描述的是仓库而非技能:技能级的变化请看索引里的 `hash` / `fetchedAt` |
+
+`owners.jsonl` 保存仓库 owner 的 GitHub 头像,已拉取到 `avatars/`,消费方无需再调 GitHub 接口——每个 owner 一行,按 owner 排序:
+
+```json
+{"owner": "vercel-labs", "avatarUrl": "https://avatars.githubusercontent.com/u/12565288?v=4", "avatar": "avatars/vercel-labs.png"}
+```
+
+| 字段         | 含义                                                                                    |
+| ------------ | --------------------------------------------------------------------------------------- |
+| `owner`      | GitHub 用户/组织名,即 id 的第一段——从每行索引关联回来的键                              |
+| `avatarUrl`  | 上游头像 URL(用户换头像时其 `?v=` 参数会变化——正是它避免了重复下载)                   |
+| `avatar`     | 快照内本地副本的路径;那一次下载失败时为 `null`                                          |
 
 两条保证,每次运行后都会做完整性校验:
 

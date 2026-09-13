@@ -8,6 +8,8 @@
  *     description)
  *   - repos.jsonl parses, is well-shaped (repo/stars/description/pushedAt
  *     rows, sorted by repo), and matches the index's repositories exactly
+ *   - owners.jsonl + avatars/ are well-shaped and consistent with the index's
+ *     owners (every referenced avatar file exists, no orphan files)
  *   - no two rows share a sanitized directory name
  *   - every content directory's SKILL.md carries a description that matches
  *     the index row
@@ -55,6 +57,7 @@ let rowCount = 0;
 let trendingCount = null;
 let curatedOwners = null;
 let reposCount = null;
+let ownersCount = null;
 const text = await readFile(path.join(OUT_DIR, "skills.jsonl"), "utf8").catch(() => null);
 if (text === null) {
   problem(`skills.jsonl not found under ${OUT_DIR}`);
@@ -224,6 +227,57 @@ if (text === null) {
     }
   }
   if (await exists(path.join(OUT_DIR, "repos.jsonl.tmp"))) problem("repos.jsonl.tmp leftover from an interrupted run");
+
+  // owners.jsonl: one row per repository owner behind the indexed skills —
+  // the avatar pulled into avatars/ so consumers need no GitHub API for it.
+  // Owners must match the index's owners exactly in both directions; every
+  // referenced avatar file must exist and every avatar file must be
+  // referenced.
+  const ownersRaw = await readFile(path.join(OUT_DIR, "owners.jsonl"), "utf8").catch(() => null);
+  if (ownersRaw === null) {
+    problem("owners.jsonl not found");
+  } else {
+    const owners = [];
+    for (const [i, line] of ownersRaw.split("\n").entries()) {
+      if (!line.trim()) continue;
+      try {
+        owners.push(JSON.parse(line));
+      } catch {
+        problem(`owners.jsonl line ${i + 1}: invalid JSON`);
+      }
+    }
+    const shaped = owners.every((r) =>
+      r !== null && typeof r === "object" && !Array.isArray(r) &&
+      /^[^/]+$/.test(r.owner) &&
+      (r.avatarUrl === null || typeof r.avatarUrl === "string") &&
+      (r.avatar === null || (typeof r.avatar === "string" && r.avatar.startsWith("avatars/"))) &&
+      (r.avatar === null || r.avatarUrl !== null),
+    );
+    if (!shaped) {
+      problem("owners.jsonl: rows must carry owner/avatarUrl/avatar");
+    } else {
+      ownersCount = owners.length;
+      const seen = new Set();
+      for (const r of owners) {
+        if (seen.has(r.owner)) problem(`owners.jsonl: duplicate owner: ${r.owner}`);
+        seen.add(r.owner);
+      }
+      for (let i = 1; i < owners.length; i++) {
+        if (owners[i - 1].owner >= owners[i].owner) problem(`owners.jsonl: rows not sorted by owner at ${owners[i].owner}`);
+      }
+      const rowOwners = new Set(rows.map((r) => repoOfId(r.id)?.split("/")[0]).filter(Boolean));
+      for (const owner of rowOwners) if (!seen.has(owner)) problem(`owners.jsonl: no row for ${owner}`);
+      for (const owner of seen) if (!rowOwners.has(owner)) problem(`owners.jsonl: orphan row (no index row): ${owner}`);
+      for (const r of owners) {
+        if (r.avatar && !(await exists(path.join(OUT_DIR, r.avatar)))) problem(`owners.jsonl: avatar file missing: ${r.avatar} (${r.owner})`);
+      }
+      const referenced = new Set(owners.map((r) => r.avatar).filter(Boolean));
+      for (const entry of (await readdir(path.join(OUT_DIR, "avatars")).catch(() => []))) {
+        if (!referenced.has(`avatars/${entry}`)) problem(`orphan avatar file (no owners.jsonl row): avatars/${entry}`);
+      }
+    }
+  }
+  if (await exists(path.join(OUT_DIR, "owners.jsonl.tmp"))) problem("owners.jsonl.tmp leftover from an interrupted run");
 }
 
 if (problems.length) {
@@ -233,5 +287,5 @@ if (problems.length) {
   process.exit(1);
 }
 console.log(
-  `OK: ${rowCount} rows, ${dirCount} content directories, ${reposCount ?? "no"} repos, ${trendingCount ?? "no"} trending, ${curatedOwners ?? "no"} curated owners, 0 problems (${OUT_DIR})`,
+  `OK: ${rowCount} rows, ${dirCount} content directories, ${reposCount ?? "no"} repos, ${ownersCount ?? "no"} owners, ${trendingCount ?? "no"} trending, ${curatedOwners ?? "no"} curated owners, 0 problems (${OUT_DIR})`,
 );

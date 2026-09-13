@@ -25,6 +25,13 @@
  *   data/repos.jsonl                        one row per GitHub repository
  *                                           behind an indexed skill: stars,
  *                                           About description, last push time
+ *   data/owners.jsonl                       one row per repository owner:
+ *                                           avatar URL and the local copy's
+ *                                           path under data/avatars/
+ *   data/avatars/{owner}.{png|jpg}          the owners' GitHub avatars
+ *                                           (downloaded from the avatar CDN,
+ *                                           no token needed), so consumers
+ *                                           need no GitHub API for them
  *   data/stats.json                         this run's stats: timing, entry
  *                                           counts, failed ids
  *
@@ -75,6 +82,10 @@ const startedAt = new Date();
 // repo -> { stars, description, pushedAt }, filled by the stars phase and
 // written to repos.jsonl at the end.
 const repoMeta = new Map();
+
+// owner -> avatar_url, filled by the stars phase (the repo response already
+// carries it) and consumed by the avatar phase.
+const ownerAvatars = new Map();
 
 // Every JSON artifact (trending.json, curated.json, skills.jsonl, stats.json)
 // is written to `<path>.tmp` first and swapped in via rename(2), so a crash
@@ -263,6 +274,19 @@ async function loadPrevRepos() {
   }
 }
 
+// Previous run's owners.jsonl drives avatar caching: while a GitHub avatar
+// URL (its ?v= parameter bumps on change) is unchanged and the file is on
+// disk, it is not re-downloaded; a failed download keeps the previous row.
+async function loadPrevOwners() {
+  try {
+    const text = await readFile(path.join(OUT_DIR, "owners.jsonl"), "utf8");
+    const rows = text.split("\n").filter(Boolean).map((line) => JSON.parse(line));
+    return new Map(rows.map((row) => [row.owner, row]));
+  } catch {
+    return new Map();
+  }
+}
+
 // Returns the index row for the skill, or null when the skill is left out of
 // the index: duplicates (stale content removed too) and skills without an
 // upstream snapshot. Fetch errors propagate to the worker, which also leaves
@@ -382,6 +406,7 @@ console.error(`[1/5] Fetching leaderboard from ${API_BASE} ...`);
 const { skills, nonGithub } = await fetchLeaderboard(skillsApi);
 const prevIndex = await loadPrevIndex();
 const prevRepos = await loadPrevRepos();
+const prevOwners = await loadPrevOwners();
 
 console.error(`[2/5] Fetching trending top ${TRENDING_COUNT} (github-sourced) from ${API_BASE} ...`);
 const { ids: trending, nonGithub: trendingNonGithub } = await fetchTrending(skillsApi);
@@ -423,6 +448,7 @@ const starWorker = async () => {
         description: data?.description ?? null,
         pushedAt: data?.pushed_at ?? null,
       });
+      if (data?.owner?.login) ownerAvatars.set(data.owner.login, data.owner.avatar_url ?? null);
     } else if (prevRepos.has(repo)) {
       repoMeta.set(repo, prevRepos.get(repo)); // keep the last good entry
     }
@@ -433,7 +459,7 @@ const starWorker = async () => {
 };
 await Promise.all(Array.from({ length: Math.min(CONCURRENCY, repos.length) }, starWorker));
 
-console.error(`[5/5] Fetching content for ${targets.length} skills${WANT_AUDITS ? " + audits" : ""} ...`);
+console.error(`[5/6] Fetching content for ${targets.length} skills${WANT_AUDITS ? " + audits" : ""} ...`);
 
 const rows = [];
 let index = 0;
@@ -504,6 +530,88 @@ const indexed = new Set(rows.map((r) => r.id));
 const removed = [...prevIndex.keys()].filter((id) => !indexed.has(id));
 for (const id of removed) await rm(skillDir(id), { recursive: true, force: true });
 
+// Repositories behind the final index rows; their first segments are the
+// owners whose avatars the next phase pulls in.
+const rowRepos = [...new Set(rows.map((r) => repoOfId(r.id)).filter(Boolean))].sort();
+
+console.error(`[6/6] Syncing avatars for ${new Set(rowRepos.map((repo) => repo.split("/")[0])).size} owners ...`);
+
+// Avatar CDN (avatars.githubusercontent.com): no token, no documented rate
+// limit — a plain fetch with retries for transient failures. `size=96` keeps
+// the stored copies small.
+const fetchAvatar = async (url) => {
+  for (let attempt = 1; ; attempt++) {
+    let res;
+    try {
+      res = await fetch(url);
+    } catch (err) {
+      if (attempt >= 3) throw new Error(`network error after ${attempt} tries: ${err.cause?.code ?? err.message} (${url})`);
+      await sleep(1000 * attempt);
+      continue;
+    }
+    if ((res.status === 429 || res.status >= 500) && attempt < 3) {
+      await res.text().catch(() => {});
+      await sleep(1000 * attempt);
+      continue;
+    }
+    if (!res.ok) throw new Error(`HTTP ${res.status} (${url})`);
+    return { bytes: Buffer.from(await res.arrayBuffer()), type: res.headers.get("content-type") ?? "" };
+  }
+};
+
+// One row per owner of an indexed repository: the GitHub avatar URL and the
+// path of the local copy. While the URL is unchanged (its ?v= parameter
+// bumps when the user changes the avatar) and the file is on disk, nothing
+// is downloaded; a failed download keeps the previous row (or writes one
+// with a null path, retried next run). Files land in avatars/ named after
+// the owner, extension from the response's content type.
+const avatarDir = path.join(OUT_DIR, "avatars");
+await mkdir(avatarDir, { recursive: true });
+const ownerSet = [...new Set(rowRepos.map((repo) => repo.split("/")[0]))].sort();
+const ownerRows = new Map();
+let ownerIndex = 0;
+const avatarWorker = async () => {
+  while (ownerIndex < ownerSet.length) {
+    const owner = ownerSet[ownerIndex++];
+    const prev = prevOwners.get(owner);
+    const avatarUrl = ownerAvatars.get(owner) ?? prev?.avatarUrl ?? null;
+    if (!avatarUrl) {
+      ownerRows.set(owner, { owner, avatarUrl: null, avatar: prev?.avatar ?? null });
+      continue;
+    }
+    const cached =
+      prev?.avatarUrl === avatarUrl && prev.avatar && (await exists(path.join(OUT_DIR, prev.avatar)));
+    if (cached) {
+      ownerRows.set(owner, prev);
+      continue;
+    }
+    try {
+      const { bytes, type } = await fetchAvatar(`${avatarUrl}${avatarUrl.includes("?") ? "&" : "?"}size=96`);
+      const rel = `avatars/${safeSegment(owner)}.${type.includes("jpeg") ? "jpg" : "png"}`;
+      await writeFile(path.join(OUT_DIR, `${rel}.tmp`), bytes);
+      await rename(path.join(OUT_DIR, `${rel}.tmp`), path.join(OUT_DIR, rel));
+      if (prev?.avatar && prev.avatar !== rel) await rm(path.join(OUT_DIR, prev.avatar), { force: true });
+      ownerRows.set(owner, { owner, avatarUrl, avatar: rel });
+    } catch (err) {
+      console.error(`  WARN avatar ${owner}: ${err.message}`);
+      ownerRows.set(owner, prev ?? { owner, avatarUrl, avatar: null });
+    }
+  }
+};
+await Promise.all(Array.from({ length: Math.min(CONCURRENCY, ownerSet.length) }, avatarWorker));
+const ownersOut = ownerSet.map((owner) => ownerRows.get(owner));
+await atomicWrite(
+  path.join(OUT_DIR, "owners.jsonl"),
+  ownersOut.map((row) => JSON.stringify(row)).join("\n") + (ownersOut.length ? "\n" : ""),
+);
+// Files no row references anymore (an owner's avatar switched formats, a
+// failed run left a .tmp behind) are pruned, keeping avatars/ exactly the
+// set of referenced copies.
+const referencedAvatars = new Set(ownersOut.map((r) => r.avatar).filter(Boolean));
+for (const entry of (await readdir(avatarDir).catch(() => []))) {
+  if (!referencedAvatars.has(`avatars/${entry}`)) await rm(path.join(avatarDir, entry), { force: true });
+}
+
 // Sort by installs desc, ties by id: workers finish out of order, so the row
 // order would otherwise be nondeterministic and daily snapshots would differ
 // even without real changes.
@@ -519,7 +627,6 @@ await rm(path.join(OUT_DIR, ".tmp"), { recursive: true, force: true });
 // under --limit, repos whose request failed) keep the previous run's values;
 // a repo with no previous value gets all-null fields and is filled in on the
 // next successful run.
-const rowRepos = [...new Set(rows.map((r) => repoOfId(r.id)).filter(Boolean))].sort();
 const reposOut = rowRepos.map((repo) => ({
   repo,
   ...(repoMeta.get(repo) ?? prevRepos.get(repo) ?? { stars: null, description: null, pushedAt: null }),

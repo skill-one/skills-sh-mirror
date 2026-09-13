@@ -5,7 +5,10 @@
 // an older dataset are removed), repo metadata (stars / description /
 // pushedAt per unique repo in repos.jsonl — skills sharing a repo trigger a
 // single request; 404 -> nulls; 500 retried into a value; only repos behind
-// indexed rows are kept), skills.jsonl index shape (only saved skills — duplicates and
+// indexed rows are kept), owner avatars (one row per owner in owners.jsonl +
+// the image in avatars/, downloaded from the URL the repo response carries
+// with no token; cached while the URL's ?v= parameter is unchanged; a failed
+// download keeps the previous row), skills.jsonl index shape (only saved skills — duplicates and
 // no-snapshot skills are omitted; skills whose fetch failed keep their
 // previous row and content), pure content directories, path sanitization,
 // SKILL.md description extraction (plain / quoted / folded block scalars;
@@ -157,21 +160,38 @@ const TRENDING_PER_PAGE = "200";
 // canonical id.
 const CURATED_REDUCED = { ...CURATED, data: CURATED.data.map((o) => ({ ...o, skills: o.skills.map(canonicalId) })) };
 
-// Mock GitHub API: repo -> { stars, description, pushed_at } (null = repo
-// gone, 404). The scraper maps these onto repos.jsonl's stars/description/
+// Mock GitHub API: repo -> { stars, description, pushed_at, ownerLogin }
+// (null = repo gone, 404). The scraper maps these onto repos.jsonl's stars/description/
 // pushedAt; a null description exercises the null passthrough.
 const REPOS = {
-  "/repos/vercel-labs/skills": { stars: 1000, description: "Skills for Vercel", pushed_at: "2026-09-01T00:00:00.000Z" },
-  "/repos/owner/repo": { stars: 42, description: "A test repo", pushed_at: "2026-08-15T12:00:00.000Z" },
-  "/repos/owner/flaky-repo": { stars: 5, description: null, pushed_at: "2026-07-01T00:00:00.000Z" }, // 500s once, then succeeds
+  "/repos/vercel-labs/skills": { stars: 1000, description: "Skills for Vercel", pushed_at: "2026-09-01T00:00:00.000Z", ownerLogin: "vercel-labs" },
+  "/repos/owner/repo": { stars: 42, description: "A test repo", pushed_at: "2026-08-15T12:00:00.000Z", ownerLogin: "owner" },
+  "/repos/owner/flaky-repo": { stars: 5, description: null, pushed_at: "2026-07-01T00:00:00.000Z", ownerLogin: "owner" }, // 500s once, then succeeds
   "/repos/gone/repo": null,
-  "/repos/claude-office-skills/skills": { stars: 7, description: "Claude office skills", pushed_at: "2026-09-10T00:00:00.000Z" },
+  "/repos/claude-office-skills/skills": { stars: 7, description: "Claude office skills", pushed_at: "2026-09-10T00:00:00.000Z", ownerLogin: "claude-office-skills" },
 };
+// owner -> avatar path served by the mock CDN (no auth, like GitHub's avatar host)
+const OWNER_U = { "vercel-labs": 1, "owner": 2, "claude-office-skills": 3 };
+// vercel-labs's avatar URL carries this version: bumping it makes the scraper
+// see a new avatarUrl and re-download, while other owners stay cached.
+let vercelAvatarRev = 4;
 const GH_TOKEN = "gh-mock-token";
 const ghHits = {};
 const ghServer = createServer((req, res) => {
   const repoPath = req.url.split("?")[0];
   ghHits[repoPath] = (ghHits[repoPath] ?? 0) + 1;
+  // Avatar host: no Authorization header, like GitHub's avatar CDN. u/3 500s
+  // once (transient retry) and serves jpeg, exercising the .jpg extension.
+  if (repoPath.startsWith("/u/")) {
+    if (repoPath === "/u/3" && ghHits[repoPath] === 1) {
+      res.statusCode = 500;
+      res.end("boom");
+      return;
+    }
+    res.setHeader("content-type", repoPath === "/u/3" ? "image/jpeg" : "image/png");
+    res.end(Buffer.from(`${repoPath === "/u/3" ? "jpg" : "png"}-${repoPath}`));
+    return;
+  }
   if (req.headers.authorization !== `Bearer ${GH_TOKEN}`) {
     res.statusCode = 401;
     res.end(JSON.stringify({ message: "Bad credentials" }));
@@ -187,9 +207,20 @@ const ghServer = createServer((req, res) => {
     res.end(JSON.stringify({ message: "Not Found" }));
     return;
   }
-  const { stars, description, pushed_at } = REPOS[repoPath];
+  const { stars, description, pushed_at, ownerLogin } = REPOS[repoPath];
   res.setHeader("content-type", "application/json");
-  res.end(JSON.stringify({ full_name: repoPath.slice("/repos/".length), stargazers_count: stars, description, pushed_at }));
+  res.end(
+    JSON.stringify({
+      full_name: repoPath.slice("/repos/".length),
+      stargazers_count: stars,
+      description,
+      pushed_at,
+      owner: {
+        login: ownerLogin,
+        avatar_url: `http://${req.headers.host}/u/${OWNER_U[ownerLogin]}?v=${ownerLogin === "vercel-labs" ? vercelAvatarRev : 4}`,
+      },
+    }),
+  );
 });
 
 test("scraper end-to-end against mock API", async () => {
@@ -296,6 +327,7 @@ test("scraper end-to-end against mock API", async () => {
 
   const readRows = async (out) => (await readFile(path.join(out, "skills.jsonl"), "utf8")).split("\n").filter(Boolean).map(JSON.parse);
   const readRepos = async (out) => (await readFile(path.join(out, "repos.jsonl"), "utf8")).split("\n").filter(Boolean).map(JSON.parse);
+  const readOwners = async (out) => (await readFile(path.join(out, "owners.jsonl"), "utf8")).split("\n").filter(Boolean).map(JSON.parse);
   const readStats = async (out) => JSON.parse(await readFile(path.join(out, "stats.json"), "utf8"));
   const pathExists = (p) => access(p).then(() => true, () => false);
   const dir = (out, ...p) => path.join(out, "skills", ...p);
@@ -378,6 +410,19 @@ test("scraper end-to-end against mock API", async () => {
     assert.equal(ghHits["/repos/owner/flaky-repo"], 2); // 500 + successful retry
     assert.equal(ghHits["/repos/gone/repo"], 1);
 
+    // owner avatars land in owners.jsonl + avatars/, one row per owner of an
+    // indexed repo (sorted by owner), downloaded from the URL the repo
+    // response carries — no auth, no token, no GitHub API rate limit
+    const owners1 = await readOwners(out1);
+    assert.deepEqual(owners1, [
+      { owner: "owner", avatarUrl: `${ghBase}/u/2?v=4`, avatar: "avatars/owner.png" },
+      { owner: "vercel-labs", avatarUrl: `${ghBase}/u/1?v=4`, avatar: "avatars/vercel-labs.png" },
+    ]);
+    assert.equal(await readFile(path.join(out1, "avatars/owner.png"), "utf8"), "png-/u/2");
+    assert.equal(await readFile(path.join(out1, "avatars/vercel-labs.png"), "utf8"), "png-/u/1");
+    assert.equal(ghHits["/u/1"], 1);
+    assert.equal(ghHits["/u/2"], 1);
+
     // description comes from the SKILL.md frontmatter (plain / quoted / folded)
     assert.equal(rows1[0].description, "Find skills on skills.sh."); // plain scalar
     assert.equal(rows1[1].description, "weird but quoted"); // quoted scalar
@@ -447,6 +492,9 @@ test("scraper end-to-end against mock API", async () => {
     assert.deepEqual(rows2.map((r) => r.hash), rows1.map((r) => r.hash));
     // repos.jsonl is re-fetched every run; unchanged values reproduce it verbatim
     assert.deepEqual(await readRepos(out1), repos1);
+    // avatars are cached while the URL (?v= parameter) is unchanged: no downloads
+    assert.deepEqual(await readOwners(out1), owners1);
+    assert.equal(ghHits["/u/1"], 1);
     assert.equal(
       await readFile(dir(out1, "vercel-labs/skills/find-skills", "SKILL.md"), "utf8"),
       findSkillsFiles(0)[0].contents,
@@ -488,6 +536,8 @@ test("scraper end-to-end against mock API", async () => {
     assert.deepEqual(rows4[0].audits, AUDITS["vercel-labs/skills/find-skills"]);
     assert.deepEqual(rows4[1].audits, []); // audited by nobody -> empty array
     assert.deepEqual(await readRepos(out2), repos1); // re-fetched for the fresh dir
+    assert.deepEqual(await readOwners(out2), owners1); // avatars downloaded again into the fresh dir
+    assert.equal(ghHits["/u/1"], 2);
 
     // --- run 5: repairing bad-id lets it save (into out1, where it has
     // never had content)
@@ -537,6 +587,7 @@ test("scraper end-to-end against mock API", async () => {
     // carried over from the previous repos.jsonl, so the file still covers
     // every indexed row's repo
     assert.deepEqual(await readRepos(out1), repos1);
+    assert.deepEqual(await readOwners(out1), owners1); // carried over like the rows
 
     // --- run 8 (--audits, out2): unchanged content reuses the previous audit
     // results without any audit request
@@ -587,6 +638,7 @@ test("scraper end-to-end against mock API", async () => {
     const GOOD_TRENDING = ["vercel-labs/skills/find-skills", "claude-office-skills/skills/facebookmeta-ads"];
     const GOOD_STATS = JSON.parse(await readFile(path.join(out1, "stats.json"), "utf8"));
     const GOOD_REPOS = await readRepos(out1);
+    const GOOD_OWNERS = await readOwners(out1);
     const baseRows = await readRows(out1); // == rows6: 5 rows including bad-id
     const writeIndex = async (rows) =>
       writeFile(path.join(out1, "skills.jsonl"), rows.map((r) => JSON.stringify(r)).join("\n") + "\n");
@@ -616,6 +668,15 @@ test("scraper end-to-end against mock API", async () => {
       pattern,
       setup: () => writeRepos(repos),
       cleanup: () => writeRepos(GOOD_REPOS),
+    });
+    // owners.jsonl cases: rows are JSON lines, one owner per line.
+    const writeOwners = (owners) =>
+      writeFile(path.join(out1, "owners.jsonl"), owners.map((r) => JSON.stringify(r)).join("\n") + "\n");
+    const ownersCase = (name, pattern, owners) => ({
+      name,
+      pattern,
+      setup: () => writeOwners(owners),
+      cleanup: () => writeOwners(GOOD_OWNERS),
     });
 
     const tamperCases = [
@@ -681,6 +742,29 @@ test("scraper end-to-end against mock API", async () => {
       reposCase("repos.jsonl is not sorted by repo", /repos\.jsonl: rows not sorted by repo at owner\/repo/, [...GOOD_REPOS].reverse()),
       reposCase("repos.jsonl lacks an indexed row's repository", /repos\.jsonl: no row for owner\/repo/, GOOD_REPOS.filter((r) => r.repo !== "owner/repo")),
       reposCase("repos.jsonl holds a row no index row references", /repos\.jsonl: orphan row \(no index row\): extra\/repo/, [...GOOD_REPOS, { repo: "extra/repo", stars: 1, description: null, pushedAt: null }]),
+      {
+        name: "owners.jsonl is unparseable",
+        pattern: /owners\.jsonl line 1: invalid JSON/,
+        setup: () => writeFile(path.join(out1, "owners.jsonl"), "{\n" + GOOD_OWNERS.map((r) => JSON.stringify(r)).join("\n") + "\n"),
+        cleanup: () => writeOwners(GOOD_OWNERS),
+      },
+      ownersCase("owners.jsonl's rows are not owner/avatarUrl/avatar shaped", /owners\.jsonl: rows must carry/, [{ ...GOOD_OWNERS[0], avatar: undefined }, ...GOOD_OWNERS.slice(1)]),
+      ownersCase("owners.jsonl repeats an owner", /owners\.jsonl: duplicate owner: owner/, [GOOD_OWNERS[0], GOOD_OWNERS[0], ...GOOD_OWNERS.slice(1)]),
+      ownersCase("owners.jsonl is not sorted by owner", /owners\.jsonl: rows not sorted by owner at owner\n/, [...GOOD_OWNERS].reverse()),
+      ownersCase("owners.jsonl lacks an indexed row's owner", /owners\.jsonl: no row for owner/, GOOD_OWNERS.filter((r) => r.owner !== "owner")),
+      ownersCase("owners.jsonl holds a row no index row references", /owners\.jsonl: orphan row \(no index row\): extra/, [...GOOD_OWNERS, { owner: "extra", avatarUrl: null, avatar: null }]),
+      {
+        name: "owners.jsonl references an avatar file that is gone from disk",
+        pattern: /avatar file missing: avatars\/owner\.png/,
+        setup: () => rm(path.join(out1, "avatars/owner.png")),
+        cleanup: () => writeFile(path.join(out1, "avatars/owner.png"), "png-/u/2"),
+      },
+      {
+        name: "an avatar file no owners.jsonl row references",
+        pattern: /orphan avatar file \(no owners\.jsonl row\): avatars\/orphan\.png/,
+        setup: () => writeFile(path.join(out1, "avatars/orphan.png"), "x"),
+        cleanup: () => rm(path.join(out1, "avatars/orphan.png")),
+      },
     ];
     for (const { name, pattern, notPattern, setup, cleanup } of tamperCases) {
       await setup();
@@ -703,6 +787,7 @@ test("scraper end-to-end against mock API", async () => {
     // otherwise verify would report an orphan directory); the removal shows
     // up in stats.
     gone.add("owner/repo/flaky-500");
+    vercelAvatarRev = 5; // vercel-labs changed its avatar upstream
     const r10 = await run(out1);
     assert.equal(r10.status, 0, `run 10 failed:\n${r10.stderr}`);
     assert.match(r10.stderr, /changed=1, added=0, removed=1, dropped=4, failed=1 \(carried over: 1\)/);
@@ -714,6 +799,10 @@ test("scraper end-to-end against mock API", async () => {
       ["vercel-labs/skills/find-skills", "owner/repo/wei rd~x", "owner/flaky-repo/star-skill", "owner/repo/bad-id"],
     );
     assert.equal(await pathExists(dir(out1, "owner/repo/flaky-500")), false); // delisted content removed
+    // the bumped avatar URL forces exactly that one re-download; unchanged URLs stay cached
+    assert.equal(ghHits["/u/1"], 3);
+    assert.equal(ghHits["/u/2"], 2);
+    assert.deepEqual((await readOwners(out1))[1], { owner: "vercel-labs", avatarUrl: `${ghBase}/u/1?v=5`, avatar: "avatars/vercel-labs.png" });
     const v10 = await verify(out1);
     assert.equal(v10.status, 0, `verify out1 failed after removal:\n${v10.stdout}${v10.stderr}`);
     assert.match(v10.stdout, /OK: 4 rows, 4 content directories/);
@@ -759,6 +848,14 @@ test("scraper end-to-end against mock API", async () => {
     );
     assert.equal(await pathExists(dir(out1, "claude-office-skills/skills/facebook")), false); // the raw id never materializes
     const rows12 = await readRows(out1);
+    // the newly listed skill's owner joins owners.jsonl: 500 + retry, jpeg -> .jpg
+    assert.deepEqual(await readOwners(out1), [
+      { owner: "claude-office-skills", avatarUrl: `${ghBase}/u/3?v=4`, avatar: "avatars/claude-office-skills.jpg" },
+      { owner: "owner", avatarUrl: `${ghBase}/u/2?v=4`, avatar: "avatars/owner.png" },
+      { owner: "vercel-labs", avatarUrl: `${ghBase}/u/1?v=5`, avatar: "avatars/vercel-labs.png" },
+    ]);
+    assert.equal(await readFile(path.join(out1, "avatars/claude-office-skills.jpg"), "utf8"), "jpg-/u/3");
+    assert.equal(ghHits["/u/3"], 2); // 500 + successful retry
     // the newly listed skill's repo joins repos.jsonl (sorted position first)
     assert.deepEqual(await readRepos(out1), [
       { repo: "claude-office-skills/skills", stars: 7, description: "Claude office skills", pushedAt: "2026-09-10T00:00:00.000Z" },
@@ -831,8 +928,10 @@ test("publish: one commit per day, date-preserving prune, tag window", async () 
       const data = path.join(work, "data");
       await mkdir(path.join(data, "skills", "o/r/s"), { recursive: true });
       await writeFile(path.join(data, "skills", "o/r/s", "SKILL.md"), `# s rev ${day}\n`);
+      await mkdir(path.join(data, "avatars"), { recursive: true });
+      await writeFile(path.join(data, "avatars", "o.png"), "o");
       await writeFile(path.join(data, "skills.jsonl"), `{"day":"${day}","body":"${body}"}\n`);
-      for (const f of ["repos.jsonl", "trending.json", "curated.json", "stats.json"]) {
+      for (const f of ["repos.jsonl", "owners.jsonl", "trending.json", "curated.json", "stats.json"]) {
         await writeFile(path.join(data, f), `{"day":"${day}"}\n`);
       }
     };

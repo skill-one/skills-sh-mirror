@@ -9,6 +9,8 @@ A daily snapshot of every GitHub-sourced skill on [skills.sh](https://www.skills
 ```
 ├── skills.jsonl   one row per skill, sorted by installs desc — query / filter / rank here
 ├── repos.jsonl    one row per GitHub repository behind the index (stars, about, last push)
+├── owners.jsonl   one row per repository owner (avatar URL + local copy's path)
+├── avatars/       the owners' GitHub avatars, saved as {owner}.png|jpg
 ├── trending.json  the trending view's first 100 GitHub-sourced ids, in rank order
 ├── curated.json   the officially featured skills' ids, grouped by owner
 ├── stats.json     the producing run's stats (counts, changes, failed ids)
@@ -51,6 +53,18 @@ Each `skills.jsonl` row:
 | `stars` | the repository's stargazer count; `null` if the repo is gone or the count is unknown |
 | `description` | the repository's GitHub About text; `null` if unset or unknown |
 | `pushedAt` | the repository's last code-push time (`pushed_at`); `null` if the repo is gone. Note this tracks the repository, not the skill: use `hash`/`fetchedAt` in the index for skill-level changes |
+
+`owners.jsonl` holds the repository owners' GitHub avatars, pulled into `avatars/` so consumers need no GitHub API for them — one row per owner, sorted by owner:
+
+```json
+{"owner": "vercel-labs", "avatarUrl": "https://avatars.githubusercontent.com/u/12565288?v=4", "avatar": "avatars/vercel-labs.png"}
+```
+
+| Field | Meaning |
+|---|---|
+| `owner` | the GitHub user/org name — the id's first segment, the join key from every index row |
+| `avatarUrl` | the upstream avatar URL (its `?v=` parameter bumps when the user changes the avatar — this is what keeps re-downloads away) |
+| `avatar` | path of the local copy in the snapshot; `null` if that run's download failed |
 
 Two guarantees, integrity-checked after every run:
 
