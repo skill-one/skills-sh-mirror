@@ -27,7 +27,7 @@ import { spawnSync } from "node:child_process";
 import { argValue } from "./lib.mjs";
 
 const DEFAULT_WINDOW = 30;
-const SNAPSHOT = ["skills", "skills.jsonl", "trending.json", "curated.json", "stats.json"];
+const SNAPSHOT = ["skills", "skills.jsonl", "repos.json", "trending.json", "curated.json", "stats.json"];
 const POINTER = "latest";
 
 const git = (args, opts = {}) => {

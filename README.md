@@ -8,6 +8,7 @@ A daily snapshot of every GitHub-sourced skill on [skills.sh](https://www.skills
 
 ```
 ├── skills.jsonl   one row per skill, sorted by installs desc — query / filter / rank here
+├── repos.json     the GitHub repositories behind the indexed skills (stars, about, last push)
 ├── trending.json  the trending view's first 100 GitHub-sourced ids, in rank order
 ├── curated.json   the officially featured skills' ids, grouped by owner
 ├── stats.json     the producing run's stats (counts, changes, failed ids)
@@ -23,7 +24,6 @@ Each `skills.jsonl` row:
 {
   "id": "vercel-labs/skills/find-skills",
   "installs": 3263512,
-  "stars": 1523,
   "url": "https://www.skills.sh/vercel-labs/skills/find-skills",
   "description": "Find and install skills for your agent from skills.sh",
   "hash": "b146008599c31057cef1c145774cea5d5afb30e8f43fa802e47a4b461419aaaf",
@@ -34,11 +34,28 @@ Each `skills.jsonl` row:
 | Field | Meaning |
 |---|---|
 | `id`, `installs`, `url` | from the skills.sh leaderboard (the id encodes source and slug: `{owner}/{repo}/{slug}`) |
-| `stars` | the GitHub repository's stargazer count (the id's first two segments); `null` if the repo is gone or the count is unknown |
 | `description` | from the skill's `SKILL.md` frontmatter; skills whose SKILL.md has none are not mirrored |
 | `hash` | Content version of the skill's files: SHA-256 over each file's `path + 0x00 + bytes + 0x00`, files in case-insensitive path order ([the upstream `hash`](DEVELOPING.md#the-upstream-hash)); `null` if unknown |
 | `fetchedAt` | when the current content version was first fetched |
 | `audits` | with `--audits`: partner audit results (`provider`, `status`, `riskLevel`, …); `[]` = none yet |
+
+`repos.json` holds the GitHub repository metadata, keyed by `owner/repo` (an id's first two segments — the join key from every row):
+
+```json
+{
+  "vercel-labs/skills": {
+    "stars": 1523,
+    "description": "Agents, skills, and plugins for Vercel",
+    "pushedAt": "2026-09-11T14:02:11.000Z"
+  }
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `stars` | the repository's stargazer count; `null` if the repo is gone or the count is unknown |
+| `description` | the repository's GitHub About text; `null` if unset or unknown |
+| `pushedAt` | the repository's last code-push time (`pushed_at`); `null` if the repo is gone. Note this tracks the repository, not the skill: use `hash`/`fetchedAt` in the index for skill-level changes |
 
 Two guarantees, integrity-checked after every run:
 

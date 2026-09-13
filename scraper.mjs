@@ -7,8 +7,9 @@
  * GitHub token in GITHUB_TOKEN for star counts — see DEVELOPING.md.
  *
  * Only github-sourced skills (sourceType "github") are mirrored; well-known
- * sources have no repository to attribute. Each index row records the stars
- * of the skill's repository (owner/repo = the id's first two segments).
+ * sources have no repository to attribute. Repository metadata (stars, the
+ * About description, the last push time) is kept in repos.json, keyed by
+ * "owner/repo" — one entry per repository behind an indexed skill.
  *
  * Output shape:
  *   data/skills.jsonl                       index: one row per github-sourced
@@ -21,6 +22,9 @@
  *                                           grouping
  *   data/skills/{owner}/{repo}/{slug}/      pure skill files, nothing else
  *                                           (mirrors the id segment by segment)
+ *   data/repos.json                         the GitHub repositories behind the
+ *                                           indexed skills: stars, About
+ *                                           description, last push time
  *   data/stats.json                         this run's stats: timing, entry
  *                                           counts, failed ids
  *
@@ -56,7 +60,7 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import { mkdir, readdir, readFile, rename, rmdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { argValue, canonicalId, dirName, exists, githubRepoOf, safeSegment, skillDescription } from "./lib.mjs";
+import { argValue, canonicalId, dirName, exists, repoOfId, safeSegment, skillDescription } from "./lib.mjs";
 
 const API_BASE = (process.env.SKILLS_API_BASE ?? "https://skills.sh").replace(/\/+$/, "");
 const GITHUB_API_BASE = (process.env.GITHUB_API_BASE ?? "https://api.github.com").replace(/\/+$/, "");
@@ -68,8 +72,9 @@ const WANT_AUDITS = args.includes("--audits");
 const CONCURRENCY = 10; // request budget shared by both API clients
 const startedAt = new Date();
 
-// repo -> stargazers_count, filled by the stars phase and read by fetchSkill.
-const repoStars = new Map();
+// repo -> { stars, description, pushedAt }, filled by the stars phase and
+// written to repos.json at the end.
+const repoMeta = new Map();
 
 // Every JSON artifact (trending.json, curated.json, skills.jsonl, stats.json)
 // is written to `<path>.tmp` first and swapped in via rename(2), so a crash
@@ -245,6 +250,17 @@ async function loadPrevIndex() {
   }
 }
 
+// Previous run's repos.json drives carry-over: a repo whose GitHub request
+// failed this run keeps its previous entry; a repo fetched for the first time
+// whose request failed is simply absent until the next run succeeds.
+async function loadPrevRepos() {
+  try {
+    return JSON.parse(await readFile(path.join(OUT_DIR, "repos.json"), "utf8"));
+  } catch {
+    return {};
+  }
+}
+
 // Returns the index row for the skill, or null when the skill is left out of
 // the index: duplicates (stale content removed too) and skills without an
 // upstream snapshot. Fetch errors propagate to the worker, which also leaves
@@ -302,13 +318,10 @@ async function fetchSkill(skill, prev) {
   // Only the fields not derivable elsewhere: the id encodes source and slug
   // (the directory layout mirrors it), the rest of the leaderboard payload
   // (name, source, sourceType, installUrl) is redundant display data. Stars
-  // come from the per-repo fetch: the previous value covers a repo whose
-  // star request failed this run.
-  const repo = githubRepoOf(skill);
+  // and the other repository metadata live in repos.json, keyed by the repo.
   const row = {
     id: skill.id,
     installs: skill.installs,
-    stars: repoStars.get(repo) ?? prev?.stars ?? null,
     url: skill.url,
     description: skillDescription(skillMd?.contents),
     hash: detail.hash ?? null,
@@ -366,6 +379,7 @@ await mkdir(path.join(OUT_DIR, "skills"), { recursive: true });
 console.error(`[1/5] Fetching leaderboard from ${API_BASE} ...`);
 const { skills, nonGithub } = await fetchLeaderboard(skillsApi);
 const prevIndex = await loadPrevIndex();
+const prevRepos = await loadPrevRepos();
 
 console.error(`[2/5] Fetching trending top ${TRENDING_COUNT} (github-sourced) from ${API_BASE} ...`);
 const { ids: trending, nonGithub: trendingNonGithub } = await fetchTrending(skillsApi);
@@ -382,12 +396,14 @@ console.error(`  curated: ${curated.data.length} owners / ${curated.totalSkills}
 
 const targets = Number.isFinite(DETAIL_LIMIT) ? skills.slice(0, DETAIL_LIMIT) : skills;
 
-// Stars are per repository, and skills cluster on shared repos: one request
-// per unique repo instead of per skill. A 404 (deleted/renamed-away repo)
-// pins stars to null; any other failure just skips the repo, and rows fall
-// back to the previous run's value (or null on first fetch).
-const repos = [...new Set(targets.map(githubRepoOf).filter(Boolean))];
-console.error(`[4/5] Fetching stars for ${repos.length} repositories from ${GITHUB_API_BASE} ...`);
+// Repository metadata is per repository, and skills cluster on shared repos:
+// one request per unique repo instead of per skill. Each response already
+// carries everything repos.json records (stars, description, pushed_at), so
+// this phase costs no extra requests. A 404 (deleted/renamed-away repo) pins
+// all fields to null; any other failure keeps the previous entry (or, on a
+// repo's first fetch, no entry until the next run succeeds).
+const repos = [...new Set(targets.map((s) => repoOfId(s.id)).filter(Boolean))];
+console.error(`[4/5] Fetching repository metadata for ${repos.length} repositories from ${GITHUB_API_BASE} ...`);
 let reposDone = 0;
 let repoIndex = 0;
 const starWorker = async () => {
@@ -399,7 +415,15 @@ const starWorker = async () => {
         return undefined;
       },
     );
-    if (data !== undefined) repoStars.set(repo, data?.stargazers_count ?? null);
+    if (data !== undefined) {
+      repoMeta.set(repo, {
+        stars: data?.stargazers_count ?? null,
+        description: data?.description ?? null,
+        pushedAt: data?.pushed_at ?? null,
+      });
+    } else if (prevRepos[repo]) {
+      repoMeta.set(repo, prevRepos[repo]); // keep the last good entry
+    }
     if (++reposDone % 200 === 0 || reposDone === repos.length) {
       console.error(`  stars: ${reposDone}/${repos.length}`);
     }
@@ -485,6 +509,21 @@ const byRank = (a, b) => b.installs - a.installs || (a.id < b.id ? -1 : a.id > b
 const indexPath = path.join(OUT_DIR, "skills.jsonl");
 await atomicWrite(indexPath, rows.sort(byRank).map((row) => JSON.stringify(row)).join("\n") + (rows.length ? "\n" : ""));
 await rm(path.join(OUT_DIR, ".tmp"), { recursive: true, force: true });
+
+// repos.json: the GitHub repositories behind the indexed skills, keyed by
+// "owner/repo" (an id's first two segments). Every index row's repo has an
+// entry, so a consumer can join by that key without misses. Entries not
+// fetched this run (carried-over rows under --limit, repos whose request
+// failed) keep the previous run's value; a repo with no previous value gets
+// all-null fields and is filled in on the next successful run.
+const rowRepos = [...new Set(rows.map((r) => repoOfId(r.id)).filter(Boolean))];
+const reposOut = Object.fromEntries(
+  rowRepos.sort().map((repo) => [
+    repo,
+    repoMeta.get(repo) ?? prevRepos[repo] ?? { stars: null, description: null, pushedAt: null },
+  ]),
+);
+await atomicWrite(path.join(OUT_DIR, "repos.json"), JSON.stringify(reposOut, null, 2) + "\n");
 
 // Prune directories left empty by dropped skills (git drops empty dirs on
 // publish, but the local tree stays tidy). Bottom-up: rmdir fails harmlessly

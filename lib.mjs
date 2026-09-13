@@ -14,14 +14,12 @@ export const argValue = (args, flag) => {
 export const safeSegment = (s) => (s === "." || s === ".." ? "_" : s.replace(/[^\w.-]/g, "_"));
 export const dirName = (id) => id.split("/").map(safeSegment).join("/");
 
-// The GitHub repo ("owner/repo") a github-sourced skill lives in. The
-// leaderboard's own `source` field is authoritative (same field canonicalId
-// uses); the id's first two segments are the equivalent fallback when the
-// entry carries no source. Non-github entries yield null.
-export const githubRepoOf = (skill) => {
-  if (skill.sourceType !== "github") return null;
-  if (typeof skill.source === "string" && skill.source) return skill.source;
-  const segs = typeof skill.id === "string" ? skill.id.split("/") : [];
+// The "owner/repo" an id's first two segments encode. Github-sourced ids are
+// normalized so that these two segments are exactly the skill's `source`
+// (see canonicalId), so this is the repository every consumer joins index
+// rows into repos.json by.
+export const repoOfId = (id) => {
+  const segs = typeof id === "string" ? id.split("/") : [];
   return segs.length >= 3 ? segs.slice(0, 2).join("/") : null;
 };
 

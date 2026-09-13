@@ -4,8 +4,10 @@
  *
  * Checks skills.jsonl + content directories against the scraper's invariants:
  *   - every line parses; ids unique; rows sorted by installs desc (ties by id)
- *   - required fields well-formed (id, installs, stars, url, fetchedAt, hash,
- *     audits, description)
+ *   - required fields well-formed (id, installs, url, fetchedAt, hash, audits,
+ *     description)
+ *   - repos.json parses, is well-shaped (owner/repo keys; stars/description/
+ *     pushedAt values), and covers every indexed row's repository
  *   - no two rows share a sanitized directory name
  *   - every content directory's SKILL.md carries a description that matches
  *     the index row
@@ -22,7 +24,7 @@
 
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
-import { argValue, dirName, exists, skillDescription } from "./lib.mjs";
+import { argValue, dirName, exists, repoOfId, skillDescription } from "./lib.mjs";
 
 const args = process.argv.slice(2);
 const OUT_DIR = argValue(args, "--out") ?? "data";
@@ -40,8 +42,6 @@ function checkRow(row) {
   const segs = typeof id === "string" ? id.split("/").filter((s) => s.length) : [];
   if (segs.length !== 3) problem(`${label}: malformed id`);
   if (!Number.isFinite(row.installs) || row.installs < 0) problem(`${label}: bad installs`);
-  if (!("stars" in row)) problem(`${label}: missing stars`);
-  else if (row.stars !== null && (!Number.isFinite(row.stars) || row.stars < 0)) problem(`${label}: bad stars`);
   if (row.url !== null && typeof row.url !== "string") problem(`${label}: bad url`);
   if (row.fetchedAt !== null && !isIso(row.fetchedAt)) problem(`${label}: bad fetchedAt`);
   if (row.hash !== null && !isHash(row.hash)) problem(`${label}: bad hash`);
@@ -54,6 +54,7 @@ let dirCount = 0;
 let rowCount = 0;
 let trendingCount = null;
 let curatedOwners = null;
+let reposCount = null;
 const text = await readFile(path.join(OUT_DIR, "skills.jsonl"), "utf8").catch(() => null);
 if (text === null) {
   problem(`skills.jsonl not found under ${OUT_DIR}`);
@@ -181,6 +182,38 @@ if (text === null) {
     }
   }
   if (await exists(path.join(OUT_DIR, "curated.json.tmp"))) problem("curated.json.tmp leftover from an interrupted run");
+
+  // repos.json: the repositories behind the indexed skills, keyed by
+  // "owner/repo". Must match the index's repositories exactly in both
+  // directions, so a consumer can join by that key without misses.
+  const reposRaw = await readFile(path.join(OUT_DIR, "repos.json"), "utf8").catch(() => null);
+  if (reposRaw === null) {
+    problem("repos.json not found");
+  } else {
+    try {
+      const repos = JSON.parse(reposRaw);
+      const shaped =
+        repos !== null && typeof repos === "object" && !Array.isArray(repos) &&
+        Object.entries(repos).every(([repo, meta]) =>
+          /^[^/]+\/[^/]+$/.test(repo) &&
+          meta !== null && typeof meta === "object" && !Array.isArray(meta) &&
+          (meta.stars === null || (Number.isFinite(meta.stars) && meta.stars >= 0)) &&
+          (meta.description === null || typeof meta.description === "string") &&
+          (meta.pushedAt === null || isIso(meta.pushedAt)),
+        );
+      if (!shaped) {
+        problem("repos.json: not an owner/repo-keyed object with stars/description/pushedAt entries");
+      } else {
+        reposCount = Object.keys(repos).length;
+        const rowRepos = new Set(rows.map((r) => repoOfId(r.id)).filter(Boolean));
+        for (const repo of rowRepos) if (!(repo in repos)) problem(`repos.json: no entry for ${repo}`);
+        for (const repo of Object.keys(repos)) if (!rowRepos.has(repo)) problem(`repos.json: orphan entry (no index row): ${repo}`);
+      }
+    } catch {
+      problem("repos.json: invalid JSON");
+    }
+  }
+  if (await exists(path.join(OUT_DIR, "repos.json.tmp"))) problem("repos.json.tmp leftover from an interrupted run");
 }
 
 if (problems.length) {
@@ -190,5 +223,5 @@ if (problems.length) {
   process.exit(1);
 }
 console.log(
-  `OK: ${rowCount} rows, ${dirCount} content directories, ${trendingCount ?? "no"} trending, ${curatedOwners ?? "no"} curated owners, 0 problems (${OUT_DIR})`,
+  `OK: ${rowCount} rows, ${dirCount} content directories, ${reposCount ?? "no"} repos, ${trendingCount ?? "no"} trending, ${curatedOwners ?? "no"} curated owners, 0 problems (${OUT_DIR})`,
 );
