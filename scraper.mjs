@@ -8,8 +8,8 @@
  *
  * Only github-sourced skills (sourceType "github") are mirrored; well-known
  * sources have no repository to attribute. Repository metadata (stars, the
- * About description, the last push time) is kept in repos.json, keyed by
- * "owner/repo" — one entry per repository behind an indexed skill.
+ * About description, the last push time) is kept in repos.jsonl — one row
+ * per repository behind an indexed skill.
  *
  * Output shape:
  *   data/skills.jsonl                       index: one row per github-sourced
@@ -22,9 +22,9 @@
  *                                           grouping
  *   data/skills/{owner}/{repo}/{slug}/      pure skill files, nothing else
  *                                           (mirrors the id segment by segment)
- *   data/repos.json                         the GitHub repositories behind the
- *                                           indexed skills: stars, About
- *                                           description, last push time
+ *   data/repos.jsonl                        one row per GitHub repository
+ *                                           behind an indexed skill: stars,
+ *                                           About description, last push time
  *   data/stats.json                         this run's stats: timing, entry
  *                                           counts, failed ids
  *
@@ -73,7 +73,7 @@ const CONCURRENCY = 10; // request budget shared by both API clients
 const startedAt = new Date();
 
 // repo -> { stars, description, pushedAt }, filled by the stars phase and
-// written to repos.json at the end.
+// written to repos.jsonl at the end.
 const repoMeta = new Map();
 
 // Every JSON artifact (trending.json, curated.json, skills.jsonl, stats.json)
@@ -250,14 +250,16 @@ async function loadPrevIndex() {
   }
 }
 
-// Previous run's repos.json drives carry-over: a repo whose GitHub request
-// failed this run keeps its previous entry; a repo fetched for the first time
+// Previous run's repos.jsonl drives carry-over: a repo whose GitHub request
+// failed this run keeps its previous row; a repo fetched for the first time
 // whose request failed is simply absent until the next run succeeds.
 async function loadPrevRepos() {
   try {
-    return JSON.parse(await readFile(path.join(OUT_DIR, "repos.json"), "utf8"));
+    const text = await readFile(path.join(OUT_DIR, "repos.jsonl"), "utf8");
+    const rows = text.split("\n").filter(Boolean).map((line) => JSON.parse(line));
+    return new Map(rows.map((row) => [row.repo, row]));
   } catch {
-    return {};
+    return new Map();
   }
 }
 
@@ -318,7 +320,7 @@ async function fetchSkill(skill, prev) {
   // Only the fields not derivable elsewhere: the id encodes source and slug
   // (the directory layout mirrors it), the rest of the leaderboard payload
   // (name, source, sourceType, installUrl) is redundant display data. Stars
-  // and the other repository metadata live in repos.json, keyed by the repo.
+  // and the other repository metadata live in repos.jsonl, keyed by the repo.
   const row = {
     id: skill.id,
     installs: skill.installs,
@@ -398,7 +400,7 @@ const targets = Number.isFinite(DETAIL_LIMIT) ? skills.slice(0, DETAIL_LIMIT) : 
 
 // Repository metadata is per repository, and skills cluster on shared repos:
 // one request per unique repo instead of per skill. Each response already
-// carries everything repos.json records (stars, description, pushed_at), so
+// carries everything repos.jsonl records (stars, description, pushed_at), so
 // this phase costs no extra requests. A 404 (deleted/renamed-away repo) pins
 // all fields to null; any other failure keeps the previous entry (or, on a
 // repo's first fetch, no entry until the next run succeeds).
@@ -421,8 +423,8 @@ const starWorker = async () => {
         description: data?.description ?? null,
         pushedAt: data?.pushed_at ?? null,
       });
-    } else if (prevRepos[repo]) {
-      repoMeta.set(repo, prevRepos[repo]); // keep the last good entry
+    } else if (prevRepos.has(repo)) {
+      repoMeta.set(repo, prevRepos.get(repo)); // keep the last good entry
     }
     if (++reposDone % 200 === 0 || reposDone === repos.length) {
       console.error(`  stars: ${reposDone}/${repos.length}`);
@@ -510,20 +512,22 @@ const indexPath = path.join(OUT_DIR, "skills.jsonl");
 await atomicWrite(indexPath, rows.sort(byRank).map((row) => JSON.stringify(row)).join("\n") + (rows.length ? "\n" : ""));
 await rm(path.join(OUT_DIR, ".tmp"), { recursive: true, force: true });
 
-// repos.json: the GitHub repositories behind the indexed skills, keyed by
-// "owner/repo" (an id's first two segments). Every index row's repo has an
-// entry, so a consumer can join by that key without misses. Entries not
-// fetched this run (carried-over rows under --limit, repos whose request
-// failed) keep the previous run's value; a repo with no previous value gets
-// all-null fields and is filled in on the next successful run.
-const rowRepos = [...new Set(rows.map((r) => repoOfId(r.id)).filter(Boolean))];
-const reposOut = Object.fromEntries(
-  rowRepos.sort().map((repo) => [
-    repo,
-    repoMeta.get(repo) ?? prevRepos[repo] ?? { stars: null, description: null, pushedAt: null },
-  ]),
+// repos.jsonl: one row per GitHub repository behind the indexed skills,
+// sorted by repo asc (a deterministic order keeps daily diffs one line per
+// changed repo). The `repo` field is the join key from every index row (an
+// id's first two segments). Rows not fetched this run (carried-over rows
+// under --limit, repos whose request failed) keep the previous run's values;
+// a repo with no previous value gets all-null fields and is filled in on the
+// next successful run.
+const rowRepos = [...new Set(rows.map((r) => repoOfId(r.id)).filter(Boolean))].sort();
+const reposOut = rowRepos.map((repo) => ({
+  repo,
+  ...(repoMeta.get(repo) ?? prevRepos.get(repo) ?? { stars: null, description: null, pushedAt: null }),
+}));
+await atomicWrite(
+  path.join(OUT_DIR, "repos.jsonl"),
+  reposOut.map((row) => JSON.stringify(row)).join("\n") + (reposOut.length ? "\n" : ""),
 );
-await atomicWrite(path.join(OUT_DIR, "repos.json"), JSON.stringify(reposOut, null, 2) + "\n");
 
 // Prune directories left empty by dropped skills (git drops empty dirs on
 // publish, but the local tree stays tidy). Bottom-up: rmdir fails harmlessly

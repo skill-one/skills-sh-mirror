@@ -8,7 +8,7 @@ English: [README.md](README.md) · 开发指南(运行 / 校验 / 扩展):[DEVEL
 
 ```
 ├── skills.jsonl   每个技能一行,按 installs 降序 —— 查询 / 筛选 / 排行在这里
-├── repos.json     索引中技能所在的 GitHub 仓库元信息(star 数、About、最近推送时间)
+├── repos.jsonl    索引中技能所在的 GitHub 仓库,每个仓库一行(star 数、About、最近推送时间)
 ├── trending.json  trending 榜单中前 100 个 GitHub 来源 id,按榜单顺序
 ├── curated.json   官方精选技能的 id,按 owner 分组
 ├── stats.json     产出该快照那一次运行的统计(条目数、变化数、失败明细)
@@ -39,20 +39,15 @@ English: [README.md](README.md) · 开发指南(运行 / 校验 / 扩展):[DEVEL
 | `fetchedAt`             | 当前内容版本首次抓取的时间                                                              |
 | `audits`                | 使用 `--audits` 时:合作方审计结果(`provider`、`status`、`riskLevel`…);`[]` = 尚无人审计 |
 
-`repos.json` 按仓库存储 GitHub 元信息,以 `owner/repo`(id 的前两段,即每行关联回来的键)为键:
+`repos.jsonl` 按仓库存储 GitHub 元信息——每个仓库一行,按 repo 排序:
 
 ```json
-{
-  "vercel-labs/skills": {
-    "stars": 1523,
-    "description": "Agents, skills, and plugins for Vercel",
-    "pushedAt": "2026-09-11T14:02:11.000Z"
-  }
-}
+{"repo": "vercel-labs/skills", "stars": 1523, "description": "Agents, skills, and plugins for Vercel", "pushedAt": "2026-09-11T14:02:11.000Z"}
 ```
 
 | 字段          | 含义                                                                                    |
 | ------------- | --------------------------------------------------------------------------------------- |
+| `repo`        | `owner/repo`,即 id 的前两段——从每行索引关联回来的键                                    |
 | `stars`       | 仓库的 star 数;仓库已删除或未知时为 `null`                                              |
 | `description` | 仓库 GitHub 页面的 About 说明;未设置或未知时为 `null`                                   |
 | `pushedAt`    | 仓库最近一次代码推送时间(`pushed_at`);仓库已删除时为 `null`。注意它描述的是仓库而非技能:技能级的变化请看索引里的 `hash` / `fetchedAt` |

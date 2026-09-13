@@ -7,7 +7,7 @@
 1. `GET /api/v1/skills?per_page=500&page=N` —— 分页遍历排行榜(全站约 17 次请求)。只保留 GitHub 来源的条目(`sourceType: "github"`);well-known(域名)来源没有可归属的仓库,直接跳过并计入 `nonGithub`。
 2. `GET /api/v1/skills?view=trending&per_page=200` —— 单次请求拉取 trending 榜单;200 的深度足以在跳过 well-known 条目(与排行榜一致)后仍覆盖前 100 个 GitHub 来源的截断点。以 id 数组(按上游榜单顺序)写入 `trending.json`,id 与排行榜一样做规范化处理。
 3. `GET /api/v1/skills/curated` —— 官方精选的技能,按 owner 分组。写入 `curated.json`:owner 聚合数据与顶层计数原样保留(不做来源过滤——精选名单由上游决定),每个技能条目精简为规范化 id。
-4. `GET https://api.github.com/repos/{owner}/{repo}` —— 获取每个去重后仓库的元信息(约 1200 次请求:大量技能共享同一仓库)。响应本身就携带 `repos.json` 记录的全部字段(`stargazers_count`、`description`、`pushed_at`),因此这一步不产生额外请求。仓库 404(已删除)时三个字段全部置为 `null`;其他失败则保留上一轮的条目。
+4. `GET https://api.github.com/repos/{owner}/{repo}` —— 获取每个去重后仓库的元信息(约 1200 次请求:大量技能共享同一仓库)。响应本身就携带 `repos.jsonl` 记录的全部字段(`stargazers_count`、`description`、`pushed_at`),因此这一步不产生额外请求。仓库 404(已删除)时三个字段全部置为 `null`;其他失败则保留上一轮的行。
 5. `GET /api/v1/skills/{source}/{skill}` —— 获取每个技能的文件(`files` 数组携带完整文本)。SKILL.md 中没有 `description` 的技能会被跳过;其余文件先写临时目录再原子重命名到位,因此「目录存在」就意味着「内容完整」。
 6. 元数据合并成唯一的 `skills.jsonl` —— 每个已保存内容的技能一行,按 installs 降序,运行结束时原子写入。
 7. 写入 `stats.json` —— 本次运行的统计,随数据集一起发布。只保留无法从其他字段直接推导的信息:
@@ -63,7 +63,7 @@ node scraper.mjs --audits                 # 同时抓取安全审计结果(请�
 
 - skills.sh 限速 600 次/分钟,GitHub 认证 REST API 限速 5000 次/小时;脚本分别以 590 次/分钟和 80 次/分钟自限(共享并发 10),按 `Retry-After` 重试 `429` 和 `5xx` 及瞬时网络错误;`4xx` 一律不重试——它们是确定性的。
 - 每次运行都全量重新下载并重写全部内容(约 8400 次 skills.sh 请求)。上次的 `skills.jsonl` 只用来固定 `fetchedAt`:上游 hash 未变化的技能保留「首次抓取该内容版本那一次运行」的 `fetchedAt`。中断重跑可续抓,上游内容变更会被自动跟进。
-- 仓库元信息(stars / description / pushedAt)每次运行按去重后的仓库全量重抓(约 1200 次 GitHub 请求),写入以 `owner/repo` 为键的 `repos.json`——恰好覆盖索引各行的仓库,消费方按该键 join 不会落空。仓库请求失败沿用上一轮的条目(首次抓取就失败则暂缺,下次成功后补齐);仓库 404 时字段全部置 `null`。`--limit` 之外的仓库同样沿用上一轮的条目。
+- 仓库元信息(stars / description / pushedAt)每次运行按去重后的仓库全量重抓(约 1200 次 GitHub 请求),写入 `repos.jsonl`——索引各行背后的仓库每个一行,按 repo 升序(顺序确定,每日快照的 diff 因此每个仓库最多一行)。消费方按 `repo` 键 join 不会落空。仓库请求失败沿用上一轮的行(首次抓取就失败则暂缺,下次成功后补齐);仓库 404 时字段全部置 `null`。`--limit` 之外的仓库同样沿用上一轮的行。
 - 索引只包含 GitHub 来源且内容已落盘的技能:well-known(域名)来源在排行榜阶段即被跳过(计入 `nonGithub`);重复技能、上游无快照的技能、以及 SKILL.md 中没有 `description` 的技能不会出现在索引中(记录日志、计入 `Done:` 汇总、下次自动重试)。抓取失败的技能会沿用上一次的索引行和内容目录,镜像继续提供最后一份可用内容,且「行 ⟺ 目录」不变式不被破坏;从未成功抓取过的技能则不进索引。使用 `--limit` 时,limit 之外的技能同样沿用上一轮的索引行(limit 只约束抓取什么,不约束索引;下次全量运行会重新评估它们)。以上均计入 `carried over`。进程仅在系统性故障(鉴权、排行榜、索引写入)时以非零码退出。
 - 使用 `--audits` 时,只对内容 hash 变化的技能重新抓取审计结果;hash 未变的技能直接沿用上一次的结果,不发请求。
 - slug 规范化:上游的 slug 本身可能含 `/`(如 `claude-office-skills/skills/facebook/meta-ads`)。skills.sh 以 `${source}/${slug}`(slug 中的 `/` 去掉,如 `…/facebookmeta-ads`)作为这类技能的键——这是其详情 API 对多段 slug 唯一能寻址的形式。因此爬虫在去重之前,把每个 GitHub 来源条目的 id 规范化为 `${source}/${去斜杠的 slug}`(`lib.mjs` 中的 `canonicalId`);两个原始 id 理论上可能去斜杠后相同,此时保留先出现的那个。slug 本身不含 `/` 的 id(绝大多数)原样通过。
@@ -76,7 +76,7 @@ node scraper.mjs --audits                 # 同时抓取安全审计结果(请�
 | 2. 产物校验器 | 数据集是否完整? | 无(不联网) | `node verify.mjs --out data` |
 | 3. 真实 API 运行 | 线上接口行为是否未变? | token | `node scraper.mjs --limit 5 && node verify.mjs` |
 
-`verify.mjs` 是数据集被信任或上传前的门禁:每行可解析、id 唯一、按 installs 降序(并列时按 id 升序)、字段格式正确、无两行映射到同一目录名、索引行与磁盘目录双向严格对应(每行都有目录、无孤儿目录)、`stats.json` 存在且可解析并与索引一致、`trending.json` / `curated.json` 是格式正确的 id 列表、`repos.json` 格式正确且覆盖索引各行的仓库、无 `.tmp` 残留。本地快速上手:
+`verify.mjs` 是数据集被信任或上传前的门禁:每行可解析、id 唯一、按 installs 降序(并列时按 id 升序)、字段格式正确、无两行映射到同一目录名、索引行与磁盘目录双向严格对应(每行都有目录、无孤儿目录)、`stats.json` 存在且可解析并与索引一致、`trending.json` / `curated.json` 是格式正确的 id 列表、`repos.jsonl` 格式正确、按 repo 排序且与索引的仓库集合精确一致、无 `.tmp` 残留。本地快速上手:
 
 ```bash
 npm test                          # 快速,无需密钥

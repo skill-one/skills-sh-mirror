@@ -8,7 +8,7 @@ A daily snapshot of every GitHub-sourced skill on [skills.sh](https://www.skills
 
 ```
 ├── skills.jsonl   one row per skill, sorted by installs desc — query / filter / rank here
-├── repos.json     the GitHub repositories behind the indexed skills (stars, about, last push)
+├── repos.jsonl    one row per GitHub repository behind the index (stars, about, last push)
 ├── trending.json  the trending view's first 100 GitHub-sourced ids, in rank order
 ├── curated.json   the officially featured skills' ids, grouped by owner
 ├── stats.json     the producing run's stats (counts, changes, failed ids)
@@ -39,20 +39,15 @@ Each `skills.jsonl` row:
 | `fetchedAt` | when the current content version was first fetched |
 | `audits` | with `--audits`: partner audit results (`provider`, `status`, `riskLevel`, …); `[]` = none yet |
 
-`repos.json` holds the GitHub repository metadata, keyed by `owner/repo` (an id's first two segments — the join key from every row):
+`repos.jsonl` holds the GitHub repository metadata — one row per repository, sorted by repo:
 
 ```json
-{
-  "vercel-labs/skills": {
-    "stars": 1523,
-    "description": "Agents, skills, and plugins for Vercel",
-    "pushedAt": "2026-09-11T14:02:11.000Z"
-  }
-}
+{"repo": "vercel-labs/skills", "stars": 1523, "description": "Agents, skills, and plugins for Vercel", "pushedAt": "2026-09-11T14:02:11.000Z"}
 ```
 
 | Field | Meaning |
 |---|---|
+| `repo` | `owner/repo`, an id's first two segments — the join key from every index row |
 | `stars` | the repository's stargazer count; `null` if the repo is gone or the count is unknown |
 | `description` | the repository's GitHub About text; `null` if unset or unknown |
 | `pushedAt` | the repository's last code-push time (`pushed_at`); `null` if the repo is gone. Note this tracks the repository, not the skill: use `hash`/`fetchedAt` in the index for skill-level changes |

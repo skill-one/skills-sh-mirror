@@ -3,7 +3,7 @@
 // pagination (with leaderboard drift), github-only filtering (well-known
 // entries are dropped at the leaderboard, and stale well-known rows/dirs from
 // an older dataset are removed), repo metadata (stars / description /
-// pushedAt per unique repo in repos.json — skills sharing a repo trigger a
+// pushedAt per unique repo in repos.jsonl — skills sharing a repo trigger a
 // single request; 404 -> nulls; 500 retried into a value; only repos behind
 // indexed rows are kept), skills.jsonl index shape (only saved skills — duplicates and
 // no-snapshot skills are omitted; skills whose fetch failed keep their
@@ -158,7 +158,7 @@ const TRENDING_PER_PAGE = "200";
 const CURATED_REDUCED = { ...CURATED, data: CURATED.data.map((o) => ({ ...o, skills: o.skills.map(canonicalId) })) };
 
 // Mock GitHub API: repo -> { stars, description, pushed_at } (null = repo
-// gone, 404). The scraper maps these onto repos.json's stars/description/
+// gone, 404). The scraper maps these onto repos.jsonl's stars/description/
 // pushedAt; a null description exercises the null passthrough.
 const REPOS = {
   "/repos/vercel-labs/skills": { stars: 1000, description: "Skills for Vercel", pushed_at: "2026-09-01T00:00:00.000Z" },
@@ -295,6 +295,7 @@ test("scraper end-to-end against mock API", async () => {
   };
 
   const readRows = async (out) => (await readFile(path.join(out, "skills.jsonl"), "utf8")).split("\n").filter(Boolean).map(JSON.parse);
+  const readRepos = async (out) => (await readFile(path.join(out, "repos.jsonl"), "utf8")).split("\n").filter(Boolean).map(JSON.parse);
   const readStats = async (out) => JSON.parse(await readFile(path.join(out, "stats.json"), "utf8"));
   const pathExists = (p) => access(p).then(() => true, () => false);
   const dir = (out, ...p) => path.join(out, "skills", ...p);
@@ -360,17 +361,17 @@ test("scraper end-to-end against mock API", async () => {
     for (const field of ["contentSaved", "noSnapshot", "error", "slug", "name", "source", "sourceType", "installUrl"])
       assert.equal(field in rows1[0], false);
 
-    // repository metadata lives in repos.json, keyed by owner/repo — one
-    // entry per repo behind an indexed row (the dead gone/repo and the
+    // repository metadata lives in repos.jsonl, one row per repo behind an
+    // indexed row, sorted by repo asc (the dead gone/repo and the
     // not-yet-listed claude-office-skills/skills have no indexed rows, so
     // their fetches land nowhere); rows carry no repo fields at all
     for (const row of rows1) assert.equal("stars" in row, false);
-    const repos1 = JSON.parse(await readFile(path.join(out1, "repos.json"), "utf8"));
-    assert.deepEqual(repos1, {
-      "owner/flaky-repo": { stars: 5, description: null, pushedAt: "2026-07-01T00:00:00.000Z" }, // fetched after a transient 500
-      "owner/repo": { stars: 42, description: "A test repo", pushedAt: "2026-08-15T12:00:00.000Z" }, // shared by rows1[1] and rows1[2]
-      "vercel-labs/skills": { stars: 1000, description: "Skills for Vercel", pushedAt: "2026-09-01T00:00:00.000Z" },
-    });
+    const repos1 = await readRepos(out1);
+    assert.deepEqual(repos1, [
+      { repo: "owner/flaky-repo", stars: 5, description: null, pushedAt: "2026-07-01T00:00:00.000Z" }, // fetched after a transient 500
+      { repo: "owner/repo", stars: 42, description: "A test repo", pushedAt: "2026-08-15T12:00:00.000Z" }, // shared by rows1[1] and rows1[2]
+      { repo: "vercel-labs/skills", stars: 1000, description: "Skills for Vercel", pushedAt: "2026-09-01T00:00:00.000Z" },
+    ]);
     // one request per unique repo, even though five skills map to owner/repo
     assert.equal(ghHits["/repos/owner/repo"], 1);
     assert.equal(ghHits["/repos/vercel-labs/skills"], 1);
@@ -444,8 +445,8 @@ test("scraper end-to-end against mock API", async () => {
     assert.equal((await readStats(out1)).changed, 0); // nothing changed: all hashes stable
     assert.deepEqual(rows2.map((r) => r.fetchedAt), rows1.map((r) => r.fetchedAt)); // carried over
     assert.deepEqual(rows2.map((r) => r.hash), rows1.map((r) => r.hash));
-    // repos.json is re-fetched every run; unchanged values reproduce it verbatim
-    assert.deepEqual(JSON.parse(await readFile(path.join(out1, "repos.json"), "utf8")), repos1);
+    // repos.jsonl is re-fetched every run; unchanged values reproduce it verbatim
+    assert.deepEqual(await readRepos(out1), repos1);
     assert.equal(
       await readFile(dir(out1, "vercel-labs/skills/find-skills", "SKILL.md"), "utf8"),
       findSkillsFiles(0)[0].contents,
@@ -486,7 +487,7 @@ test("scraper end-to-end against mock API", async () => {
     assert.equal(await pathExists(dir(out2, "owner/repo/dup-skill")), false); // stale duplicate content removed
     assert.deepEqual(rows4[0].audits, AUDITS["vercel-labs/skills/find-skills"]);
     assert.deepEqual(rows4[1].audits, []); // audited by nobody -> empty array
-    assert.deepEqual(JSON.parse(await readFile(path.join(out2, "repos.json"), "utf8")), repos1); // re-fetched for the fresh dir
+    assert.deepEqual(await readRepos(out2), repos1); // re-fetched for the fresh dir
 
     // --- run 5: repairing bad-id lets it save (into out1, where it has
     // never had content)
@@ -496,7 +497,7 @@ test("scraper end-to-end against mock API", async () => {
     assert.match(r5.stderr, /changed=1, added=1, removed=0, dropped=4, failed=0/);
     const rows5 = await readRows(out1);
     assert.deepEqual(rows5.map((r) => r.id), [...rows1.map((r) => r.id), "owner/repo/bad-id"]);
-    assert.deepEqual(JSON.parse(await readFile(path.join(out1, "repos.json"), "utf8")), repos1); // bad-id's repo (owner/repo) was already covered
+    assert.deepEqual(await readRepos(out1), repos1); // bad-id's repo (owner/repo) was already covered
     const stats5 = await readStats(out1);
     assert.equal(stats5.changed, 1); // only the newly saved bad-id
     assert.equal(stats5.added, 1);
@@ -532,10 +533,10 @@ test("scraper end-to-end against mock API", async () => {
     assert.equal(stats7l.carriedOver, 4);
     assert.equal(stats7l.changed, 0); // the one fetched skill's hash is unchanged
     assert.equal(stats7l.indexedRows, 5);
-    // repos outside the limit were not fetched this run: their entries are
-    // carried over from the previous repos.json, so the file still covers
+    // repos outside the limit were not fetched this run: their rows are
+    // carried over from the previous repos.jsonl, so the file still covers
     // every indexed row's repo
-    assert.deepEqual(JSON.parse(await readFile(path.join(out1, "repos.json"), "utf8")), repos1);
+    assert.deepEqual(await readRepos(out1), repos1);
 
     // --- run 8 (--audits, out2): unchanged content reuses the previous audit
     // results without any audit request
@@ -585,7 +586,7 @@ test("scraper end-to-end against mock API", async () => {
     // leftovers.
     const GOOD_TRENDING = ["vercel-labs/skills/find-skills", "claude-office-skills/skills/facebookmeta-ads"];
     const GOOD_STATS = JSON.parse(await readFile(path.join(out1, "stats.json"), "utf8"));
-    const GOOD_REPOS = JSON.parse(await readFile(path.join(out1, "repos.json"), "utf8"));
+    const GOOD_REPOS = await readRepos(out1);
     const baseRows = await readRows(out1); // == rows6: 5 rows including bad-id
     const writeIndex = async (rows) =>
       writeFile(path.join(out1, "skills.jsonl"), rows.map((r) => JSON.stringify(r)).join("\n") + "\n");
@@ -606,6 +607,15 @@ test("scraper end-to-end against mock API", async () => {
       pattern,
       setup: () => writeJson(file, bad),
       cleanup: () => writeJson(file, good),
+    });
+    // repos.jsonl cases: rows are JSON lines, one repo per line.
+    const writeRepos = (repos) =>
+      writeFile(path.join(out1, "repos.jsonl"), repos.map((r) => JSON.stringify(r)).join("\n") + "\n");
+    const reposCase = (name, pattern, repos) => ({
+      name,
+      pattern,
+      setup: () => writeRepos(repos),
+      cleanup: () => writeRepos(GOOD_REPOS),
     });
 
     const tamperCases = [
@@ -660,24 +670,17 @@ test("scraper end-to-end against mock API", async () => {
       // Upstream genuinely features the same skill under several owners, so
       // repeated ids across curated groups are accepted.
       jsonCase("curated.json", "curated.json may repeat an id across owners", null, { data: [{ owner: "x", skills: ["a/b/c"] }, { owner: "y", skills: ["a/b/c"] }] }, CURATED_REDUCED),
-      jsonCase("repos.json", "repos.json is unparseable", /repos\.json: invalid JSON/, "{", GOOD_REPOS),
-      jsonCase("repos.json", "repos.json is not owner/repo-keyed metadata", /repos\.json: not an owner\/repo-keyed object/, [{ repo: "owner/repo" }], GOOD_REPOS),
-      jsonCase("repos.json", "repos.json's entries are not stars/description/pushedAt shaped", /repos\.json: not an owner\/repo-keyed object/, { "owner/repo": { stars: 1 } }, GOOD_REPOS),
-      jsonCase("repos.json", "repos.json's stars is not a number or null", /repos\.json: not an owner\/repo-keyed object/, { ...GOOD_REPOS, "owner/repo": { ...GOOD_REPOS["owner/repo"], stars: "many" } }, GOOD_REPOS),
-      jsonCase(
-        "repos.json",
-        "repos.json lacks an indexed row's repository",
-        /repos\.json: no entry for owner\/repo/,
-        Object.fromEntries(Object.entries(GOOD_REPOS).filter(([k]) => k !== "owner/repo")),
-        GOOD_REPOS,
-      ),
-      jsonCase(
-        "repos.json",
-        "repos.json holds an entry no index row references",
-        /repos\.json: orphan entry \(no index row\): extra\/repo/,
-        { ...GOOD_REPOS, "extra/repo": { stars: 1, description: null, pushedAt: null } },
-        GOOD_REPOS,
-      ),
+      {
+        name: "repos.jsonl is unparseable",
+        pattern: /repos\.jsonl line 1: invalid JSON/,
+        setup: () => writeFile(path.join(out1, "repos.jsonl"), "{\n" + GOOD_REPOS.map((r) => JSON.stringify(r)).join("\n") + "\n"),
+        cleanup: () => writeRepos(GOOD_REPOS),
+      },
+      reposCase("repos.jsonl's rows are not repo/stars/description/pushedAt shaped", /repos\.jsonl: rows must carry/, [{ ...GOOD_REPOS[0], stars: "many" }, ...GOOD_REPOS.slice(1)]),
+      reposCase("repos.jsonl repeats a repo", /repos\.jsonl: duplicate repo: owner\/repo/, [GOOD_REPOS[1], GOOD_REPOS[1], ...GOOD_REPOS.slice(2)]),
+      reposCase("repos.jsonl is not sorted by repo", /repos\.jsonl: rows not sorted by repo at owner\/repo/, [...GOOD_REPOS].reverse()),
+      reposCase("repos.jsonl lacks an indexed row's repository", /repos\.jsonl: no row for owner\/repo/, GOOD_REPOS.filter((r) => r.repo !== "owner/repo")),
+      reposCase("repos.jsonl holds a row no index row references", /repos\.jsonl: orphan row \(no index row\): extra\/repo/, [...GOOD_REPOS, { repo: "extra/repo", stars: 1, description: null, pushedAt: null }]),
     ];
     for (const { name, pattern, notPattern, setup, cleanup } of tamperCases) {
       await setup();
@@ -756,11 +759,11 @@ test("scraper end-to-end against mock API", async () => {
     );
     assert.equal(await pathExists(dir(out1, "claude-office-skills/skills/facebook")), false); // the raw id never materializes
     const rows12 = await readRows(out1);
-    // the newly listed skill's repo joins repos.json
-    assert.deepEqual(JSON.parse(await readFile(path.join(out1, "repos.json"), "utf8")), {
+    // the newly listed skill's repo joins repos.jsonl (sorted position first)
+    assert.deepEqual(await readRepos(out1), [
+      { repo: "claude-office-skills/skills", stars: 7, description: "Claude office skills", pushedAt: "2026-09-10T00:00:00.000Z" },
       ...repos1,
-      "claude-office-skills/skills": { stars: 7, description: "Claude office skills", pushedAt: "2026-09-10T00:00:00.000Z" },
-    });
+    ]);
     const v12 = await verify(out1);
     assert.equal(v12.status, 0, `verify out1 failed after run 12:\n${v12.stdout}${v12.stderr}`);
     assert.match(v12.stdout, /OK: 6 rows, 6 content directories/);
@@ -829,7 +832,7 @@ test("publish: one commit per day, date-preserving prune, tag window", async () 
       await mkdir(path.join(data, "skills", "o/r/s"), { recursive: true });
       await writeFile(path.join(data, "skills", "o/r/s", "SKILL.md"), `# s rev ${day}\n`);
       await writeFile(path.join(data, "skills.jsonl"), `{"day":"${day}","body":"${body}"}\n`);
-      for (const f of ["repos.json", "trending.json", "curated.json", "stats.json"]) {
+      for (const f of ["repos.jsonl", "trending.json", "curated.json", "stats.json"]) {
         await writeFile(path.join(data, f), `{"day":"${day}"}\n`);
       }
     };

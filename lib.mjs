@@ -17,7 +17,7 @@ export const dirName = (id) => id.split("/").map(safeSegment).join("/");
 // The "owner/repo" an id's first two segments encode. Github-sourced ids are
 // normalized so that these two segments are exactly the skill's `source`
 // (see canonicalId), so this is the repository every consumer joins index
-// rows into repos.json by.
+// rows into repos.jsonl by.
 export const repoOfId = (id) => {
   const segs = typeof id === "string" ? id.split("/") : [];
   return segs.length >= 3 ? segs.slice(0, 2).join("/") : null;

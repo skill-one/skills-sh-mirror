@@ -6,8 +6,8 @@
  *   - every line parses; ids unique; rows sorted by installs desc (ties by id)
  *   - required fields well-formed (id, installs, url, fetchedAt, hash, audits,
  *     description)
- *   - repos.json parses, is well-shaped (owner/repo keys; stars/description/
- *     pushedAt values), and covers every indexed row's repository
+ *   - repos.jsonl parses, is well-shaped (repo/stars/description/pushedAt
+ *     rows, sorted by repo), and matches the index's repositories exactly
  *   - no two rows share a sanitized directory name
  *   - every content directory's SKILL.md carries a description that matches
  *     the index row
@@ -183,37 +183,47 @@ if (text === null) {
   }
   if (await exists(path.join(OUT_DIR, "curated.json.tmp"))) problem("curated.json.tmp leftover from an interrupted run");
 
-  // repos.json: the repositories behind the indexed skills, keyed by
-  // "owner/repo". Must match the index's repositories exactly in both
-  // directions, so a consumer can join by that key without misses.
-  const reposRaw = await readFile(path.join(OUT_DIR, "repos.json"), "utf8").catch(() => null);
+  // repos.jsonl: one row per repository behind the indexed skills, sorted by
+  // repo asc. Must match the index's repositories exactly in both directions,
+  // so a consumer can join by the repo key without misses.
+  const reposRaw = await readFile(path.join(OUT_DIR, "repos.jsonl"), "utf8").catch(() => null);
   if (reposRaw === null) {
-    problem("repos.json not found");
+    problem("repos.jsonl not found");
   } else {
-    try {
-      const repos = JSON.parse(reposRaw);
-      const shaped =
-        repos !== null && typeof repos === "object" && !Array.isArray(repos) &&
-        Object.entries(repos).every(([repo, meta]) =>
-          /^[^/]+\/[^/]+$/.test(repo) &&
-          meta !== null && typeof meta === "object" && !Array.isArray(meta) &&
-          (meta.stars === null || (Number.isFinite(meta.stars) && meta.stars >= 0)) &&
-          (meta.description === null || typeof meta.description === "string") &&
-          (meta.pushedAt === null || isIso(meta.pushedAt)),
-        );
-      if (!shaped) {
-        problem("repos.json: not an owner/repo-keyed object with stars/description/pushedAt entries");
-      } else {
-        reposCount = Object.keys(repos).length;
-        const rowRepos = new Set(rows.map((r) => repoOfId(r.id)).filter(Boolean));
-        for (const repo of rowRepos) if (!(repo in repos)) problem(`repos.json: no entry for ${repo}`);
-        for (const repo of Object.keys(repos)) if (!rowRepos.has(repo)) problem(`repos.json: orphan entry (no index row): ${repo}`);
+    const repos = [];
+    for (const [i, line] of reposRaw.split("\n").entries()) {
+      if (!line.trim()) continue;
+      try {
+        repos.push(JSON.parse(line));
+      } catch {
+        problem(`repos.jsonl line ${i + 1}: invalid JSON`);
       }
-    } catch {
-      problem("repos.json: invalid JSON");
+    }
+    const shaped = repos.every((r) =>
+      r !== null && typeof r === "object" && !Array.isArray(r) &&
+      /^[^/]+\/[^/]+$/.test(r.repo) &&
+      (r.stars === null || (Number.isFinite(r.stars) && r.stars >= 0)) &&
+      (r.description === null || typeof r.description === "string") &&
+      (r.pushedAt === null || isIso(r.pushedAt)),
+    );
+    if (!shaped) {
+      problem("repos.jsonl: rows must carry repo/stars/description/pushedAt");
+    } else {
+      reposCount = repos.length;
+      const seen = new Set();
+      for (const r of repos) {
+        if (seen.has(r.repo)) problem(`repos.jsonl: duplicate repo: ${r.repo}`);
+        seen.add(r.repo);
+      }
+      for (let i = 1; i < repos.length; i++) {
+        if (repos[i - 1].repo >= repos[i].repo) problem(`repos.jsonl: rows not sorted by repo at ${repos[i].repo}`);
+      }
+      const rowRepos = new Set(rows.map((r) => repoOfId(r.id)).filter(Boolean));
+      for (const repo of rowRepos) if (!seen.has(repo)) problem(`repos.jsonl: no row for ${repo}`);
+      for (const repo of seen) if (!rowRepos.has(repo)) problem(`repos.jsonl: orphan row (no index row): ${repo}`);
     }
   }
-  if (await exists(path.join(OUT_DIR, "repos.json.tmp"))) problem("repos.json.tmp leftover from an interrupted run");
+  if (await exists(path.join(OUT_DIR, "repos.jsonl.tmp"))) problem("repos.jsonl.tmp leftover from an interrupted run");
 }
 
 if (problems.length) {
