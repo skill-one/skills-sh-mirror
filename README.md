@@ -9,8 +9,8 @@ A daily snapshot of every GitHub-sourced skill on [skills.sh](https://www.skills
 ```
 ├── skills.jsonl   one row per skill, sorted by installs desc — query / filter / rank here
 ├── repos.jsonl    one row per GitHub repository behind the index (stars, about, last push)
-├── owners.jsonl   one row per repository owner (avatar URL + local copy's path)
-├── avatars/       the owners' GitHub avatars, saved as {owner}.png|jpg
+├── owners.jsonl   one row per repository owner and its avatar URL
+├── avatars/       the owners' GitHub avatars, saved as {owner}.png
 ├── trending.json  the trending view's first 100 GitHub-sourced ids, in rank order
 ├── curated.jsonl  the officially featured skills, one row per owner
 ├── stats.json     the producing run's stats (counts, changes, failed ids)
@@ -57,14 +57,15 @@ Each `skills.jsonl` row:
 `owners.jsonl` holds the repository owners' GitHub avatars, pulled into `avatars/` so consumers need no GitHub API for them — one row per owner, sorted by owner:
 
 ```json
-{"owner": "vercel-labs", "avatarUrl": "https://avatars.githubusercontent.com/u/12565288?v=4", "avatar": "avatars/vercel-labs.png"}
+{"owner": "vercel-labs", "avatarUrl": "https://avatars.githubusercontent.com/u/12565288?v=4"}
 ```
 
 | Field | Meaning |
 |---|---|
 | `owner` | the GitHub user/org name — the id's first segment, the join key from every index row |
-| `avatarUrl` | the upstream avatar URL (its `?v=` parameter bumps when the user changes the avatar — this is what keeps re-downloads away) |
-| `avatar` | path of the local copy in the snapshot; `null` if that run's download failed |
+| `avatarUrl` | the upstream avatar URL (its `?v=` parameter bumps when the user changes the avatar — this is what keeps re-downloads away); `null` if that run's download failed |
+
+The local copy's path is derivable from the owner alone: `avatars/{owner}.png`. The extension is fixed regardless of the actual image format (GitHub serves png or jpeg): a derivable path needs a fixed name, and image decoders sniff the payload, so jpeg bytes under a `.png` name render fine everywhere. When `avatarUrl` is `null`, the copy is absent until the next run succeeds.
 
 Two guarantees, integrity-checked after every run:
 

@@ -5,10 +5,12 @@
 // an older dataset are removed), repo metadata (stars / description /
 // pushedAt per unique repo in repos.jsonl — skills sharing a repo trigger a
 // single request; 404 -> nulls; 500 retried into a value; only repos behind
-// indexed rows are kept), owner avatars (one row per owner in owners.jsonl +
-// the image in avatars/, downloaded from the URL the repo response carries
-// with no token; cached while the URL's ?v= parameter is unchanged; a failed
-// download keeps the previous row), skills.jsonl index shape (only saved skills — duplicates and
+// indexed rows are kept), owner avatars (one row per owner in owners.jsonl
+// carrying just the avatar URL — the local copy's avatars/{owner}.png path is
+// derivable from the owner alone; downloaded from the URL the repo response
+// carries with no token; cached while the URL's ?v= parameter is unchanged;
+// legacy content-type-named copies are renamed in place; a failed download
+// keeps the previous row), skills.jsonl index shape (only saved skills — duplicates and
 // no-snapshot skills are omitted; skills whose fetch failed keep their
 // previous row and content), pure content directories, path sanitization,
 // SKILL.md description extraction (plain / quoted / folded block scalars;
@@ -33,7 +35,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile, access } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rename, rm, writeFile, access } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -183,7 +185,8 @@ const ghServer = createServer((req, res) => {
   const repoPath = req.url.split("?")[0];
   ghHits[repoPath] = (ghHits[repoPath] ?? 0) + 1;
   // Avatar host: no Authorization header, like GitHub's avatar CDN. u/3 500s
-  // once (transient retry) and serves jpeg, exercising the .jpg extension.
+  // once (transient retry) and serves jpeg, exercising the fixed .png name
+  // across content types.
   if (repoPath.startsWith("/u/")) {
     if (repoPath === "/u/3" && ghHits[repoPath] === 1) {
       res.statusCode = 500;
@@ -396,11 +399,12 @@ test("scraper end-to-end against mock API", async () => {
 
     // owner avatars land in owners.jsonl + avatars/, one row per owner of an
     // indexed repo (sorted by owner), downloaded from the URL the repo
-    // response carries — no auth, no token, no GitHub API rate limit
+    // response carries — no auth, no token, no GitHub API rate limit. Rows
+    // carry just the URL: the copy's avatars/{owner}.png path is derivable.
     const owners1 = await readOwners(out1);
     assert.deepEqual(owners1, [
-      { owner: "owner", avatarUrl: `${ghBase}/u/2?v=4`, avatar: "avatars/owner.png" },
-      { owner: "vercel-labs", avatarUrl: `${ghBase}/u/1?v=4`, avatar: "avatars/vercel-labs.png" },
+      { owner: "owner", avatarUrl: `${ghBase}/u/2?v=4` },
+      { owner: "vercel-labs", avatarUrl: `${ghBase}/u/1?v=4` },
     ]);
     assert.equal(await readFile(path.join(out1, "avatars/owner.png"), "utf8"), "png-/u/2");
     assert.equal(await readFile(path.join(out1, "avatars/vercel-labs.png"), "utf8"), "png-/u/1");
@@ -460,6 +464,17 @@ test("scraper end-to-end against mock API", async () => {
       { dropped: 4, failed: 1, carriedOver: 0 },
     );
     assert.deepEqual(stats1.failedIds, ["owner/repo/bad-id"]);
+
+    // Seed the pre-unification layout (content-type-named copies + a per-row
+    // path field): run 2 must migrate in place — owner's legacy .jpg renamed
+    // to the derivable .png name — without any re-download.
+    await rename(path.join(out1, "avatars/owner.png"), path.join(out1, "avatars/owner.jpg"));
+    await writeFile(
+      path.join(out1, "owners.jsonl"),
+      owners1
+        .map((r) => JSON.stringify({ ...r, avatar: r.owner === "owner" ? "avatars/owner.jpg" : "avatars/vercel-labs.png" }))
+        .join("\n") + "\n",
+    );
 
     // --- run 2: everything is re-fetched and re-written, but while the
     // upstream hash is unchanged each row keeps the fetchedAt of the run
@@ -751,11 +766,11 @@ test("scraper end-to-end against mock API", async () => {
         setup: () => writeFile(path.join(out1, "owners.jsonl"), "{\n" + GOOD_OWNERS.map((r) => JSON.stringify(r)).join("\n") + "\n"),
         cleanup: () => writeOwners(GOOD_OWNERS),
       },
-      ownersCase("owners.jsonl's rows are not owner/avatarUrl/avatar shaped", /owners\.jsonl: rows must carry/, [{ ...GOOD_OWNERS[0], avatar: undefined }, ...GOOD_OWNERS.slice(1)]),
+      ownersCase("owners.jsonl's rows are not owner/avatarUrl shaped", /owners\.jsonl: rows must carry/, [{ ...GOOD_OWNERS[0], avatarUrl: 5 }, ...GOOD_OWNERS.slice(1)]),
       ownersCase("owners.jsonl repeats an owner", /owners\.jsonl: duplicate owner: owner/, [GOOD_OWNERS[0], GOOD_OWNERS[0], ...GOOD_OWNERS.slice(1)]),
       ownersCase("owners.jsonl is not sorted by owner", /owners\.jsonl: rows not sorted by owner at owner\n/, [...GOOD_OWNERS].reverse()),
       ownersCase("owners.jsonl lacks an indexed row's owner", /owners\.jsonl: no row for owner/, GOOD_OWNERS.filter((r) => r.owner !== "owner")),
-      ownersCase("owners.jsonl holds a row no index row references", /owners\.jsonl: orphan row \(no index row\): extra/, [...GOOD_OWNERS, { owner: "extra", avatarUrl: null, avatar: null }]),
+      ownersCase("owners.jsonl holds a row no index row references", /owners\.jsonl: orphan row \(no index row\): extra/, [...GOOD_OWNERS, { owner: "extra", avatarUrl: null }]),
       {
         name: "owners.jsonl references an avatar file that is gone from disk",
         pattern: /avatar file missing: avatars\/owner\.png/,
@@ -805,7 +820,7 @@ test("scraper end-to-end against mock API", async () => {
     // the bumped avatar URL forces exactly that one re-download; unchanged URLs stay cached
     assert.equal(ghHits["/u/1"], 3);
     assert.equal(ghHits["/u/2"], 2);
-    assert.deepEqual((await readOwners(out1))[1], { owner: "vercel-labs", avatarUrl: `${ghBase}/u/1?v=5`, avatar: "avatars/vercel-labs.png" });
+    assert.deepEqual((await readOwners(out1))[1], { owner: "vercel-labs", avatarUrl: `${ghBase}/u/1?v=5` });
     const v10 = await verify(out1);
     assert.equal(v10.status, 0, `verify out1 failed after removal:\n${v10.stdout}${v10.stderr}`);
     assert.match(v10.stdout, /OK: 4 rows, 4 content directories/);
@@ -851,13 +866,14 @@ test("scraper end-to-end against mock API", async () => {
     );
     assert.equal(await pathExists(dir(out1, "claude-office-skills/skills/facebook")), false); // the raw id never materializes
     const rows12 = await readRows(out1);
-    // the newly listed skill's owner joins owners.jsonl: 500 + retry, jpeg -> .jpg
+    // the newly listed skill's owner joins owners.jsonl: 500 + retry; jpeg
+    // content lands under the fixed .png name
     assert.deepEqual(await readOwners(out1), [
-      { owner: "claude-office-skills", avatarUrl: `${ghBase}/u/3?v=4`, avatar: "avatars/claude-office-skills.jpg" },
-      { owner: "owner", avatarUrl: `${ghBase}/u/2?v=4`, avatar: "avatars/owner.png" },
-      { owner: "vercel-labs", avatarUrl: `${ghBase}/u/1?v=5`, avatar: "avatars/vercel-labs.png" },
+      { owner: "claude-office-skills", avatarUrl: `${ghBase}/u/3?v=4` },
+      { owner: "owner", avatarUrl: `${ghBase}/u/2?v=4` },
+      { owner: "vercel-labs", avatarUrl: `${ghBase}/u/1?v=5` },
     ]);
-    assert.equal(await readFile(path.join(out1, "avatars/claude-office-skills.jpg"), "utf8"), "jpg-/u/3");
+    assert.equal(await readFile(path.join(out1, "avatars/claude-office-skills.png"), "utf8"), "jpg-/u/3");
     assert.equal(ghHits["/u/3"], 2); // 500 + successful retry
     // the newly listed skill's repo joins repos.jsonl (sorted position first)
     assert.deepEqual(await readRepos(out1), [

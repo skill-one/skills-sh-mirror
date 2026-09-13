@@ -27,7 +27,7 @@
 
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
-import { argValue, dirName, exists, repoOfId, skillDescription } from "./lib.mjs";
+import { argValue, avatarPath, dirName, exists, repoOfId, skillDescription } from "./lib.mjs";
 
 const args = process.argv.slice(2);
 const OUT_DIR = argValue(args, "--out") ?? "data";
@@ -238,10 +238,11 @@ if (text === null) {
   if (await exists(path.join(OUT_DIR, "repos.jsonl.tmp"))) problem("repos.jsonl.tmp leftover from an interrupted run");
 
   // owners.jsonl: one row per repository owner behind the indexed skills —
-  // the avatar pulled into avatars/ so consumers need no GitHub API for it.
-  // Owners must match the index's owners exactly in both directions; every
-  // referenced avatar file must exist and every avatar file must be
-  // referenced.
+  // just the avatar URL; the local copy's path is derivable from the owner
+  // alone (avatarPath), and the avatar is pulled into avatars/ so consumers
+  // need no GitHub API for it. Owners must match the index's owners exactly
+  // in both directions; an owner's copy exists if and only if its avatarUrl
+  // is non-null, and every avatar file must be a listed owner's copy.
   const ownersRaw = await readFile(path.join(OUT_DIR, "owners.jsonl"), "utf8").catch(() => null);
   if (ownersRaw === null) {
     problem("owners.jsonl not found");
@@ -258,12 +259,10 @@ if (text === null) {
     const shaped = owners.every((r) =>
       r !== null && typeof r === "object" && !Array.isArray(r) &&
       /^[^/]+$/.test(r.owner) &&
-      (r.avatarUrl === null || typeof r.avatarUrl === "string") &&
-      (r.avatar === null || (typeof r.avatar === "string" && r.avatar.startsWith("avatars/"))) &&
-      (r.avatar === null || r.avatarUrl !== null),
+      (r.avatarUrl === null || typeof r.avatarUrl === "string"),
     );
     if (!shaped) {
-      problem("owners.jsonl: rows must carry owner/avatarUrl/avatar");
+      problem("owners.jsonl: rows must carry owner/avatarUrl");
     } else {
       ownersCount = owners.length;
       const seen = new Set();
@@ -277,10 +276,12 @@ if (text === null) {
       const rowOwners = new Set(rows.map((r) => repoOfId(r.id)?.split("/")[0]).filter(Boolean));
       for (const owner of rowOwners) if (!seen.has(owner)) problem(`owners.jsonl: no row for ${owner}`);
       for (const owner of seen) if (!rowOwners.has(owner)) problem(`owners.jsonl: orphan row (no index row): ${owner}`);
+      // avatarUrl non-null ⟺ the owner's derivable local copy is on disk.
       for (const r of owners) {
-        if (r.avatar && !(await exists(path.join(OUT_DIR, r.avatar)))) problem(`owners.jsonl: avatar file missing: ${r.avatar} (${r.owner})`);
+        if (r.avatarUrl && !(await exists(path.join(OUT_DIR, avatarPath(r.owner)))))
+          problem(`owners.jsonl: avatar file missing: ${avatarPath(r.owner)} (${r.owner})`);
       }
-      const referenced = new Set(owners.map((r) => r.avatar).filter(Boolean));
+      const referenced = new Set(owners.filter((r) => r.avatarUrl).map((r) => avatarPath(r.owner)));
       for (const entry of (await readdir(path.join(OUT_DIR, "avatars")).catch(() => []))) {
         if (!referenced.has(`avatars/${entry}`)) problem(`orphan avatar file (no owners.jsonl row): avatars/${entry}`);
       }

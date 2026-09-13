@@ -60,4 +60,11 @@ export const skillDescription = (contents) => {
   return (quoted ? value.slice(1, -1) : value) || null;
 };
 
+// The local avatar copy's path for an owner, relative to the output
+// directory. The extension is fixed on purpose: owners.jsonl rows carry only
+// the upstream URL, so consumers must be able to derive the path from the
+// owner alone. Image decoders sniff the payload, so jpeg bytes under a .png
+// name render fine everywhere (scraper and verifier share this function).
+export const avatarPath = (owner) => `avatars/${safeSegment(owner)}.png`;
+
 export const exists = (p) => access(p).then(() => true, () => false);

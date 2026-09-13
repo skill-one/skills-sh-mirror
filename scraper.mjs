@@ -25,10 +25,11 @@
  *   data/repos.jsonl                        one row per GitHub repository
  *                                           behind an indexed skill: stars,
  *                                           About description, last push time
- *   data/owners.jsonl                       one row per repository owner:
- *                                           avatar URL and the local copy's
- *                                           path under data/avatars/
- *   data/avatars/{owner}.{png|jpg}          the owners' GitHub avatars
+ *   data/owners.jsonl                       one row per repository owner and
+ *                                           its GitHub avatar URL (the local
+ *                                           copy's path is derivable from the
+ *                                           owner alone, see avatarPath)
+ *   data/avatars/{owner}.png                the owners' GitHub avatars
  *                                           (downloaded from the avatar CDN,
  *                                           no token needed), so consumers
  *                                           need no GitHub API for them
@@ -67,7 +68,7 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import { mkdir, readdir, readFile, rename, rmdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { argValue, canonicalId, dirName, exists, repoOfId, safeSegment, skillDescription } from "./lib.mjs";
+import { argValue, avatarPath, canonicalId, dirName, exists, repoOfId, safeSegment, skillDescription } from "./lib.mjs";
 
 const API_BASE = (process.env.SKILLS_API_BASE ?? "https://skills.sh").replace(/\/+$/, "");
 const GITHUB_API_BASE = (process.env.GITHUB_API_BASE ?? "https://api.github.com").replace(/\/+$/, "");
@@ -272,6 +273,8 @@ async function loadPrevRepos() {
 // Previous run's owners.jsonl drives avatar caching: while a GitHub avatar
 // URL (its ?v= parameter bumps on change) is unchanged and the file is on
 // disk, it is not re-downloaded; a failed download keeps the previous row.
+// Rows carry no local path: the copy's path is derivable from the owner
+// alone (avatarPath).
 async function loadPrevOwners() {
   try {
     const text = await readFile(path.join(OUT_DIR, "owners.jsonl"), "utf8");
@@ -556,12 +559,15 @@ const fetchAvatar = async (url) => {
   }
 };
 
-// One row per owner of an indexed repository: the GitHub avatar URL and the
-// path of the local copy. While the URL is unchanged (its ?v= parameter
-// bumps when the user changes the avatar) and the file is on disk, nothing
-// is downloaded; a failed download keeps the previous row (or writes one
-// with a null path, retried next run). Files land in avatars/ named after
-// the owner, extension from the response's content type.
+// One row per owner of an indexed repository: just the GitHub avatar URL —
+// the local copy lives at a path derivable from the owner alone (avatarPath),
+// so the row needs no path field. While the URL is unchanged (its ?v=
+// parameter bumps when the user changes the avatar) and the file is on disk,
+// nothing is downloaded; a failed download keeps the previous row when its
+// copy is still on disk, and nulls avatarUrl otherwise (retried next run).
+// Copies are always named {owner}.png regardless of the response's content
+// type: a derivable path needs a fixed name, and image decoding sniffs the
+// payload, so jpeg bytes under a .png name render fine everywhere.
 const avatarDir = path.join(OUT_DIR, "avatars");
 await mkdir(avatarDir, { recursive: true });
 const ownerSet = [...new Set(rowRepos.map((repo) => repo.split("/")[0]))].sort();
@@ -572,26 +578,31 @@ const avatarWorker = async () => {
     const owner = ownerSet[ownerIndex++];
     const prev = prevOwners.get(owner);
     const avatarUrl = ownerAvatars.get(owner) ?? prev?.avatarUrl ?? null;
+    const rel = avatarPath(owner);
+    const file = path.join(OUT_DIR, rel);
+    // One-time migration from the old content-type-driven names ({owner}.jpg
+    // / {owner}.png with a per-row path field): rename into the fixed name so
+    // the URL cache below keeps holding without a re-download.
+    if (prev?.avatar && prev.avatar !== rel && (await exists(path.join(OUT_DIR, prev.avatar)))) {
+      await rename(path.join(OUT_DIR, prev.avatar), file).catch(() => {});
+    }
     if (!avatarUrl) {
-      ownerRows.set(owner, { owner, avatarUrl: null, avatar: prev?.avatar ?? null });
-      continue;
-    }
-    const cached =
-      prev?.avatarUrl === avatarUrl && prev.avatar && (await exists(path.join(OUT_DIR, prev.avatar)));
-    if (cached) {
-      ownerRows.set(owner, prev);
-      continue;
-    }
-    try {
-      const { bytes, type } = await fetchAvatar(`${avatarUrl}${avatarUrl.includes("?") ? "&" : "?"}size=96`);
-      const rel = `avatars/${safeSegment(owner)}.${type.includes("jpeg") ? "jpg" : "png"}`;
-      await writeFile(path.join(OUT_DIR, `${rel}.tmp`), bytes);
-      await rename(path.join(OUT_DIR, `${rel}.tmp`), path.join(OUT_DIR, rel));
-      if (prev?.avatar && prev.avatar !== rel) await rm(path.join(OUT_DIR, prev.avatar), { force: true });
-      ownerRows.set(owner, { owner, avatarUrl, avatar: rel });
-    } catch (err) {
-      console.error(`  WARN avatar ${owner}: ${err.message}`);
-      ownerRows.set(owner, prev ?? { owner, avatarUrl, avatar: null });
+      ownerRows.set(owner, { owner, avatarUrl: null });
+    } else if (prev?.avatarUrl === avatarUrl && (await exists(file))) {
+      ownerRows.set(owner, { owner, avatarUrl }); // cached: URL unchanged, copy on disk
+    } else {
+      try {
+        const { bytes } = await fetchAvatar(`${avatarUrl}${avatarUrl.includes("?") ? "&" : "?"}size=96`);
+        await writeFile(`${file}.tmp`, bytes);
+        await rename(`${file}.tmp`, file);
+        ownerRows.set(owner, { owner, avatarUrl });
+      } catch (err) {
+        console.error(`  WARN avatar ${owner}: ${err.message}`);
+        // Keep the previous row when its copy is still on disk; otherwise
+        // null the URL so the row invariant "avatarUrl non-null ⟺
+        // avatars/{owner}.png exists" holds and the download is retried.
+        ownerRows.set(owner, { owner, avatarUrl: (await exists(file)) ? (prev?.avatarUrl ?? null) : null });
+      }
     }
   }
 };
@@ -601,10 +612,9 @@ await atomicWrite(
   path.join(OUT_DIR, "owners.jsonl"),
   ownersOut.map((row) => JSON.stringify(row)).join("\n") + (ownersOut.length ? "\n" : ""),
 );
-// Files no row references anymore (an owner's avatar switched formats, a
-// failed run left a .tmp behind) are pruned, keeping avatars/ exactly the
-// set of referenced copies.
-const referencedAvatars = new Set(ownersOut.map((r) => r.avatar).filter(Boolean));
+// Files no row references anymore (legacy content-type-named copies, a
+// failed run's stray) are pruned, keeping avatars/ exactly the derivable set.
+const referencedAvatars = new Set(ownersOut.filter((r) => r.avatarUrl).map((r) => avatarPath(r.owner)));
 for (const entry of (await readdir(avatarDir).catch(() => []))) {
   if (!referencedAvatars.has(`avatars/${entry}`)) await rm(path.join(avatarDir, entry), { force: true });
 }
