@@ -5,6 +5,7 @@
 #   __APP_MODE__           docker-image | docker-compose
 #   __APP_PORT__           应用容器监听端口（被 Nginx 反代）
 #   __APP_IMAGE_NAME__     docker-image 模式下 docker load 后的镜像名:tag（如 myapp:latest）
+#   __APP_NAME__           服务名（systemd unit / 容器名）
 set -euxo pipefail
 
 LOG=/var/log/qianwenai-bootstrap.log
@@ -28,6 +29,7 @@ APP_URL="__APP_ARTIFACT_URL__"
 APP_MODE="__APP_MODE__"
 APP_PORT="__APP_PORT__"
 IMAGE_NAME="__APP_IMAGE_NAME__"
+APP_NAME="__APP_NAME__"
 
 mkdir -p /opt/qianwenai
 cd /opt/qianwenai
@@ -50,24 +52,24 @@ if [ "$APP_MODE" = "docker-image" ]; then
     docker tag "$LOADED_REF" "${IMAGE_NAME}"
   fi
   # 写 systemd unit 持久托管
-  cat > /etc/systemd/system/qianwenai-app.service <<UNIT
+  cat > /etc/systemd/system/${APP_NAME}.service <<UNIT
 [Unit]
-Description=qianwenai app container
+Description=${APP_NAME} app container
 After=docker.service
 Requires=docker.service
 
 [Service]
 Restart=always
-ExecStartPre=-/usr/bin/docker rm -f qianwenai-app
-ExecStart=/usr/bin/docker run --rm --name qianwenai-app -p ${APP_PORT}:${APP_PORT} ${DB_ENV_OPT} ${IMAGE_NAME}
-ExecStop=/usr/bin/docker stop qianwenai-app
+ExecStartPre=-/usr/bin/docker rm -f ${APP_NAME}
+ExecStart=/usr/bin/docker run --rm --name ${APP_NAME} -p ${APP_PORT}:${APP_PORT} ${DB_ENV_OPT} ${IMAGE_NAME}
+ExecStop=/usr/bin/docker stop ${APP_NAME}
 
 [Install]
 WantedBy=multi-user.target
 UNIT
   systemctl daemon-reload
-  systemctl enable qianwenai-app
-  systemctl restart qianwenai-app
+  systemctl enable ${APP_NAME}
+  systemctl restart ${APP_NAME}
 
 elif [ "$APP_MODE" = "docker-compose" ]; then
   # 解压（包含 docker-compose.yml 和构建上下文 或 已 build 的镜像 tar）

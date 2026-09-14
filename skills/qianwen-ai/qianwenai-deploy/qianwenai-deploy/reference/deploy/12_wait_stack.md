@@ -30,7 +30,7 @@ python3 scripts/wait_and_probe.py \
 - 含 RDS：RDS 创建约 10-30 分钟，传 `--max-wait 2700`。
 - `--max-wait` 必须 **大于** 步骤 11 的 `TIMEOUT_MIN`（ROS 侧超时，默认 15min / 含 RDS 40min）；
   ROS 判失败后本脚本会立刻读到 `CREATE_FAILED`/`ROLLBACK_*` 终态并返回，不会空等到 `--max-wait`。
-- 栈到达终态后**立即**开始 nginx `/healthz` 探活（不再固定 sleep 30s）：nginx 已就绪时 1 次即通、零等待；
+- 栈到达终态后**立即**开始 nginx `/healthz` 探活：nginx 已就绪时 1 次即通、零等待；
   失败才按 4/8/12s（上限 12s）递增退避重试，15 次的重试窗口约 2.5 分钟，足够覆盖
   yum 装 Nginx 的慢场景。
 - 单次 `aliyun` CLI 调用超过 30s 会被当作临时错误自动重试，不会中断整个等待。
@@ -82,12 +82,12 @@ python3 scripts/wait_and_probe.py \
 | `failed` + stage=`stack_create` | 执行 `aliyun ros ListStackResources` 定位出错资源，参考 `reference/rules/rule_error_handling.md` |
 | `failed` + stage=`health_check` | Nginx 没起来 —— 用云助手查 `/var/log/qianwenai-bootstrap.log` |
 
-`ok` 且 `app: "manual"` 时，记成功前先核验应用：用云助手读应用日志判断是否起来（有干净启动行 / 端口在监听 = 起来了）。`INSTANCE_ID` = `ListStackResources` 里的 ECS 实例。
+`ok` 且 `app: "manual"` 时，记成功前先核验应用：用云助手读应用日志判断是否起来（有干净启动行 / 端口在监听 = 起来了）。`INSTANCE_ID` = `ListStackResources` 里的 ECS 实例；`$APP_NAME` 即部署期设置的服务名。
 
 ```bash
 CID=$(PAGER=cat aliyun ecs RunCommand --RegionId "$REGION" --InstanceId.1 "$INSTANCE_ID" \
   --Type RunShellScript --Timeout 60 --ContentEncoding PlainText \
-  --CommandContent 'systemctl status qianwenai-app; echo ---; tail -n 100 /var/log/qianwenai-app.log' \
+  --CommandContent "systemctl status $APP_NAME; echo ---; tail -n 100 /var/log/$APP_NAME.log" \
   | python3 -c 'import sys,json;print(json.load(sys.stdin)["InvokeId"])')
 sleep 8
 PAGER=cat aliyun ecs DescribeInvocations --RegionId "$REGION" --InvokeId "$CID" --IncludeOutput true \
@@ -109,4 +109,4 @@ PAGER=cat aliyun ecs DescribeInvocations --RegionId "$REGION" --InvokeId "$CID" 
 
 用 Cloud Assistant 查日志（见 `reference/rules/rule_error_handling.md`）：
 - `/var/log/qianwenai-bootstrap.log` — UserData 引导过程
-- `/var/log/qianwenai-app.log` — 应用 stdout/stderr
+- `/var/log/$APP_NAME.log` — 应用 stdout/stderr

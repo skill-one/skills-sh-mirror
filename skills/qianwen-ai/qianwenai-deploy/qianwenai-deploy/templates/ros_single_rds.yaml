@@ -9,7 +9,6 @@ Parameters:
     AllowedPattern: '^[a-z][a-z0-9-]{0,30}$'
   InstanceType:
     Type: String
-    Default: ecs.e-c1m2.large
   ImageId:
     Type: String
     Default: aliyun_3_x64_20G_alibase_20240528.vhd
@@ -25,17 +24,15 @@ Parameters:
     MaxValue: 500
   ZoneId:
     Type: String
-    Description: 可用区 ID（选取库存检查中有货的可用区，见 reference/deploy/08_check_stock.md）
+    Description: 可用区 ID（ECS ∩ RDS 交集可用区，见 reference/deploy/08_check_stock.md）
   AppPort:
     Type: Number
     Default: 8080
   DbInstanceClass:
     Type: String
-    Default: mysql.n2.medium.1
     Description: RDS MySQL 实例规格
   DbInstanceStorage:
     Type: Number
-    Default: 20
     MinValue: 20
     MaxValue: 6000
     Description: RDS 存储空间 GB
@@ -274,6 +271,18 @@ Outputs:
       Fn::GetAtt:
         - EcsInstance
         - PrivateIps
+  SecurityGroupId:
+    Description: ECS 安全组 ID（入方向规则检查 / 放行）
+    Value:
+      Fn::GetAtt:
+        - SecurityGroup
+        - SecurityGroupId
+  EipAllocationId:
+    Description: EIP 分配 ID（EIP 状态查询 / 重新绑定）
+    Value:
+      Fn::GetAtt:
+        - Eip
+        - AllocationId
   DbInstanceId:
     Description: RDS 实例 ID
     Value:

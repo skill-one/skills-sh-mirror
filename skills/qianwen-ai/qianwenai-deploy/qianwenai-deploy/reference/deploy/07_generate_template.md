@@ -9,14 +9,14 @@
 ### 无 RDS
 
 ```bash
-python scripts/generate_template.py \
+python3 scripts/generate_template.py \
   --topology single \
   --app-type systemd \
   --runtime none \
   --app-port 8080 \
+  --app-name "$APP_NAME" \
   --start-command "./server" \
   --nginx-mode static+app \
-  --artifacts-json /tmp/qianwenai-artifacts.json \
   --output /tmp/qianwenai-template.yaml \
   --userdata-output /tmp/qianwenai-userdata.sh
 ```
@@ -24,18 +24,21 @@ python scripts/generate_template.py \
 ### 含 RDS
 
 ```bash
-DB_PASSWORD='<strong-pwd>' python scripts/generate_template.py \
+DB_PASSWORD='<strong-pwd>' python3 scripts/generate_template.py \
   --topology single \
   --app-type systemd \
   --runtime none \
   --app-port 8080 \
+  --app-name "$APP_NAME" \
   --start-command "./server" \
   --nginx-mode proxy \
-  --with-rds --db-name appdb --db-account appuser \
-  --artifacts-json /tmp/qianwenai-artifacts.json \
+  --with-rds \
   --output /tmp/qianwenai-template.yaml \
   --userdata-output /tmp/qianwenai-userdata.sh
 ```
+
+> 本步骤产出带占位产物 URL 的模板，供步骤 9 校验与询价。真实产物 URL 在步骤 10 填入——
+> 步骤 10 会带 `--artifacts-json` 重新执行本脚本。
 
 ---
 
@@ -46,6 +49,7 @@ DB_PASSWORD='<strong-pwd>' python scripts/generate_template.py \
 | `--topology` | 固定 `single`（单机） |
 | `--app-type` | `docker` / `systemd` / `static-only` |
 | `--app-port` | 应用监听端口 |
+| `--app-name` | 服务名（systemd unit / 容器名 / 日志文件名 / 默认镜像 tag），须匹配 `^[a-z][a-z0-9-]{0,30}$` |
 | `--runtime` | 运行时安装（仅 systemd）：`none`（默认）/ `java` / `node` / `python`。<br>仅这三种语言 + 静态编译语言（`none`）走 systemd，其他语言用 `--app-type docker`，详见 `03_analyze_project.md` |
 | `--start-command` | 完整启动命令（相对 `/opt/qianwenai`） |
 | `--nginx-mode` | `static+app`/`proxy`/`static` |
@@ -63,19 +67,6 @@ DB_PASSWORD='<strong-pwd>' python scripts/generate_template.py \
 | 无 RDS 路径 | 模板原样写出；UserData 写到独立文件，作为 ROS Parameter 传入 |
 | 含 RDS 路径 | UserData base64 编码后 inline 到模板的 `__USERDATA_BODY__` 位置 |
 | DB_PASSWORD | 必须通过环境变量传入（不走命令行，避免 `ps` 泄露） |
-
----
-
-## artifacts-json 管道
-
-推荐用法：`upload_artifacts.py` 输出 → 文件 → `generate_template.py` 读入：
-
-```bash
-python scripts/upload_artifacts.py ... > /tmp/qianwenai-artifacts.json
-python scripts/generate_template.py ... --artifacts-json /tmp/qianwenai-artifacts.json
-```
-
-这样产物签名 URL 自动填入模板，无需手动粘贴。
 
 ---
 

@@ -1,4 +1,4 @@
-# 产物上传（步骤 9/10）
+# 产物上传（步骤 10）
 
 调用 `scripts/upload_artifacts.py` 上传构建产物和模板到 OSS。本文档说明调用方式和关键行为。
 
@@ -6,24 +6,32 @@
 
 ## 调用方式
 
-### 上传模板（步骤 9，获取 TemplateURL）
+建栈用的模板必须含真实产物地址，因此顺序是：先传产物 → 用产物 URL 重新生成模板 → 再传该模板。
+
+### 1. 上传构建产物
 
 ```bash
-python scripts/upload_artifacts.py --region "$REGION" \
-  --template-file /tmp/qianwenai-template.yaml
-```
-
-输出 JSON 含 `template_url`。
-
-### 上传构建产物（步骤 10）
-
-```bash
-python scripts/upload_artifacts.py --region "$REGION" \
+python3 scripts/upload_artifacts.py --region "$REGION" \
   [--bucket "$BUCKET"] \
   --static-dir dist \
   --app-mode binary --app-dir app \
   > /tmp/qianwenai-artifacts.json
 ```
+
+输出 JSON 含 `static_url` / `app_url`（同一桶后续复用，传 `--bucket`）。
+
+### 2. 用产物 URL 重新生成模板
+
+把上一步的 `artifacts-json` 传给 `generate_template.py`，产出含真实产物地址的正式模板（见步骤 7）。
+
+### 3. 上传正式模板（获取 TemplateURL）
+
+```bash
+python3 scripts/upload_artifacts.py --region "$REGION" --bucket "$BUCKET" \
+  --template-file /tmp/qianwenai-template.yaml
+```
+
+输出 JSON 含 `template_url`，供步骤 11 建栈。
 
 ---
 

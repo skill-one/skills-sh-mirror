@@ -3,6 +3,9 @@
 `update_app.sh` 通过 Cloud Assistant RunCommand 在 ECS 上执行如下脚本。
 Agent 无需关心具体脚本内容（由 `update_app.sh` 自动生成），本文档仅供调试参考。
 
+下文 `<SERVICE_NAME>` = 状态文件的 `service_name`（systemd unit / 容器名 / 日志文件名），
+缺失时回退 `qianwenai-app`。
+
 ---
 
 ## 应用更新流程
@@ -43,7 +46,7 @@ rm -f "$STAGING_DIR/app.tar.gz"
 ### 阶段 2：原子切换（停机窗口）
 
 ```bash
-systemctl stop qianwenai-app || true
+systemctl stop <SERVICE_NAME> || true
 # 保留旧版本用于回滚（上一轮的备份先清掉）
 rm -rf /opt/qianwenai.prev
 if [ -d /opt/qianwenai ]; then mv /opt/qianwenai /opt/qianwenai.prev; fi
@@ -52,27 +55,29 @@ mv "$STAGING_DIR" /opt/qianwenai
 # 离线安装依赖（仅 Python，使用阶段 1 缓存）
 pip install --no-index --find-links /tmp/qianwenai-pip-cache -r requirements.txt
 
-systemctl restart qianwenai-app
+systemctl restart <SERVICE_NAME>
 ```
 
 ### 健康检查（失败自动回滚）
 
+> 存活判定与部署期一致：看服务状态 + 应用日志（systemd 读 `/var/log/<SERVICE_NAME>.log`，docker 读 `journalctl -u <SERVICE_NAME>`），不做 HTTP 探测。
+
 ```bash
-APP_PORT=$(sed -n 's/^Environment=PORT=//p' /etc/systemd/system/qianwenai-app.service | head -1)
-APP_PORT=${APP_PORT:-8080}
+BASE_RESTARTS=$(systemctl show -p NRestarts --value <SERVICE_NAME>)
 sleep 3
 for i in $(seq 1 15); do
-  curl -sf -o /dev/null --max-time 5 "http://localhost:${APP_PORT}/" && exit 0
+  systemctl is-active --quiet <SERVICE_NAME> \
+    && [ "$(systemctl show -p NRestarts --value <SERVICE_NAME>)" -le "$BASE_RESTARTS" ] && exit 0
   sleep 2
 done
 
 # 健康检查失败 → 回滚到 /opt/qianwenai.prev，
 # 坏产物留在 /opt/qianwenai.failed 供排查
-systemctl stop qianwenai-app || true
+systemctl stop <SERVICE_NAME> || true
 rm -rf /opt/qianwenai.failed
 mv /opt/qianwenai /opt/qianwenai.failed || true
 mv /opt/qianwenai.prev /opt/qianwenai
-systemctl restart qianwenai-app
+systemctl restart <SERVICE_NAME>
 exit 1
 ```
 
@@ -103,7 +108,7 @@ docker load -i "$STAGING_DIR/image.tar"
 rm -rf /opt/qianwenai.prev
 if [ -d /opt/qianwenai ]; then mv /opt/qianwenai /opt/qianwenai.prev; fi
 mv "$STAGING_DIR" /opt/qianwenai
-systemctl restart qianwenai-app
+systemctl restart <SERVICE_NAME>
 ```
 
 ### docker-compose 模式
@@ -122,11 +127,14 @@ docker compose -f docker-compose.yml up -d --build
 
 ### 健康检查（失败自动回滚）
 
+> 存活判定与部署期一致：看服务状态 + 应用日志（systemd 读 `/var/log/<SERVICE_NAME>.log`，docker 读 `journalctl -u <SERVICE_NAME>`），不做 HTTP 探测。
+
 ```bash
-APP_PORT=<app_port，默认 8080>
+BASE_RESTARTS=$(systemctl show -p NRestarts --value <SERVICE_NAME>)
 sleep 3
 for i in $(seq 1 15); do
-  curl -sf -o /dev/null --max-time 5 "http://localhost:${APP_PORT}/" && exit 0
+  systemctl is-active --quiet <SERVICE_NAME> \
+    && [ "$(systemctl show -p NRestarts --value <SERVICE_NAME>)" -le "$BASE_RESTARTS" ] && exit 0
   sleep 2
 done
 

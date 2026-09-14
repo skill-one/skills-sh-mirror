@@ -10,6 +10,20 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
+# 部署脚本产生的状态文件与密码副本，总是忽略，避免误提交状态与签名 URL。
+DEPLOY_LEAK_PATHS = (
+    ".qianwenai-deploy",
+    ".qianwenai-deploy.local",
+)
+
+# 宿主 AI Agent 工作区会持久化已批准的命令与历史，可能捕获 AK/SK、密码或签名 URL。
+# 仅当当前目录里实际存在这些目录时才加入 .gitignore。
+AGENT_DIRS = (
+    ".claude", ".qoder", ".cursor", ".windsurf", ".codex", ".gemini",
+    ".continue", ".roo", ".cline", ".trae", ".aider",
+)
+
+
 def _ensure_gitignore(root: Path, *entries: str) -> None:
     """确保 .gitignore 含指定条目（幂等）。"""
     gi = root / ".gitignore"
@@ -27,6 +41,13 @@ def _ensure_gitignore(root: Path, *entries: str) -> None:
         gi.write_text(content, encoding="utf-8")
 
 
+def _ignore_agent_dirs(root: Path) -> None:
+    """将当前目录里实际存在的宿主 AI Agent 工作区加入 .gitignore。"""
+    found = [name + "/" for name in AGENT_DIRS if (root / name).is_dir()]
+    if found:
+        _ensure_gitignore(root, *found)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--stack-id", required=True,
@@ -36,6 +57,8 @@ def main():
     ap.add_argument("--region", required=True)
     ap.add_argument("--topology", default="single", choices=["single"])
     ap.add_argument("--app-type", required=True)
+    ap.add_argument("--app-name", default="qianwenai-app",
+                    help="服务名（systemd unit / 容器名 / 日志文件名）；observe/operate 据此定位服务")
     ap.add_argument("--runtime", default=None,
                     help="运行时类型（none/java/node/python），用于热更新时判断依赖安装方式")
     ap.add_argument("--app-mode", default=None, choices=["docker-image", "docker-compose"],
@@ -72,6 +95,8 @@ def main():
     else:
         ecs_ids = [x.strip() for x in str(ecs_ids_raw).split(",") if x.strip()]
 
+    security_group_id = outputs.get("SecurityGroupId") or outputs.get("security_group_id")
+    eip_allocation_id = outputs.get("EipAllocationId") or outputs.get("eip_allocation_id")
     db_instance_id = outputs.get("DbInstanceId") or outputs.get("db_instance_id")
     db_conn = outputs.get("DbConnectionAddress") or outputs.get("db_connection_address")
     db_port_raw = outputs.get("DbPort") or outputs.get("db_port")
@@ -84,6 +109,7 @@ def main():
         "region_id": args.region,
         "topology": args.topology,
         "app_type": args.app_type,
+        "service_name": args.app_name,
         "runtime": args.runtime,
         "static_dir": args.static_dir,
         "app_dir": args.app_dir,
@@ -92,6 +118,8 @@ def main():
         "outputs": {
             "public_ip": public_ip,
             "ecs_instance_ids": ecs_ids,
+            "security_group_id": security_group_id,
+            "eip_allocation_id": eip_allocation_id,
             "db_instance_id": db_instance_id,
             "db_connection_address": db_conn,
             "db_port": db_port,
@@ -104,7 +132,7 @@ def main():
     # Docker 热更新所需字段：仅在 docker 部署时有意义，避免污染其它 app_type 的状态文件
     if args.app_type == "docker":
         state["app_mode"] = args.app_mode or "docker-image"
-        state["app_image_name"] = args.app_image_name or "qianwenai-app:latest"
+        state["app_image_name"] = args.app_image_name or f"{args.app_name}:latest"
     if args.app_port is not None:
         state["app_port"] = args.app_port
     if args.stack_id:
@@ -125,8 +153,8 @@ def main():
     state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
     # 状态文件含 current_artifact_urls（OSS 签名 URL，等同下载凭证），按 0600 落盘。
     os.chmod(state_path, 0o600)
-    # 无条件把主状态文件加入 .gitignore（即便本次没有密码文件）：签名 URL 不应入库。
-    _ensure_gitignore(root, ".qianwenai-deploy")
+    # 忽略部署产物与密码副本文件。
+    _ensure_gitignore(root, *DEPLOY_LEAK_PATHS)
 
     if ecs_password or db_password:
         local_path = root / ".qianwenai-deploy.local"
@@ -140,8 +168,8 @@ def main():
                               encoding="utf-8")
         os.chmod(local_path, 0o600)
 
-        # 追加到 .gitignore
-        _ensure_gitignore(root, ".qianwenai-deploy.local")
+    # 忽略当前目录里实际存在的宿主 AI Agent 工作区。
+    _ignore_agent_dirs(root)
 
     print(str(state_path))
 

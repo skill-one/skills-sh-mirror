@@ -6,11 +6,19 @@
 
 ## 调用方式
 
+参数文件含明文密码：用 `umask 077` 创建（权限 600），创建栈后立即删除。
+
 ```bash
+umask 077 && cat > /tmp/qianwenai-params.json <<'JSON'
+... 参数 JSON（见下）...
+JSON
 APP_NAME="$APP_NAME" APP_DESC="$APP_DESC" \
   [TIMEOUT_MIN=40] \
   bash scripts/create_stack.sh "$REGION" "$TEMPLATE_URL" "$STACK_NAME" /tmp/qianwenai-params.json
+rm -f /tmp/qianwenai-params.json
 ```
+
+> ROS CLI 通过命令行参数接收密码，进程运行期间 `ps` 可见，此为 CLI 限制；限制参数文件权限并在用后删除，可减少残留暴露面。
 
 ---
 
@@ -21,7 +29,7 @@ Agent 需生成 JSON 文件（如 `/tmp/qianwenai-params.json`），包含所有
 ```json
 [
   {"key": "AppName", "value": "myapp"},
-  {"key": "InstanceType", "value": "ecs.e-c1m2.large"},
+  {"key": "InstanceType", "value": "<步骤6选定规格>"},
   {"key": "Password", "value": "<Agent生成的强密码>"},
   {"key": "SystemDiskSize", "value": "40"},
   {"key": "AppPort", "value": "8080"},
@@ -31,7 +39,10 @@ Agent 需生成 JSON 文件（如 `/tmp/qianwenai-params.json`），包含所有
 ```
 
 含 RDS 时不传 `UserDataScript`，改传：
-- `DbInstanceClass`、`DbInstanceStorage`、`DbName`、`DbAccount`、`DbPassword`
+- `DbInstanceClass`（= 步骤 5 的 `DB_INSTANCE_CLASS`）、`DbInstanceStorage`（GiB）、`DbName`、
+  `DbAccount`、`DbPassword`
+
+> `DbInstanceClass`/`DbInstanceStorage` 取自用户在步骤 5 的选择——创建栈时必须用用户选定的规格。
 
 ---
 

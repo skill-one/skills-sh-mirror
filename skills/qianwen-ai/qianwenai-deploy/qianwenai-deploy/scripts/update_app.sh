@@ -38,6 +38,7 @@ public_ip = outputs.get("public_ip") or ""
 app_mode = d.get("app_mode") or "docker-image"
 image_name = d.get("app_image_name") or "qianwenai-app:latest"
 app_port = d.get("app_port") or ""
+service_name = d.get("service_name") or "qianwenai-app"
 
 vals = {
     "REGION": region,
@@ -50,6 +51,7 @@ vals = {
     "APP_MODE": app_mode,
     "IMAGE_NAME": image_name,
     "APP_PORT": str(app_port),
+    "SERVICE_NAME": service_name,
 }
 for k, v in vals.items():
     print(f"{k}={shlex.quote(str(v))}")
@@ -68,7 +70,7 @@ fi
 # 生成 docker 应用的热更新片段（在 ECS 上执行）。
 # 依赖调用方已展开的变量：APP_MODE / IMAGE_NAME / APP_PORT / APP_URL。
 # 与 templates/userdata/docker.sh 的首装逻辑保持一致：
-#   docker-image  → 下载 tar.gz → docker load → 重启 systemd 托管的 qianwenai-app 容器
+#   docker-image  → 下载 tar.gz → docker load → 重启 systemd 托管的 $SERVICE_NAME 容器
 #   docker-compose→ 下载 tar.gz（含 compose.yml + 上下文/镜像）→ docker compose up -d --build
 gen_app_update_docker() {
   local port="${APP_PORT:-8080}"
@@ -129,9 +131,8 @@ echo '[update] docker load 新镜像'
 # docker load 的输出形如 'Loaded image: repo:tag'，据此拿到新镜像的真实 tag/ID。
 LOAD_OUT=\$(docker load -i image.tar)
 echo \"\$LOAD_OUT\"
-# 关键：新产物的镜像 tag 未必等于状态文件里固定的 IMAGE_NAME（'$IMAGE_NAME'）。
-# 若不重打 tag，systemd unit 的 ExecStart 仍按旧 tag 跑，docker load 完却启动旧镜像，
-# 表现为"健康检查通过、静默空转在旧版本"。这里强制把刚加载的镜像重打成 IMAGE_NAME。
+# 加载出的镜像 tag 未必等于 systemd unit 运行的固定 IMAGE_NAME（'$IMAGE_NAME'），
+# 因此把刚加载的镜像重打成 IMAGE_NAME。
 LOADED_REF=\$(echo \"\$LOAD_OUT\" | sed -n 's/^Loaded image: //p' | head -1)
 if [ -z \"\$LOADED_REF\" ]; then
   # 兼容 'Loaded image ID: sha256:...' 的输出形式
@@ -142,28 +143,28 @@ if [ -n \"\$LOADED_REF\" ] && [ \"\$LOADED_REF\" != '$IMAGE_NAME' ]; then
   docker tag \"\$LOADED_REF\" '$IMAGE_NAME'
 fi
 
-# 与首装一致：用 systemd 托管的 qianwenai-app 容器，确保 unit 存在
-if [ ! -f /etc/systemd/system/qianwenai-app.service ]; then
-  cat > /etc/systemd/system/qianwenai-app.service <<UNIT
+# 与首装一致：用 systemd 托管的 $SERVICE_NAME 容器，确保 unit 存在
+if [ ! -f /etc/systemd/system/$SERVICE_NAME.service ]; then
+  cat > /etc/systemd/system/$SERVICE_NAME.service <<UNIT
 [Unit]
-Description=qianwenai app container
+Description=$SERVICE_NAME app container
 After=docker.service
 Requires=docker.service
 
 [Service]
 Restart=always
-ExecStartPre=-/usr/bin/docker rm -f qianwenai-app
-ExecStart=/usr/bin/docker run --rm --name qianwenai-app -p \${APP_PORT}:\${APP_PORT} \${DB_ENV_OPT} $IMAGE_NAME
-ExecStop=/usr/bin/docker stop qianwenai-app
+ExecStartPre=-/usr/bin/docker rm -f $SERVICE_NAME
+ExecStart=/usr/bin/docker run --rm --name $SERVICE_NAME -p \${APP_PORT}:\${APP_PORT} \${DB_ENV_OPT} $IMAGE_NAME
+ExecStop=/usr/bin/docker stop $SERVICE_NAME
 
 [Install]
 WantedBy=multi-user.target
 UNIT
   systemctl daemon-reload
-  systemctl enable qianwenai-app
+  systemctl enable $SERVICE_NAME
 fi
 
-# 保留新产物目录（含 image.tar）供排查，替换旧的
+# 将当前版本移到 .prev（供回滚/排查），再装入新产物目录
 rm -rf /opt/qianwenai.prev
 if [ -d /opt/qianwenai ]; then mv /opt/qianwenai /opt/qianwenai.prev; fi
 mv \"\$STAGING_DIR\" /opt/qianwenai
@@ -171,17 +172,18 @@ echo '[update] 重启容器'
 # 注意：脚本头部是 set -euxo pipefail。systemctl restart 失败若不兜住，会立即退出，
 # 下面的健康检查+回滚块将永远不可达；而 ExecStartPre 已用 docker rm -f 删掉旧容器，
 # 结果是新旧都没跑。这里用 '|| true' 兜住，把成败判定交给随后的健康检查/回滚逻辑。
-systemctl restart qianwenai-app || echo '[update] systemctl restart 返回非零，转入健康检查/回滚'
+systemctl restart $SERVICE_NAME || echo '[update] systemctl restart 返回非零，转入健康检查/回滚'
 "
   fi
 
   # === 健康检查（docker 通用） ===
   s+="
 echo '[update] 健康检查...'
+BASE_RESTARTS=\$(_restarts)
 sleep 3
 HEALTHY=0
 for _i in \$(seq 1 15); do
-  if curl -sf -o /dev/null --max-time 5 \"http://localhost:\${APP_PORT}/\"; then
+  if _healthy \"\$BASE_RESTARTS\"; then
     HEALTHY=1
     break
   fi
@@ -189,6 +191,7 @@ for _i in \$(seq 1 15); do
 done
 if [ \"\$HEALTHY\" -eq 0 ]; then
   echo '[update] 健康检查失败，回滚到上一版本'
+  echo '[update] 失败诊断（服务状态+应用日志）：'; _diag || true
 "
   if [ "$APP_MODE" = "docker-compose" ]; then
     s+="
@@ -198,8 +201,9 @@ if [ \"\$HEALTHY\" -eq 0 ]; then
     mv /opt/qianwenai /opt/qianwenai.failed || true
     mv /opt/qianwenai.prev /opt/qianwenai
     (cd /opt/qianwenai && docker compose -f docker-compose.yml up -d --build) || true
+    BASE_RESTARTS=\$(_restarts)
     for _i in \$(seq 1 15); do
-      if curl -sf -o /dev/null --max-time 5 \"http://localhost:\${APP_PORT}/\"; then
+      if _healthy \"\$BASE_RESTARTS\"; then
         echo '[update] 回滚成功，已恢复上一版本（新产物留在 /opt/qianwenai.failed 供排查）'
         exit 1
       fi
@@ -219,9 +223,10 @@ if [ \"\$HEALTHY\" -eq 0 ]; then
     rm -rf /opt/qianwenai.failed
     if [ -d /opt/qianwenai ]; then mv /opt/qianwenai /opt/qianwenai.failed || true; fi
     if [ -d /opt/qianwenai.prev ]; then mv /opt/qianwenai.prev /opt/qianwenai; fi
-    systemctl restart qianwenai-app || echo '[update] 回滚重启返回非零，继续探活判定'
+    systemctl restart $SERVICE_NAME || echo '[update] 回滚重启返回非零，继续探活判定'
+    BASE_RESTARTS=\$(_restarts)
     for _i in \$(seq 1 15); do
-      if curl -sf -o /dev/null --max-time 5 \"http://localhost:\${APP_PORT}/\"; then
+      if _healthy \"\$BASE_RESTARTS\"; then
         echo '[update] 回滚成功，已恢复上一版本（新产物留在 /opt/qianwenai.failed 供排查）'
         exit 1
       fi
@@ -247,9 +252,31 @@ set -euxo pipefail
 exec >> /var/log/qianwenai-update.log 2>&1
 echo \"[\$(date -u +%FT%TZ)] === qianwenai update start ===\"
 "
+  # 健康判据按托管方式分流：compose 由 docker compose 托管（无 systemd unit），其余走 systemd。
+  if [ "$APP_TYPE" = "docker" ] && [ "$APP_MODE" = "docker-compose" ]; then
+    script+="
+_restarts() { (cd /opt/qianwenai && docker compose -f docker-compose.yml ps -aq 2>/dev/null | xargs -r docker inspect -f '{{.RestartCount}}' 2>/dev/null) | awk '{s+=\$1} END {print s+0}'; }
+# 健康：至少一个容器 running，无 restarting/exited 容器，且相对基线无新增重启。
+_healthy() { [ \"\$(cd /opt/qianwenai && docker compose -f docker-compose.yml ps --status running -q 2>/dev/null | wc -l)\" -gt 0 ] && ! (cd /opt/qianwenai && docker compose -f docker-compose.yml ps -a --format '{{.State}}' 2>/dev/null | grep -qE 'restarting|exited') && [ \"\$(_restarts)\" -le \"\${1:-0}\" ]; }
+_diag() { (cd /opt/qianwenai && docker compose -f docker-compose.yml ps -a; echo ---; docker compose -f docker-compose.yml logs --tail=50) 2>&1; }
+"
+  else
+    local applog
+    if [ "$APP_TYPE" = "docker" ]; then
+      applog="journalctl -u $SERVICE_NAME --no-pager | tail -n 50"
+    else
+      applog="tail -n 50 /var/log/$SERVICE_NAME.log 2>/dev/null"
+    fi
+    script+="
+_restarts() { systemctl show -p NRestarts --value $SERVICE_NAME 2>/dev/null || echo 0; }
+# 健康：服务 active 且相对基线无新增重启（Restart=always 下用重启计数排除 CrashLoop 误判）。
+_healthy() { systemctl is-active --quiet $SERVICE_NAME && [ \"\$(_restarts)\" -le \"\${1:-0}\" ]; }
+# 应用层核验：与部署期一致，用服务状态 + 应用日志判断存活，不做 HTTP 探测。
+_diag() { systemctl status $SERVICE_NAME --no-pager 2>&1 | tail -n 20; echo ---; $applog; }
+"
+  fi
 
-  # 应用产物更新：按 APP_TYPE 分派。docker 与 systemd 的原子替换机制完全不同，
-  # 早先版本无视 APP_TYPE 一律生成 systemd 脚本，导致 docker 部署热更新静默失败。
+  # 应用产物更新：按 APP_TYPE 分派。docker 与 systemd 使用不同的原子替换机制。
   if [ -n "$APP_URL" ] && [ "$APP_TYPE" = "docker" ]; then
     script+="$(gen_app_update_docker)"
   elif [ -n "$APP_URL" ]; then
@@ -294,7 +321,7 @@ fi
     script+="
 # === 阶段 2：原子切换 ===
 echo '[update] 停止服务'
-systemctl stop qianwenai-app || true
+systemctl stop $SERVICE_NAME || true
 echo '[update] 原子替换'
 # 保留旧版本用于回滚，不直接删除；上一轮遗留的备份先清掉。
 rm -rf /opt/qianwenai.prev
@@ -319,16 +346,15 @@ fi
     script+="
 echo '[update] 启动服务'
 # set -e 下 restart 失败会直接退出、跳过健康检查+回滚；兜住交给健康检查判定。
-systemctl restart qianwenai-app || echo '[update] systemctl restart 返回非零，转入健康检查/回滚'
+systemctl restart $SERVICE_NAME || echo '[update] systemctl restart 返回非零，转入健康检查/回滚'
 
 # === 健康检查 ===
 echo '[update] 健康检查...'
-APP_PORT=\$(sed -n 's/^Environment=PORT=//p' /etc/systemd/system/qianwenai-app.service 2>/dev/null | head -1)
-APP_PORT=\${APP_PORT:-8080}
+BASE_RESTARTS=\$(_restarts)
 sleep 3
 HEALTHY=0
 for _i in \$(seq 1 15); do
-  if curl -sf -o /dev/null --max-time 5 \"http://localhost:\${APP_PORT}/\"; then
+  if _healthy \"\$BASE_RESTARTS\"; then
     HEALTHY=1
     break
   fi
@@ -336,14 +362,16 @@ for _i in \$(seq 1 15); do
 done
 if [ \"\$HEALTHY\" -eq 0 ]; then
   echo '[update] 健康检查失败，回滚到上一版本'
+  echo '[update] 失败诊断（服务状态+应用日志）：'; _diag || true
   if [ -d /opt/qianwenai.prev ]; then
-    systemctl stop qianwenai-app || true
+    systemctl stop $SERVICE_NAME || true
     rm -rf /opt/qianwenai.failed
     mv /opt/qianwenai /opt/qianwenai.failed || true
     mv /opt/qianwenai.prev /opt/qianwenai
-    systemctl restart qianwenai-app || echo '[update] 回滚重启返回非零，继续探活判定'
+    systemctl restart $SERVICE_NAME || echo '[update] 回滚重启返回非零，继续探活判定'
+    BASE_RESTARTS=\$(_restarts)
     for _i in \$(seq 1 15); do
-      if curl -sf -o /dev/null --max-time 5 \"http://localhost:\${APP_PORT}/\"; then
+      if _healthy \"\$BASE_RESTARTS\"; then
         echo '[update] 回滚成功，已恢复上一版本（新产物留在 /opt/qianwenai.failed 供排查）'
         exit 1
       fi

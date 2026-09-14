@@ -655,6 +655,13 @@ holds down blobs referenced by captures from the last 7 days by default, writes
 `raw-mirror/v1/pruned.jsonl` for every non-empty plan, and refuses apply mode
 while an index/watch job is active.
 
+Use `--provider opencode` and/or `--source-path '*/opencode.db'` with an age
+or size rule to target one source without retiring unrelated captures.
+Repeated providers are alternatives; a source-path glob further narrows them.
+With a selector, `--max-size` measures unique blobs in that selection. Shared
+blobs still referenced outside it and orphan blobs without source provenance
+remain protected. The JSON plan records the selectors and `scope_blob_bytes`.
+
 Large mutable sources are stored as 4 MiB content-addressed chunks. Growing
 JSONL files reuse every unchanged complete chunk, and SQLite sources reuse
 unchanged 4 MiB byte regions, so each historical snapshot remains byte-exact without
@@ -1000,9 +1007,12 @@ commit/bead/release provenance); it carries no raw session text. The same
 
 Provenance correlation is **project-scoped and explicit-reference anchored**:
 for a hit from the project you are running `cass` in now, cass links it to a
-closed bead / commit / proof / release only when the hit's own indexed text
-references a known identifier (`bead:<id>`, `commit:<sha>`, `release:<tag>`),
-joined against that project's local beads and git history. A temporal or
+closed bead or commit only when the hit's own indexed text references a known
+identifier (`bead:<id>` or `commit:<sha>`), joined against that project's local
+beads and git history. A linked commit's containing release is resolved from
+Git. Release containment preserves provenance but does not establish proof of
+the excerpt's claim: a landed commit remains `proof_debt` and cannot become
+`trusted` from this correlation alone. A temporal or
 workspace coincidence is never enough, so an unrelated conversation never
 inherits another's trust. Off-project hits report `workspace_mismatch`, and a
 hit whose local source file no longer exists on disk reports `source_unhealthy`
@@ -1710,10 +1720,15 @@ Launch-time flags: `cass tui --refresh` (alias `--catch-up`) runs an incremental
 | `Ctrl+Space` | Momentary "peek" to XL context |
 | `F9` | Toggle match mode: prefix (default) ↔ standard |
 | `F12` / `Alt+R` | Cycle ranking: recent → balanced → relevance → quality → newest → oldest |
+| `Alt+F` | Cycle result grouping: agent → conversation → workspace → flat |
 | `Alt+S` | Cycle search mode (lexical / semantic / hybrid) |
 | `Ctrl+D` | Cycle density: Compact → Cozy → Spacious |
 | `Ctrl+1`..`Ctrl+9` | Save the current view to slot N |
 | `Shift+1`..`Shift+9` | Load the view from slot N |
+
+For one chronological list across agents, select **flat** grouping with `Alt+F`
+and **newest** ranking with `F12`. Grouping is also available in the command
+palette and is preserved with ranking and filters in saved views.
 
 ### Selection & Actions
 

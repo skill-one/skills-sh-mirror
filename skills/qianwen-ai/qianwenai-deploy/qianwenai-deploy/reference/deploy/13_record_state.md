@@ -8,12 +8,13 @@
 
 ```bash
 PASSWORD="$ECS_PWD" [DB_PASSWORD="$DB_PWD"] \
-  python scripts/record_state.py \
+ python3 scripts/record_state.py \
     --stack-id "$STACK_ID" \
     --stack-name "$STACK_NAME" \
     --region "$REGION" \
     --topology single \
     --app-type systemd --runtime none \
+    --app-name "$APP_NAME" \
     --nginx-mode static+app \
     --outputs-json '{"PublicIp":"47.x.x.x","EcsInstanceIds":"i-xxx"}' \
     --artifact-bucket "$BUCKET" \
@@ -25,7 +26,7 @@ PASSWORD="$ECS_PWD" [DB_PASSWORD="$DB_PWD"] \
 > **docker 部署额外传** `--app-mode docker-image|docker-compose`、
 > `--app-image-name <镜像名:tag>`（docker-image 模式）、`--app-port <端口>`。
 > 这些字段写入状态文件后，`update_app.sh` 热更新才能正确 `docker load` / `docker compose up`；
-> 缺失时默认 `docker-image` + `qianwenai-app:latest` + 端口 8080。
+> 缺失时默认 `docker-image` + `<APP_NAME>:latest` + 端口 8080。
 
 ---
 
@@ -46,6 +47,8 @@ PASSWORD="$ECS_PWD" [DB_PASSWORD="$DB_PWD"] \
 {
   "PublicIp": "47.x.x.x",
   "EcsInstanceIds": "i-bp1xxx",
+  "SecurityGroupId": "sg-bp1xxx",
+  "EipAllocationId": "eip-bp1xxx",
   "DbInstanceId": "rm-xxx",
   "DbConnectionAddress": "rm-xxx.mysql.rds.aliyuncs.com",
   "DbPort": "3306",
@@ -63,6 +66,11 @@ PASSWORD="$ECS_PWD" [DB_PASSWORD="$DB_PWD"] \
 | `.qianwenai-deploy.local` | 含 ECS/RDS 密码 | 自动加入 `.gitignore`，权限 0600 |
 
 > ⚠️ `current_artifact_urls` 里的 `static_url` / `app_url` 是带签名参数的 OSS 预签名下载链接，在过期前任何持有者都可下载产物。因此该状态文件按 0600 落盘并加入 `.gitignore`，不应提交版本库或分享。
+
+> 🔐 脚本自动把状态文件与密码副本加入 `.gitignore`：`.qianwenai-deploy`、`.qianwenai-deploy.local`。
+> 另会扫描当前目录，仅将**实际存在**的宿主 AI Agent 工作区（`.claude/`、`.qoder/`、`.cursor/`、
+> `.windsurf/`、`.codex/`、`.gemini/`、`.continue/`、`.roo/`、`.cline/`、`.trae/`、`.aider`）加入，
+> 这些目录可能保存含 AK/SK、密码或签名 URL 的已批准命令/历史。
 
 ---
 
@@ -102,6 +110,8 @@ PASSWORD="$ECS_PWD" [DB_PASSWORD="$DB_PWD"] \
   "outputs": {
     "public_ip": "47.x.x.x",
     "ecs_instance_ids": ["i-bp1xxx"],
+    "security_group_id": null,
+    "eip_allocation_id": null,
     "db_instance_id": null,
     "db_connection_address": null,
     "db_port": null,
@@ -140,7 +150,14 @@ PASSWORD="$ECS_PWD" [DB_PASSWORD="$DB_PWD"] \
 |-----------|--------|------|
 | `PublicIp` | `public_ip` | 公网 IP |
 | `EcsInstanceIds` | `ecs_instance_ids` | ECS 实例 ID（逗号分隔或数组） |
+| `SecurityGroupId` | `security_group_id` | ECS 安全组 ID（入方向规则检查） |
+| `EipAllocationId` | `eip_allocation_id` | EIP 分配 ID（EIP 状态查询 / 重新绑定） |
 | `DbInstanceId` | `db_instance_id` | RDS 实例 ID |
 | `DbConnectionAddress` | `db_connection_address` | RDS 内网地址 |
 | `DbPort` | `db_port` | RDS 端口 |
 | `DbAccount` | `db_account` | RDS 账号 |
+
+---
+
+状态写好后进入步骤 14，向 `app_timeline.jsonl` 追加一条 `event=deploy`，见
+`reference/deploy/14_app_timeline.md`。

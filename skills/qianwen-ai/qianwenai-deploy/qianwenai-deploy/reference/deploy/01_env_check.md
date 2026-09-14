@@ -125,6 +125,8 @@ aliyun sts GetCallerIdentity 2>&1
 | 返回 JSON 含 `AccountId` 和 `Arn` | 记录 ACCOUNT_ID 和 ARN，环境检查通过 ✓ |
 | 报错 | 可能 OAuth 已过期，引导用户重新授权（回到认证流程） |
 
+> 部署需要的最小 RAM 权限见 `reference/rules/ram_policies.md`；调用出现 `Forbidden.RAM` 时对照该表补权限。
+
 ---
 
 ## 检查完成后的产出
@@ -134,3 +136,13 @@ aliyun sts GetCallerIdentity 2>&1
 - `REGION` — 部署地域（默认 `cn-hangzhou`）
 - `ACCOUNT_ID` — 阿里云账户 ID
 - `IDENTITY_ARN` — 调用者 ARN
+
+---
+
+## 密钥泄露防护
+
+宿主 AI Agent 可能把已批准的命令和历史写入本地，捕获 AK/SK、密码或 OSS 签名 URL。
+
+- 绝不把 AK/SK 或密码作为命令行参数或输出到聊天，改用环境变量。
+- 步骤 13 会把 Agent 的工作目录加入 `.gitignore`。
+- 若此类文件已被 git 跟踪，告知用户执行 `git rm --cached` 移除，并轮换已暴露的凭证。

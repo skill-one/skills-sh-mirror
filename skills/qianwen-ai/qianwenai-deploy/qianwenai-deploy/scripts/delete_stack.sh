@@ -67,6 +67,16 @@ fi
 # 否则用户以为「没删干净」，却不知道还得回来重跑。
 cleanup_bucket() {
   [ -n "$BUCKET" ] || return 0
+  # 仅清理本工具创建的临时桶：名字带 qianwenai-deploy-tmp- 前缀，或带 from=qianwenai 标签。
+  case "$BUCKET" in
+    qianwenai-deploy-tmp-*) : ;;
+    *)
+      if ! aliyun oss bucket-tagging --method get "oss://$BUCKET/" 2>/dev/null | tr -d '\n' | grep -q 'from.*qianwenai'; then
+        echo "[delete] 跳过 OSS 桶 $BUCKET：非本工具创建（无 qianwenai-deploy-tmp- 前缀且无 from=qianwenai 标签），不予删除。" >&2
+        return 0
+      fi
+      ;;
+  esac
   echo "[delete] 清理 OSS 桶 $BUCKET"
   if ! aliyun oss rm "oss://$BUCKET" -r -f >/dev/null 2>&1 \
      || ! aliyun oss rm "oss://$BUCKET" -b -f >/dev/null 2>&1; then

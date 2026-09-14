@@ -81,25 +81,23 @@ impl UpdateState {
 
     /// Save state to disk (synchronous)
     #[cfg(test)]
-    fn save(&self) -> Result<()> {
-        let path = state_path();
-        save_update_state_to_path(self, &path)
+    fn save(&self, path: &Path) -> Result<()> {
+        save_update_state_to_path(self, path)
     }
 
     /// Save state to disk (asynchronous)
     #[cfg(test)]
-    async fn save_async(&self) -> Result<()> {
-        let path = state_path();
+    async fn save_async(&self, path: &Path) -> Result<()> {
         if let Some(parent) = path.parent() {
             asupersync::fs::create_dir_all(parent)
                 .await
                 .with_context(|| format!("creating update state directory {}", parent.display()))?;
         }
         let json = serde_json::to_string_pretty(self).context("serializing update state")?;
-        let temp_path = write_update_state_temp_file_async(&path, json.as_bytes())
+        let temp_path = write_update_state_temp_file_async(path, json.as_bytes())
             .await
             .with_context(|| format!("writing temporary update state for {}", path.display()))?;
-        replace_update_state_file_from_temp(&temp_path, &path)
+        replace_update_state_file_from_temp(&temp_path, path)
             .with_context(|| format!("replacing {}", path.display()))?;
         Ok(())
     }
@@ -1675,36 +1673,24 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    #[serial]
     fn test_update_state_save_replaces_existing_symlink() {
         let temp_dir = tempfile::TempDir::new().unwrap();
         let (_outside_dir, target_file) = install_update_state_symlink(temp_dir.path());
-        unsafe {
-            std::env::set_var("CASS_DATA_DIR", temp_dir.path());
-        }
-
         let state = UpdateState {
             last_check_ts: 42,
             skipped_version: Some("0.2.0".to_string()),
         };
-        state.save().unwrap();
-
-        unsafe {
-            std::env::remove_var("CASS_DATA_DIR");
-        }
+        state
+            .save(&temp_dir.path().join("update_state.json"))
+            .unwrap();
         assert_update_state_symlink_was_replaced(temp_dir.path(), &target_file, 42);
     }
 
     #[cfg(unix)]
     #[test]
-    #[serial]
     fn test_update_state_save_async_replaces_existing_symlink() {
         let temp_dir = tempfile::TempDir::new().unwrap();
         let (_outside_dir, target_file) = install_update_state_symlink(temp_dir.path());
-        unsafe {
-            std::env::set_var("CASS_DATA_DIR", temp_dir.path());
-        }
-
         let state = UpdateState {
             last_check_ts: 43,
             skipped_version: Some("0.2.0".to_string()),
@@ -1712,11 +1698,9 @@ mod tests {
         let runtime = asupersync::runtime::RuntimeBuilder::current_thread()
             .build()
             .expect("build test runtime");
-        runtime.block_on(state.save_async()).unwrap();
-
-        unsafe {
-            std::env::remove_var("CASS_DATA_DIR");
-        }
+        runtime
+            .block_on(state.save_async(&temp_dir.path().join("update_state.json")))
+            .unwrap();
         assert_update_state_symlink_was_replaced(temp_dir.path(), &target_file, 43);
     }
 
@@ -2177,34 +2161,40 @@ mod tests {
     #[test]
     #[serial]
     fn integration_force_check_bypasses_cadence_even_when_state_save_fails() {
-        use std::os::unix::fs::PermissionsExt;
-
         let temp_dir = tempfile::TempDir::new().unwrap();
         let state_file = temp_dir.path().join("update_state.json");
         let state = UpdateState {
             last_check_ts: now_unix(),
             skipped_version: None,
         };
-        std::fs::write(&state_file, serde_json::to_string_pretty(&state).unwrap()).unwrap();
+        let seeded_bytes = serde_json::to_vec_pretty(&state).unwrap();
+        std::fs::write(&state_file, &seeded_bytes).unwrap();
+        assert!(!state.should_check(), "seeded state must enforce cadence");
+
+        // A directory cannot be opened as the writable lock file, even by root.
+        let lock_path = update_state_lock_path(&state_file);
+        std::fs::create_dir(&lock_path).unwrap();
+        let before_error =
+            mutate_persisted_update_state_at(&state_file, &state_file, UpdateState::mark_checked)
+                .expect_err("the lock directory must prevent state persistence");
+        assert_eq!(
+            before_error
+                .downcast_ref::<std::io::Error>()
+                .map(std::io::Error::kind),
+            Some(std::io::ErrorKind::IsADirectory),
+            "expected an actual lock-path directory error: {before_error:#}"
+        );
+        assert_eq!(
+            std::fs::read(&state_file).unwrap(),
+            seeded_bytes,
+            "failed persistence must preserve the seeded cadence and preferences"
+        );
 
         let release_json = r#"{
             "tag_name": "v9.9.9",
             "html_url": "https://github.com/Dicklesworthstone/coding_agent_session_search/releases/tag/v9.9.9"
         }"#;
         let (addr, handle) = start_test_server(release_json, 200);
-
-        let dir_metadata = std::fs::metadata(temp_dir.path()).unwrap();
-        let file_metadata = std::fs::metadata(&state_file).unwrap();
-        let dir_mode = dir_metadata.permissions().mode();
-        let file_mode = file_metadata.permissions().mode();
-
-        let mut readonly_dir = dir_metadata.permissions();
-        readonly_dir.set_mode(0o555);
-        std::fs::set_permissions(temp_dir.path(), readonly_dir).unwrap();
-
-        let mut readonly_file = file_metadata.permissions();
-        readonly_file.set_mode(0o444);
-        std::fs::set_permissions(&state_file, readonly_file).unwrap();
 
         unsafe {
             std::env::set_var("CASS_DATA_DIR", temp_dir.path());
@@ -2219,14 +2209,7 @@ mod tests {
             .build()
             .expect("build test runtime");
         let result = runtime.block_on(force_check("0.1.0"));
-
-        let mut restore_file = std::fs::metadata(&state_file).unwrap().permissions();
-        restore_file.set_mode(file_mode);
-        std::fs::set_permissions(&state_file, restore_file).unwrap();
-
-        let mut restore_dir = std::fs::metadata(temp_dir.path()).unwrap().permissions();
-        restore_dir.set_mode(dir_mode);
-        std::fs::set_permissions(temp_dir.path(), restore_dir).unwrap();
+        let after_save = mark_update_check_complete();
 
         unsafe {
             std::env::remove_var("CASS_UPDATE_API_BASE_URL");
@@ -2235,6 +2218,20 @@ mod tests {
 
         handle.join().expect("server thread");
 
+        let after_error =
+            after_save.expect_err("the real update-check writer must still fail after force_check");
+        assert_eq!(
+            after_error
+                .downcast_ref::<std::io::Error>()
+                .map(std::io::Error::kind),
+            Some(std::io::ErrorKind::IsADirectory),
+            "expected the same lock-path directory error after force_check: {after_error:#}"
+        );
+        assert_eq!(
+            std::fs::read(&state_file).unwrap(),
+            seeded_bytes,
+            "force_check must preserve the seeded state when persistence fails"
+        );
         let info = result.expect("force check should bypass cadence and succeed");
         assert_eq!(info.latest_version, "9.9.9");
         assert!(info.is_newer);

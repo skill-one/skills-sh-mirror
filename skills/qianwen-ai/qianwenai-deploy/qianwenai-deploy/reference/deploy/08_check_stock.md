@@ -1,27 +1,13 @@
 # 库存检查（步骤 8）
 
-Agent 直接执行 CLI 命令查询 ECS（及可选 RDS）的可用区库存。
-
----
-
-## ECS 库存查询
-
-```bash
-aliyun ecs DescribeAvailableResource \
-  --RegionId "$REGION" \
-  --DestinationResource InstanceType \
-  --InstanceType "$INSTANCE_TYPE" \
-  --InstanceChargeType PostPaid
-```
-
-从返回 JSON 提取有库存的可用区：
-`AvailableZones.AvailableZone[]` 中 `Status` 为 `Available` 或 `WithStock` 的 `ZoneId`。
+ECS 规格已在步骤 6 从实时有货清单选定，`INSTANCE_TYPE` 与 `ZONE_ID` 均已确认，本步骤直接沿用、**跳过 ECS 库存查询**。
+含 RDS 时，验证 RDS 规格在 ECS 有货可用区是否支持，取交集确定最终 `ZONE_ID`。
 
 ---
 
 ## RDS 可用区验证（仅含 RDS 时）
 
-对每个 ECS 有货的可用区，验证 RDS 规格是否支持：
+对 ECS 有货的可用区，验证所选 RDS 规格是否支持：
 
 ```bash
 aliyun rds DescribeAvailableClasses \
@@ -39,14 +25,17 @@ aliyun rds DescribeAvailableClasses \
 
 | 结果 | 动作 |
 |------|------|
-| ≥1 个可用区有货 | 记录 `ZONE_ID`（取第一个），继续 |
-| 0 个可用区 | 给用户 2–3 个替代方案（换规格/换地域），附代价说明 |
+| 无 RDS | 直接沿用步骤 6 的 `ZONE_ID`，继续 |
+| 含 RDS 且交集非空 | 记录交集中的 `ZONE_ID`（取第一个），继续 |
+| 含 RDS 且交集为空 | 给用户 2–3 个替代方案（换 RDS/ECS 规格、换地域），附代价说明 |
 
 ---
 
 ## 替代方案建议
 
-库存不足时 Agent 自行查询替代规格的库存：
-- 同系列更大规格（如 `ecs.e-c1m2.xlarge`）
-- 其他系列同配置（如 `ecs.g7.large`）
-- 换地域（如 `cn-shanghai`、`cn-beijing`）
+交集为空时 Agent 自行查询替代方案的可用性：
+- 回到步骤 6 换一个 ECS 有货规格
+- 回到步骤 5 换一个 RDS 规格
+- 换地域（如 `cn-shanghai`、`cn-beijing`），重跑受影响的步骤
+
+> 上述任一改动都会改变步骤 5/6 的选择，因此继续步骤 8/9 前须重跑步骤 7，用新选择重新生成模板。

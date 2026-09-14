@@ -34,7 +34,7 @@ aliyun ros ListStacks --RegionId "$REGION" \
 | 同项目已有部署 | AskUserQuestion：① 热更新（推荐，IP 不变）② 删除旧栈重新部署 |
 | 无存量部署 | 继续全栈部署（步骤 5） |
 
-> 用户选择热更新 → 跳转到 **热更新流程**（U1–U3）。
+> 用户选择热更新 → 跳转到 **热更新流程**（U1–U4）。
 > 用户选择删除重建 → 先执行 `bash scripts/delete_stack.sh --project-root . --yes`，等待完成后继续全栈部署。
 
 ---

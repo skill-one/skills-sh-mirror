@@ -4,9 +4,10 @@
 #   __APP_ARTIFACT_URL__   应用产物 tar.gz 的 OSS 签名 URL
 #   __APP_RUNTIME__        none | java | node | python
 #   __START_COMMAND__          完整启动命令（相对 /opt/qianwenai），如
-#                              ./server / "python3 app.py" / "java -jar app.jar" /
+#                              ./server / "python3 app.py" / "sh -c 'java -jar /opt/qianwenai/*.jar'" /
 #                              "node server.js" / "gunicorn -b :8080 app:app"
 #   __APP_PORT__           应用监听端口
+#   __APP_NAME__           服务名（systemd unit / 日志文件名）
 set -euxo pipefail
 
 LOG=/var/log/qianwenai-bootstrap.log
@@ -17,6 +18,7 @@ APP_URL="__APP_ARTIFACT_URL__"
 RUNTIME="__APP_RUNTIME__"
 ENTRY="__START_COMMAND__"
 PORT="__APP_PORT__"
+APP_NAME="__APP_NAME__"
 
 # 1. 安装运行时
 case "$RUNTIME" in
@@ -31,7 +33,7 @@ case "$RUNTIME" in
     ;;
   node)
     if ! command -v node >/dev/null 2>&1; then
-      # 走发行版自带的、带 GPG 签名校验的包源安装 Node（不再用 `curl … | bash` 下载即执行远程代码）。
+      # 走发行版自带的、带 GPG 签名校验的包源安装 Node。
       # 顺序：① 直接 dnf install（Alibaba Cloud Linux 3 的 nodejs 20 是 alinux3-updates 里的独立包）；
       #       ② 独立包不存在时，若有 nodejs 模块流则启用后再装；③ 老系统退回 yum。
       if command -v dnf >/dev/null 2>&1; then
@@ -68,30 +70,6 @@ curl -fsSL "$APP_URL" -o app.tar.gz
 tar -xzf app.tar.gz
 rm -f app.tar.gz
 
-# 2b. Java JAR 名兜底：Maven/Gradle 通常产出带版本号的 JAR 名，而 ENTRY 常硬编码
-# 固定名（如 "java -jar app.jar"）。若 ENTRY 引用的 JAR 不存在，则把真正可运行的
-# JAR 软链到期望名，保证无论产物实际文件名如何都能启动。
-if [ "$RUNTIME" = "java" ]; then
-  # ENTRY 里的 JAR token = "-jar" 后面那个参数（默认 app.jar）。
-  WANT_JAR="$(printf '%s ' $ENTRY | awk '{for(i=1;i<NF;i++) if($i=="-jar"){print $(i+1); exit}}')"
-  [ -n "$WANT_JAR" ] || WANT_JAR="app.jar"
-  WANT_BASE="$(basename "$WANT_JAR")"
-  if [ ! -f "/opt/qianwenai/$WANT_BASE" ]; then
-    # 选最大的 *.jar（即可运行的 fat JAR），排除 sources/javadoc/plain jar。
-    # 用 stat 保证可移植（最小化镜像可能没有 GNU find -printf）。
-    REAL_JAR="$(find /opt/qianwenai -maxdepth 3 -type f -name '*.jar' \
-      ! -name '*-sources.jar' ! -name '*-javadoc.jar' ! -name 'original-*.jar' 2>/dev/null \
-      | while read -r f; do printf '%s\t%s\n' "$(stat -c%s "$f" 2>/dev/null || echo 0)" "$f"; done \
-      | sort -rn | head -1 | cut -f2)"
-    if [ -n "$REAL_JAR" ]; then
-      echo "[info] 未找到 JAR '$WANT_BASE'，软链真实 JAR：$REAL_JAR -> /opt/qianwenai/$WANT_BASE"
-      ln -sf "$REAL_JAR" "/opt/qianwenai/$WANT_BASE"
-    else
-      echo "[error] /opt/qianwenai 下未找到可运行的 JAR；应用将无法启动"
-    fi
-  fi
-fi
-
 # python: 安装依赖
 if [ "$RUNTIME" = "python" ] && [ -f requirements.txt ]; then
   python3 -m pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com -r requirements.txt
@@ -104,8 +82,8 @@ fi
 # 3. 解析启动命令
 # ENTRY 即「完整启动命令」，是命令的唯一来源；脚本不按 runtime 注入任何解释器，
 # 只把首个 token（argv[0]）解析成绝对路径——systemd ExecStart 要求 argv[0] 为绝对路径。
-# 这样无论 ./server / "python3 run.py" / "java -jar app.jar" / "gunicorn app:app"
-# 都按用户给定的命令原样运行，不存在「自动前缀」与「用户前缀」相撞的问题。
+# 无论 ./server / "python3 run.py" / "java -jar <name>.jar" / "gunicorn app:app"，
+# 都按 ENTRY 原样运行。
 set -- $ENTRY
 ARGV0="$1"; shift || true
 case "$ARGV0" in
@@ -127,9 +105,9 @@ esac
 EXEC="$ARGV0 $*"
 
 # 4. 写 systemd unit
-cat > /etc/systemd/system/qianwenai-app.service <<UNIT
+cat > /etc/systemd/system/${APP_NAME}.service <<UNIT
 [Unit]
-Description=qianwenai app
+Description=${APP_NAME} app
 After=network-online.target
 Wants=network-online.target
 
@@ -140,15 +118,15 @@ EnvironmentFile=-/etc/qianwenai/db.env
 ExecStart=${EXEC}
 Restart=always
 RestartSec=3
-StandardOutput=append:/var/log/qianwenai-app.log
-StandardError=append:/var/log/qianwenai-app.log
+StandardOutput=append:/var/log/${APP_NAME}.log
+StandardError=append:/var/log/${APP_NAME}.log
 
 [Install]
 WantedBy=multi-user.target
 UNIT
 
 systemctl daemon-reload
-systemctl enable qianwenai-app
-systemctl restart qianwenai-app
+systemctl enable ${APP_NAME}
+systemctl restart ${APP_NAME}
 
 echo "[$(date -u +%FT%TZ)] systemd app up"

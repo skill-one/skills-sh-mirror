@@ -242,7 +242,7 @@ def main():
     outputs = extract_outputs(stack_data)
     public_ip = outputs.get("PublicIp", outputs.get("EipAddress", ""))
     # 模板 Output 是 EcsInstanceIds（逗号分隔的列表）；取第一个作为展示用实例 ID。
-    # 兼容早期可能存在的 InstanceId / EcsInstanceId 单数键。
+    # 同时接受 InstanceId / EcsInstanceId 单数键。
     ecs_ids_raw = outputs.get("EcsInstanceIds") or outputs.get("InstanceId") \
         or outputs.get("EcsInstanceId") or ""
     instance_id = str(ecs_ids_raw).split(",")[0].strip() if ecs_ids_raw else ""

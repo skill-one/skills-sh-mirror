@@ -12,7 +12,7 @@
 | `InvalidParameter`           | 密码不合格                   | 重新生成强密码                                                 |
 | 栈回滚 `ROLLBACK_COMPLETE`   | 资源创建失败                 | `ListStackResources` 定位出错资源                              |
 | Nginx 探活失败但栈成功       | UserData 未跑完 / Nginx 异常 | 查 `/var/log/qianwenai-bootstrap.log`                          |
-| Nginx 通但应用未起（`app: "manual"` 待核验） | 应用崩了 / 尚未启动 | 用云助手查 `/var/log/qianwenai-app.log`                        |
+| Nginx 通但应用未起（`app: "manual"` 待核验） | 应用崩了 / 尚未启动 | 用云助手查 `/var/log/$APP_NAME.log`                        |
 | `DELETE_FAILED`              | 资源被外部占用               | ROS 控制台手动清理                                             |
 | 密码丢失                     | `.local` 文件误删            | ECS/RDS 控制台重置密码                                         |
 | RunCommand 超时              | 云助手未响应                 | 检查 ECS 状态和 `DescribeCloudAssistantStatus`                 |
@@ -29,7 +29,7 @@
 **模板与 API**：
 
 - ROS 必须用 `--TemplateURL`（`--TemplateBody` 被 WAF 拦截）
-- 可用区必须来自库存检查（见 `reference/deploy/08_check_stock.md`，Agent 直接调用 `DescribeAvailableResource`）
+- 可用区必须来自步骤 6 选定的有货规格（`ZONE_ID`）；含 RDS 时再按 `reference/deploy/08_check_stock.md` 取 ECS ∩ RDS 交集
 - `DisableRollback=false` 和 `from=qianwenai` tag 必带
 - 禁止跳过 `ValidateTemplate`
 
@@ -59,14 +59,15 @@
 - 单 region
 ## 登服务器排查
 
-核验应用是否启动时，通过 Cloud Assistant 在 ECS 上读应用日志判断。
+核验应用是否启动时，通过 Cloud Assistant 在 ECS 上读应用日志判断。下文 `$APP_NAME` 为部署期
+环境变量（即服务名）；部署完成后的排障请用 operate skill（从状态文件读 `service_name`）。
 
 ## 要看的日志
 
 | 文件 | 内容 |
 |------|------|
 | `/var/log/qianwenai-bootstrap.log` | UserData 引导过程 |
-| `/var/log/qianwenai-app.log` | 应用 stdout/stderr |
+| `/var/log/$APP_NAME.log` | 应用 stdout/stderr |
 
 ## Cloud Assistant RunCommand
 
@@ -77,7 +78,7 @@ ECS 自带云助手，直接在实例上执行 shell 命令：
 CID=$(PAGER=cat aliyun ecs RunCommand \
   --RegionId "$REGION" --InstanceId.1 "$INSTANCE_ID" --Type RunShellScript \
   --Timeout 60 --ContentEncoding PlainText \
-  --CommandContent 'systemctl status qianwenai-app --no-pager; echo ---; tail -n 100 /var/log/qianwenai-app.log' \
+  --CommandContent "systemctl status $APP_NAME --no-pager; echo ---; tail -n 100 /var/log/$APP_NAME.log" \
   | python3 -c 'import sys,json;print(json.load(sys.stdin)["InvokeId"])')
 
 # 2. 取结果（异步，先等待）
@@ -93,10 +94,10 @@ PAGER=cat aliyun ecs DescribeInvocations --RegionId "$REGION" --InvokeId "$CID" 
 
 ```bash
 # 查看服务状态
-systemctl status qianwenai-app --no-pager
+systemctl status $APP_NAME --no-pager
 
 # 查看最近日志
-tail -n 100 /var/log/qianwenai-app.log
+tail -n 100 /var/log/$APP_NAME.log
 
 # 查看引导日志
 tail -n 50 /var/log/qianwenai-bootstrap.log
@@ -105,7 +106,7 @@ tail -n 50 /var/log/qianwenai-bootstrap.log
 ss -tlnp | grep 8080
 
 # 重启服务
-systemctl restart qianwenai-app
+systemctl restart $APP_NAME
 ```
 
 ## 注意事项

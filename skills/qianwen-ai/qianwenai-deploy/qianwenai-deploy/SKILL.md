@@ -32,7 +32,8 @@ output: >-
 ## 快速路径
 
 1. **路由任务** — 匹配到 3 种模式之一：全栈部署 · 热更新 · 删除/清理。
-2. **部署（默认）** — 按步骤 1→13 执行，每步有对应 reference 文档。
+2. **部署（默认）** — 严格按步骤 1→14 顺序执行，不跳步/不乱序；门禁与可跳过项见
+   `reference/rules/rule_interaction.md`「执行顺序」。
 3. **创建资源前确认费用** — 人民币（¥）展示小时单价，取得用户确认。
 4. **记录状态** — 成功后写入 `.qianwenai-deploy`。
 
@@ -44,6 +45,13 @@ output: >-
 | 全栈 ROS 编排、热更新、清理 | AWS/GCP/Azure/其他云 |
 | ECS + 可选 RDS + OSS + 公网 IP | K8s/Serverless/容器编排 |
 | OAuth/AK 认证（不收集凭证） | 域名/HTTPS（不涉及） |
+| 部署用户提供的代码/项目 | 审查或修改用户代码的业务逻辑、为代码正确性背书 |
+
+## 关于用户代码
+
+本 skill 负责把用户提供的代码/项目构建并部署上线，不审查、不修改其业务逻辑，也不保证代码本身正确。
+
+代码的 bug、安全问题及部署上线后由代码引发的后果，由用户自行承担；如需改代码，由用户自行决定并执行。
 
 ## 假设
 
@@ -64,7 +72,7 @@ output: >-
 
 ---
 
-## 全栈部署（步骤 1–13）
+## 全栈部署（步骤 1–14）
 
 ### 阶段 1 · 准备
 
@@ -93,6 +101,7 @@ output: >-
 | 11 | 创建栈 | `reference/deploy/11_create_stack.md` |
 | 12 | 等待终态 + 探活 | `reference/deploy/12_wait_stack.md` |
 | 13 | 记录状态 | `reference/deploy/13_record_state.md` |
+| 14 | 追加应用档案 | `reference/deploy/14_app_timeline.md` |
 
 ---
 
@@ -105,6 +114,7 @@ output: >-
 | U1 | 构建 + 上传新产物 | `reference/deploy/10_upload_artifacts.md` |
 | U2 | 下发更新（Cloud Assistant） | `reference/hotfix/update_app.md` |
 | U3 | 探活 + 更新状态 | `reference/hotfix/update_app.md` |
+| U4 | 追加应用档案（`event=hotfix`） | `reference/deploy/14_app_timeline.md` |
 
 更新脚本模板见 `reference/hotfix/update_recipe.md`。
 
@@ -143,16 +153,16 @@ scripts/
   generate_template.py  upload_artifacts.py
   create_stack.sh       record_state.py
   delete_stack.sh       update_app.sh
-  wait_and_probe.py
+  wait_and_probe.py     append_timeline.py
 reference/
   deploy/
-    01_env_check.md ~ 13_record_state.md
+    01_env_check.md ~ 14_app_timeline.md
   hotfix/
     update_app.md       update_recipe.md
   cleanup/
     delete_stack.md
   rules/
-    rule_interaction.md  rule_error_handling.md
+    rule_interaction.md  rule_error_handling.md  ram_policies.md
 templates/
   ros_single[_rds].yaml
   userdata/{systemd,docker,nginx_proxy,nginx_static,nginx_static_proxy}.sh

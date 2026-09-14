@@ -3,6 +3,20 @@
 All notable changes to the `scope-triage` skill. Versions refer to `metadata.version`
 in SKILL.md. This file is for maintainers and is never loaded by agents using the skill.
 
+## [1.0.5] - 2026-09-14
+
+### Changed
+- Route C saves the approved design as `docs/specs/YYYYMMDD-HHMM-<topic>.md`, replacing the
+  date-only name and dropping the `-design` suffix: a timestamped name orders same-day specs
+  by creation and makes the suffix redundant
+
+## [1.0.4] - 2026-09-13
+
+### Changed
+- Route A now names `tdd` and `debugging` as backticked skill references instead of the
+  bare words "TDD" and "debugging", so the root router's handoff into implementation reads
+  as the local skills rather than as methodology nouns; routing semantics are unchanged
+
 ## [1.0.3] - 2026-08-09
 
 ### Changed

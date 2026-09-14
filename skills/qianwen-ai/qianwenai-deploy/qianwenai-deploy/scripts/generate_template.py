@@ -6,6 +6,7 @@ import argparse
 import base64
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -60,7 +61,8 @@ def build_userdata(app_type: str, args) -> str:
         app_script = app_script.replace("__APP_ARTIFACT_URL__", args.app_artifact_url or "")
         app_script = app_script.replace("__APP_MODE__", args.app_mode or "docker-image")
         app_script = app_script.replace("__APP_PORT__", str(args.app_port))
-        app_script = app_script.replace("__APP_IMAGE_NAME__", args.app_image_name or "qianwenai-app:latest")
+        app_script = app_script.replace("__APP_IMAGE_NAME__", args.app_image_name or f"{args.app_name}:latest")
+        app_script = app_script.replace("__APP_NAME__", args.app_name)
         parts.append("# --- app: docker ---")
         parts.append(app_script)
     elif app_type == "systemd":
@@ -70,6 +72,7 @@ def build_userdata(app_type: str, args) -> str:
         app_script = app_script.replace("__APP_RUNTIME__", runtime)
         app_script = app_script.replace("__START_COMMAND__", args.start_command or "./server")
         app_script = app_script.replace("__APP_PORT__", str(args.app_port))
+        app_script = app_script.replace("__APP_NAME__", args.app_name)
         parts.append(f"# --- app: systemd (runtime={runtime}) ---")
         parts.append(app_script)
     else:
@@ -82,9 +85,8 @@ def build_userdata(app_type: str, args) -> str:
 def inject_userdata_body(template_text: str, userdata_body: str) -> str:
     """把 userdata_body 做 base64 编码后注入模板的 __USERDATA_BODY__ 占位。
 
-    不再尝试逐个转义 shell 变量（${!VAR} 不可靠，且 $VAR / ${VAR#pattern} 也会被
-    ROS Fn::Sub 解析报错）。改用 base64 编码方案：Fn::Sub 完全看不到 shell 变量，
-    运行时解码后 source 执行，继承 db.env 环境变量。
+    采用 base64 编码：Fn::Sub 看不到 shell 变量；运行时解码后 source 执行，
+    继承 db.env 环境变量。
     """
     marker = "__USERDATA_BODY__"
     if marker not in template_text:
@@ -133,11 +135,14 @@ def main():
                          "显式的 --static-artifact-url / --app-artifact-url 优先。")
     ap.add_argument("--app-mode", default="docker-image", choices=["docker-image", "docker-compose"])
     ap.add_argument("--app-image-name", default="")
+    ap.add_argument("--app-name", default="qianwenai-app",
+                    help="服务名（systemd unit / 容器名 / 日志文件名 / 默认镜像 tag）。"
+                         "须匹配 ^[a-z][a-z0-9-]{0,30}$。")
     ap.add_argument("--start-command", default="",
                     help="完整启动命令（相对 /opt/qianwenai），如 ./server / "
-                         "\"python3 app.py\" / \"java -jar app.jar\" / \"node server.js\" / "
-                         "\"gunicorn -b :8080 app:app\"。脚本不再自动补解释器前缀，"
-                         "命令以此为唯一来源。")
+                         "\"python3 app.py\" / \"sh -c 'java -jar /opt/qianwenai/*.jar'\" / \"node server.js\" / "
+                         "\"gunicorn -b :8080 app:app\"。此命令即最终执行命令，"
+                         "不会追加解释器前缀。")
     ap.add_argument("--nginx-mode", default="static+app", choices=["static+app", "proxy", "static"],
                     help="static+app: 静态文件 + /api/ 反代（默认）；proxy: 全量反代到应用（Flask/Django 等）；static: 纯静态托管")
     ap.add_argument("--output", required=True)
@@ -146,11 +151,12 @@ def main():
     # RDS-related
     ap.add_argument("--with-rds", action="store_true",
                     help="选用 *_rds.yaml 模板，并把 UserData inline 进模板（Fn::Sub 嵌入 RDS 内网地址）")
-    ap.add_argument("--db-name", default="appdb")
-    ap.add_argument("--db-account", default="appuser")
-    ap.add_argument("--db-instance-class", default="mysql.n2.medium.1")
-    ap.add_argument("--db-instance-storage", type=int, default=20)
     args = ap.parse_args()
+
+    if not re.fullmatch(r"[a-z][a-z0-9-]{0,30}", args.app_name):
+        print(f"--app-name 非法：{args.app_name!r}；须匹配 ^[a-z][a-z0-9-]{{0,30}}$"
+              "（小写字母开头，仅含小写字母/数字/短横线，长度 1-31）", file=sys.stderr)
+        sys.exit(64)
 
     # 校验 DB_PASSWORD
     if args.with_rds and not os.environ.get("DB_PASSWORD"):
@@ -183,7 +189,7 @@ def main():
             "# 以下为转义前的原始 body（仅供 diff 调试）：\n\n" + userdata,
             encoding="utf-8")
     else:
-        # 原有路径：模板原样写出，UserData 走独立文件
+        # 模板原样写出，UserData 走独立文件
         Path(args.output).write_text(skeleton, encoding="utf-8")
         Path(args.userdata_output).write_text(userdata, encoding="utf-8")
 

@@ -75,7 +75,7 @@ head -80 README.md
 
 | 变量 | 说明 |
 |------|------|
-| `APP_NAME` | 应用名（小写、短横线连接） |
+| `APP_NAME` | 应用名，须匹配 `^[a-z][a-z0-9-]{0,30}$`（小写字母开头，仅含小写字母/数字/短横线，长度 1-31）。直接用作服务名（systemd unit / 容器名 / 日志文件名）。含大写/下划线/空格/中文或超长时先规范化 |
 | `APP_DESC` | 一句话描述 |
 | `app_type` | 见下方映射表 |
 | `start_command` | 完整启动命令（相对部署目录） |
@@ -181,7 +181,7 @@ DLL，因此归入 `docker`——不要去猜用户的构建参数。
 
 - Go 二进制：`./server`
 - Python：`python3 app.py` 或 `gunicorn -b :8080 app:app`
-- Java：`java -jar app.jar`
+- Java：单 jar 用 `sh -c 'java -jar /opt/qianwenai/*.jar'`；多 jar 写产物里真实的 jar 文件名
 - Node：`node server.js`
 
 ---

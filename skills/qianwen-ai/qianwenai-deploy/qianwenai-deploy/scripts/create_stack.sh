@@ -13,6 +13,10 @@ usage() {
 REGION="$1"; TPL_URL="$2"; NAME="$3"; PARAMS_FILE="$4"
 : "${APP_NAME:?missing APP_NAME}"
 : "${APP_DESC:?missing APP_DESC}"
+case "$APP_NAME" in
+  [a-z]*) [[ "$APP_NAME" =~ ^[a-z][a-z0-9-]{0,30}$ ]] || { echo "APP_NAME 非法：${APP_NAME}（须匹配 ^[a-z][a-z0-9-]{0,30}\$）" >&2; exit 64; } ;;
+  *) echo "APP_NAME 非法：${APP_NAME}（须以小写字母开头，仅含小写字母/数字/短横线，长度 1-31）" >&2; exit 64 ;;
+esac
 [ -f "$PARAMS_FILE" ] || { echo "params-file not found: $PARAMS_FILE" >&2; exit 1; }
 PROJECT_ROOT="${PROJECT_ROOT:-.}"
 # ROS 侧超时：无 RDS 时 ECS+EIP 通常 2-5 分钟就绪，15 分钟已很宽裕；含 RDS 传 40。
@@ -48,6 +52,8 @@ EXISTING=$(aliyun ros ListStacks \
   --Status.1 CREATE_IN_PROGRESS \
   --Status.2 CREATE_COMPLETE \
   --Status.3 CREATE_FAILED \
+  --Status.4 ROLLBACK_COMPLETE \
+  --Status.5 ROLLBACK_FAILED \
   --PageSize 1 2>&1) || true
 
 EXISTING_SID=$(echo "$EXISTING" | python3 -c "
@@ -67,19 +73,20 @@ if [ -n "$EXISTING_SID" ]; then
   echo "[create] 发现同名栈 ${EXISTING_SID}（${NAME}），复用" >&2
   STACK_ID="$EXISTING_SID"
 else
-  # 若存在同名的 CREATE_FAILED 栈，先删掉以释放名字
+  # 释放被失败/回滚栈占用的名字
   FAILED_SID=$(echo "$EXISTING" | python3 -c "
 import json, sys
+FAILED = {'CREATE_FAILED', 'ROLLBACK_COMPLETE', 'ROLLBACK_FAILED'}
 try:
     d = json.load(sys.stdin)
     stacks = d.get('Stacks', [])
-    if stacks and stacks[0].get('Status') == 'CREATE_FAILED':
+    if stacks and stacks[0].get('Status') in FAILED:
         print(stacks[0].get('StackId', ''))
 except Exception:
     pass
 " 2>/dev/null)
   if [ -n "$FAILED_SID" ]; then
-    echo "[create] 删除此前失败的栈 $FAILED_SID" >&2
+    echo "[create] 删除失败/回滚栈 $FAILED_SID 以释放栈名" >&2
     aliyun ros DeleteStack --RegionId "$REGION" --StackId "$FAILED_SID" >/dev/null 2>&1 || true
     sleep 5
   fi

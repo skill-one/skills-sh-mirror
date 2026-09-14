@@ -2,6 +2,9 @@
 
 调用 `scripts/update_app.sh` 通过 Cloud Assistant 在 ECS 上原子替换应用代码。
 
+下文 `<service_name>` = 状态文件的 `service_name`（`update_app.sh` 自动读取），缺失时回退
+`qianwenai-app`。
+
 ---
 
 ## 调用方式
@@ -26,8 +29,7 @@ APP_URL="$APP_URL" STATIC_URL="$STATIC_URL" \
 ## 执行流程（脚本在 ECS 上执行的逻辑）
 
 脚本按状态文件里的 `app_type` 分派应用更新逻辑（`docker` / `systemd`）。
-**docker 部署必须走 docker 分支**：早期版本无视 `app_type` 一律生成 systemd 脚本，
-导致 docker 应用热更新「成功返回」但线上仍跑旧容器。
+**docker 部署必须走 docker 分支**，才能真正替换正在运行的容器。
 
 ### 应用更新 · systemd（最小停机窗口）
 
@@ -37,11 +39,11 @@ APP_URL="$APP_URL" STATIC_URL="$STATIC_URL" \
    - 预安装依赖（Python: pip download；Node: yarn install）
 
 2. **阶段 2：原子切换**（停机窗口）
-   - `systemctl stop qianwenai-app`
+   - `systemctl stop <service_name>`
    - `rm -rf /opt/qianwenai && mv staging → /opt/qianwenai`
    - 离线安装依赖（使用阶段 1 预下载的缓存）
-   - `systemctl restart qianwenai-app`
-   - 本地健康检查（curl localhost 重试 15 次）
+   - `systemctl restart <service_name>`
+   - 健康检查：服务状态 + 应用日志（不做 HTTP 探测），失败自动回滚
 
 ### 应用更新 · docker
 
@@ -51,7 +53,7 @@ APP_URL="$APP_URL" STATIC_URL="$STATIC_URL" \
 - **docker-image 模式**
   1. 下载 tar.gz 到 `/opt/qianwenai.staging` 并校验、解出 `image.tar`
   2. 记录旧镜像 ID（回滚用）→ `docker load -i image.tar`
-  3. 确保 systemd unit `qianwenai-app.service` 存在 → 目录原子替换 → `systemctl restart qianwenai-app`
+  3. 确保 systemd unit `<service_name>.service` 存在 → 目录原子替换 → `systemctl restart <service_name>`
   4. 健康检查失败 → `docker tag` 回滚到旧镜像并重启（新产物留在 `/opt/qianwenai.failed`）
 - **docker-compose 模式**
   1. 下载 tar.gz（含 `docker-compose.yml` + 上下文/镜像）到 staging
@@ -72,6 +74,18 @@ APP_URL="$APP_URL" STATIC_URL="$STATIC_URL" \
 stdout JSON：
 ```json
 {"status": "success", "updated_instances": ["i-xxx"], "invoke_ids": ["t-xxx"]}
+```
+
+---
+
+## 追加应用档案
+
+更新成功后追加一条 `event=hotfix` 到 `app_timeline.jsonl`：
+
+```bash
+python3 scripts/append_timeline.py --skill qianwenai-deploy --event hotfix \
+  --summary "热更新完成：应用产物已替换，服务状态校验通过" \
+  --data-json '{"artifact":"app+static","verification":"passed"}'
 ```
 
 ---
