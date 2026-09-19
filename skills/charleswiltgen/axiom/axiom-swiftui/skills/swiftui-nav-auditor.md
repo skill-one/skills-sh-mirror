@@ -74,14 +74,14 @@ Run all 10 existing detection patterns. For every grep match, use Read to verify
 ### 1. Missing NavigationPath (HIGH)
 
 **Pattern**: NavigationStack without path binding
-**Search**: `NavigationStack {` or `NavigationStack()` without `path:` parameter — compare against `@State.*NavigationPath` count
+**Search**: `NavigationStack\s*(\(\s*\))?\s*\{` (stacks opened without a `path:` argument) — compare against `@State.*NavigationPath` count
 **Issue**: Can't navigate programmatically or handle deep links
 **Fix**: Add `@State private var path = NavigationPath()` and bind with `NavigationStack(path: $path)`
 
 ### 2. Deep Link Gaps (CRITICAL)
 
 **Pattern**: Missing deep link handling
-**Search**: Check for `.onOpenURL` handler; check Info.plist for URL scheme registration
+**Search**: `Glob: **/Info.plist` and `Glob: **/*.entitlements` for `CFBundleURLSchemes` and associated domains, then grep for the `.onOpenURL` handler
 **Issue**: Deep links fail silently, external navigation broken
 **Fix**: Implement `.onOpenURL` handler that routes to correct NavigationPath destination
 
@@ -106,12 +106,12 @@ Run all 10 existing detection patterns. For every grep match, use Read to verify
 **Issue**: Undefined behavior — wrong view shown, navigation breaks
 **Fix**: Use unique types or wrapper enum with associated values
 
-### 6. Tab/Nav Integration (MEDIUM)
+### 6. Tab/Nav Integration (LOW)
 
-**Pattern**: Missing sidebar adaptable style (iOS 18+)
-**Search**: `TabView` with `NavigationStack` but no `.tabViewStyle(.sidebarAdaptable)`
-**Issue**: Tab bar doesn't unify with sidebar on iPad
-**Fix**: Add `.tabViewStyle(.sidebarAdaptable)`
+**Pattern**: TabView nesting NavigationStack without an iPad sidebar intent
+**Search**: `TabView` containing `NavigationStack` and no `.tabViewStyle(.sidebarAdaptable)`
+**Issue**: Only a gap if the app intends a sidebar on iPad — a plain tab bar is a valid design
+**Fix**: If a sidebar is intended, add `.tabViewStyle(.sidebarAdaptable)`
 
 ### 7. Missing State Preservation (HIGH)
 
@@ -123,7 +123,7 @@ Run all 10 existing detection patterns. For every grep match, use Read to verify
 ### 8. Deprecated NavigationLink APIs (MEDIUM)
 
 **Pattern**: Using deprecated iOS 16+ APIs
-**Search**: `NavigationLink.*isActive:` or `NavigationLink.*tag:.*selection:`
+**Search**: `isActive:` or `tag:` — the deprecated initializer labels; Read each match and keep only the ones whose enclosing call is a `NavigationLink`. A line-oriented `NavigationLink.*` pattern misses calls that swift-format wraps across lines.
 **Issue**: Deprecated, will be removed in future iOS versions
 **Fix**: Migrate to NavigationStack + NavigationPath pattern
 
@@ -249,3 +249,23 @@ If >100 total issues: Summarize by category, show only CRITICAL/HIGH details
 ## Related
 
 For navigation patterns, debugging, and API reference: `axiom-swiftui` skill (navigation)
+
+## Invocation Examples
+
+Prompts that should launch this agent:
+
+<example>
+user: "Check my SwiftUI navigation for correctness issues"
+assistant: [Launches swiftui-nav-auditor agent]
+</example>
+
+<example>
+user: "My deep links aren't working, can you scan my navigation code?"
+assistant: [Launches swiftui-nav-auditor agent]
+</example>
+
+Explicit command: Users can also invoke this agent directly with `/axiom:audit swiftui-nav`
+
+## Scope
+
+Automatically scans SwiftUI navigation code for architecture issues - detects missing NavigationPath, deep link gaps, state restoration problems, wrong container usage, and navigation correctness issues.

@@ -83,7 +83,8 @@ done
 
 DATE=$(date +%Y-%m-%d)
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# CDPATH must not redirect the cd that locates the sibling scripts.
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 SKILL_ROOT="$(dirname "$SCRIPT_DIR")"
 TEMPLATE_DIR="$SKILL_ROOT/templates"
 
@@ -102,6 +103,7 @@ slugify() {
     # Lowercase, non-alphanumerics → '-', collapse repeats, trim leading/trailing '-'
     printf '%s' "$1" \
         | tr '[:upper:]' '[:lower:]' \
+        | tr '\r\n' '--' \
         | sed -e 's/[^a-z0-9]/-/g' -e 's/-\{2,\}/-/g' -e 's/^-//' -e 's/-$//' \
         | cut -c1-40
 }
@@ -201,12 +203,20 @@ apply_v3_mode() {
 
     # (c) auto-attest the plan (attestation default-on in v3 modes, security
     #     strand rec 1). attest-plan.sh resolves the same way init-session just
-    #     pinned things: in slug mode PLAN_ID points at this plan dir; in legacy
-    #     mode it is empty and the script falls back to ./task_plan.md at root.
-    #     Run from the project root (CWD here) so both resolutions land.
+    #     pinned things. Slug mode binds both selectors to the plan that was
+    #     just created, so an inherited PWF_PLAN_ROOT or PLAN_ID cannot
+    #     redirect attestation to another project or plan (#261, #237). Root
+    #     mode clears both instead: the attester only falls back to the legacy
+    #     ./task_plan.md when no selector is set, and a bound pin would make it
+    #     refuse the root plan. Run from the project root (CWD here) so both
+    #     resolutions land.
     _attest="${SCRIPT_DIR}/attest-plan.sh"
     if [ -f "${_attest}" ] && [ -f "${_mode_plan}" ]; then
-        PLAN_ID="${PLAN_ID:-}" sh "${_attest}" >/dev/null 2>&1 || true
+        if [ "$SLUG_MODE" -eq 1 ]; then
+            PWF_PLAN_ROOT="$PWD" PLAN_ID="${PLAN_ID}" sh "${_attest}" >/dev/null 2>&1 || true
+        else
+            PWF_PLAN_ROOT="" PLAN_ID="" sh "${_attest}" >/dev/null 2>&1 || true
+        fi
     fi
 }
 
@@ -382,6 +392,20 @@ if [ "$SLUG_MODE" -eq 1 ]; then
     BASE_ID="${DATE}-${SLUG}"
     PLAN_ID="$BASE_ID"
     PLAN_ROOT="${PWD}/.planning"
+    PLAN_SELECTOR="${SCRIPT_DIR}/set-active-plan.sh"
+    if [ ! -f "${PLAN_SELECTOR}" ]; then
+        echo "Error: set-active-plan.sh is required to create a named plan safely." >&2
+        exit 1
+    fi
+    mkdir -p "${PLAN_ROOT}"
+    # Verify the physical planning root and the existing pointer before
+    # creating anything below it. A symlink or junction that escapes the
+    # project must not redirect init writes, and a linked or non-regular
+    # pointer must be refused before a plan directory exists on disk. The
+    # selector's check is constant time; --list would parse every plan.
+    if ! sh "${PLAN_SELECTOR}" --verify-root; then
+        exit 1
+    fi
     counter=2
     while [ -d "${PLAN_ROOT}/${PLAN_ID}" ]; do
         PLAN_ID="${BASE_ID}-${counter}"
@@ -393,7 +417,13 @@ if [ "$SLUG_MODE" -eq 1 ]; then
     echo "Initializing planning files for: ${PROJECT_NAME:-untitled} (template: $TEMPLATE)"
     echo "PLAN_ID=$PLAN_ID"
     create_files_in "$PLAN_DIR"
-    printf "%s\n" "$PLAN_ID" > "${PLAN_ROOT}/.active_plan"
+    # Reuse the selector's contained, atomic pointer replacement. Direct shell
+    # redirection would truncate a pre-existing hardlink and could overwrite a
+    # different file that shares the same inode.
+    if ! sh "${PLAN_SELECTOR}" "${PLAN_ID}" >/dev/null; then
+        echo "Error: could not safely update ${PLAN_ROOT}/.active_plan." >&2
+        exit 1
+    fi
     inherit_root_mode
     apply_v3_mode "$PLAN_DIR" "${PLAN_DIR}/task_plan.md"
     echo ""

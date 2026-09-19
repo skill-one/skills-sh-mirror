@@ -17,6 +17,7 @@
 - accounting-companies.md — 事業所
 - accounting-deals.md — 取引（収入・支出）
 - accounting-expense-application-currencies.md — 経費精算の外貨
+- accounting-expense-application-forms.md — Expense application forms
 - accounting-expense-application-line-templates.md — 経費科目
 - accounting-expense-applications.md — 経費精算
 - accounting-fixed-assets.md — 固定資産台帳
@@ -90,6 +91,7 @@
 - pm-partners.md — Partners
 - pm-people.md — People
 - pm-projects.md — Projects
+- pm-sales-order-statuses.md — SalesOrderStatuses
 - pm-teams.md — Teams
 - pm-unit-costs.md — UnitCosts
 - pm-users.md — ログインユーザー
@@ -127,6 +129,10 @@
 - partner-management-orderer-company-users.md — partner_management_orderer_company_users
 - partner-management-orderer-sections.md — partner_management_orderer_sections
 - partner-management-partner-management-orderer-partners.md — partner_management_orderer_partners
+- partner-management-partner-management-orderer-project-business-partners.md — partner_management_orderer_project_business_partners
+- partner-management-partner-management-orderer-project-company-users.md — partner_management_orderer_project_company_users
+- partner-management-partner-management-orderer-project-partners.md — partner_management_orderer_project_partners
+- partner-management-partner-management-orderer-projects.md — partner_management_orderer_projects
 
 ## survey - freeeサーベイ
 

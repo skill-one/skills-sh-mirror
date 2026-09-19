@@ -4,7 +4,7 @@ description: "Liquid is an open-source templating language created by Shopify. I
 compatibility: Requires Node.js
 metadata:
   author: Shopify
-  version: "1.14.1"
+  version: "1.16.0"
 hooks:
   PostToolUse:
     - matcher: Skill

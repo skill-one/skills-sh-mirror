@@ -28,6 +28,235 @@ const GOLDEN_UPDATE_COMMAND_SHAPE: &str = "UPDATE_GOLDENS=1 rch exec -- env CARG
 const GOLDEN_REVIEW_COMMAND_SHAPE: &str = "git diff -- tests/fixtures/swarm_status tests/golden/swarm_status tests/swarm_status_contract.rs";
 const STRESS_SAMPLE_COUNT: usize = 5;
 
+#[test]
+fn live_swarm_status_reports_unknown_sources_without_zero_work_claims() {
+    let root = TempDir::new().expect("empty working directory");
+    let output = Command::new(assert_cmd::cargo::cargo_bin!("cass"))
+        .current_dir(root.path())
+        .env("HOME", root.path().join("home"))
+        .env("XDG_CONFIG_HOME", root.path().join("config"))
+        .env("XDG_DATA_HOME", root.path().join("data"))
+        .env("CASS_DATA_DIR", root.path().join("cass-data"))
+        .env("CASS_AUTO_REFRESH", "0")
+        .env("CODING_AGENT_SEARCH_NO_UPDATE_PROMPT", "1")
+        .arg("--data-dir")
+        .arg(root.path().join("cass-data"))
+        .args(["swarm", "status", "--json"])
+        .output()
+        .expect("live status command");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: Value = serde_json::from_slice(&output.stdout).expect("status JSON");
+    assert_eq!(value["status"], "partial");
+    for field in [
+        "ready_count",
+        "in_progress_count",
+        "blocked_count",
+        "dirty_worktree",
+    ] {
+        assert!(
+            value["summary"][field].is_null(),
+            "unknown {field}: {value}"
+        );
+    }
+    assert_eq!(value["build_pressure"]["status"], "unknown");
+    assert!(value["summary"]["build_pressure"].is_null());
+    for field in ["active_cargo_jobs", "cpu_count", "load_average_1m"] {
+        assert!(value["build_pressure"][field].is_null());
+    }
+    assert_eq!(
+        value["build_pressure"]["recommended_action"],
+        "inspect-rch-state"
+    );
+    assert!(value["beads"]["graph"].is_null());
+    assert!(
+        value["_meta"]["generated_at_ms"]
+            .as_u64()
+            .is_some_and(|time| time > 0)
+    );
+    assert!(!root.path().join(".beads").exists());
+    assert!(!root.path().join(".git").exists());
+}
+
+#[test]
+#[ignore = "requires installed br 0.6.x; run explicitly through RCH"]
+fn live_swarm_cli_reads_real_git_and_beads_without_authorizing_claims() {
+    let sandbox = TempDir::new().expect("isolated CLI environment");
+    let repo = sandbox.path().join("repo");
+    fs::create_dir(&repo).expect("repository directory");
+    let tool = |program: &str, args: &[&str]| {
+        assert!(matches!(program, "git" | "br"), "unknown test tool");
+        let mut command = if program == "git" {
+            std::process::Command::new("git")
+        } else {
+            std::process::Command::new("br")
+        };
+        let output = command
+            .args(args)
+            .current_dir(&repo)
+            .env("HOME", sandbox.path().join("home"))
+            .env("XDG_CONFIG_HOME", sandbox.path().join("config"))
+            .env("BEADS_DIR", repo.join(".beads"))
+            .env_remove("BEADS_DB")
+            .env_remove("BD_DB")
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env_remove("GIT_INDEX_FILE")
+            .output()
+            .expect("installed Git and br tools");
+        assert!(
+            output.status.success(),
+            "{program} {args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output.stdout
+    };
+    tool("git", &["init", "-b", "main"]);
+    fs::write(repo.join("tracked.txt"), "original").expect("tracked file");
+    tool("git", &["add", "tracked.txt"]);
+    tool(
+        "git",
+        &[
+            "-c",
+            "user.name=CASS Test",
+            "-c",
+            "user.email=cass@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-m",
+            "seed",
+        ],
+    );
+    let head = String::from_utf8(tool("git", &["rev-parse", "HEAD"]))
+        .expect("Git commit identity")
+        .trim()
+        .to_owned();
+    fs::write(repo.join("tracked.txt"), "modified").expect("dirty worktree");
+    tool("br", &["init", "--prefix", "live"]);
+    let create = |title: &str| {
+        let value: Value = serde_json::from_slice(&tool("br", &["create", title, "--json"]))
+            .expect("created bead");
+        value["id"].as_str().expect("bead ID").to_owned()
+    };
+    let ready = create("Ready task");
+    let active = create("Active task");
+    let blocked = create("Blocked task");
+    tool("br", &["update", &active, "--status", "in_progress"]);
+    tool("br", &["dep", "add", &blocked, &active]);
+    tool("br", &["sync", "--flush-only"]);
+
+    let unchanged: Vec<_> = [
+        ".git/index",
+        ".beads/issues.jsonl",
+        ".beads/beads.db",
+        "tracked.txt",
+    ]
+    .into_iter()
+    .map(|relative| {
+        let path = repo.join(relative);
+        let bytes = fs::read(&path).expect("source bytes");
+        let modified = fs::metadata(&path).unwrap().modified().unwrap();
+        (path, bytes, modified)
+    })
+    .collect();
+    let cass = |args: &[&str]| {
+        let output = Command::new(assert_cmd::cargo::cargo_bin!("cass"))
+            .current_dir(&repo)
+            .env("HOME", sandbox.path().join("home"))
+            .env("XDG_CONFIG_HOME", sandbox.path().join("config"))
+            .env("XDG_DATA_HOME", sandbox.path().join("data"))
+            .env("CASS_AUTO_REFRESH", "0")
+            .env("CODING_AGENT_SEARCH_NO_UPDATE_PROMPT", "1")
+            .arg("--data-dir")
+            .arg(sandbox.path().join("cass-data"))
+            .args(args)
+            .timeout(Duration::from_secs(40))
+            .output()
+            .expect("live CLI output");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice::<Value>(&output.stdout).expect("live CLI JSON")
+    };
+    let status = cass(&["swarm", "status", "--json"]);
+    assert_eq!(status["status"], "partial");
+    assert_eq!(status["summary"]["dirty_worktree"], true);
+    let dirty_paths = status["git"]["dirty_paths"].as_array().unwrap();
+    assert!(dirty_paths.iter().all(|row| row["path"].is_string()));
+    assert!(dirty_paths.iter().any(|row| row["path"] == "tracked.txt"));
+    for (category, id, count) in [
+        ("ready", &ready, "ready_count"),
+        ("in_progress", &active, "in_progress_count"),
+        ("blocked", &blocked, "blocked_count"),
+    ] {
+        assert_eq!(status["summary"][count], 1);
+        let row = &status["beads"][category][0];
+        assert_eq!(row["id"], id.as_str());
+        assert_eq!(row["safe_to_claim"], false);
+        assert!(
+            row["claim_blockers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|v| v == "live-coordination-unverified")
+        );
+        assert!(row.get("stale_state").is_none());
+    }
+    assert!(status["summary"]["stale_candidate_count"].is_null());
+    assert_eq!(
+        status["build_pressure"]["recommended_action"],
+        "inspect-rch-state"
+    );
+    let observations = &status["_meta"]["source_observations"];
+    assert_eq!(observations["git"]["head"], head);
+    assert_eq!(
+        observations["git"]["repository_id"].as_str().unwrap().len(),
+        64
+    );
+    assert_eq!(observations["beads"]["source_kind"], "exported-jsonl");
+    assert!(observations["beads"]["observed_at_ms"].as_u64().unwrap() > 0);
+    let packet = cass(&["swarm", "work-packet", "--json", "--bead", &ready]);
+    assert_eq!(packet["summary"]["bead_id"], ready);
+    assert_eq!(packet["summary"]["safe_to_start"], false);
+    assert_eq!(packet["_meta"]["source_observations"]["git"]["head"], head);
+    assert_eq!(
+        packet["work_packet"]["collision_simulation"]["inputs"]["dirty_path_count"],
+        dirty_paths.len()
+    );
+    assert!(
+        packet["work_packet"]["collision_simulation"]["advisories"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|advisory| advisory["kind"] == "peer-dirty-unrelated")
+    );
+    for (path, bytes, modified) in &unchanged {
+        assert_eq!(&fs::read(path).expect("source unchanged"), bytes);
+        assert_eq!(fs::metadata(path).unwrap().modified().unwrap(), *modified);
+    }
+    // Break only this disposable export. Git should remain usable, and the
+    // tracker failure must not turn into a zero-ready-work result.
+    fs::write(repo.join(".beads/issues.jsonl"), "{malformed\n").expect("damaged test export");
+    let failed = cass(&["swarm", "status", "--json"]);
+    assert_eq!(failed["status"], "partial");
+    assert_eq!(failed["summary"]["dirty_worktree"], true);
+    assert!(failed["summary"]["ready_count"].is_null());
+    assert_eq!(
+        fs::read(repo.join(".beads/issues.jsonl")).unwrap(),
+        b"{malformed\n"
+    );
+    assert_eq!(
+        fs::read(repo.join(".beads/beads.db")).unwrap(),
+        unchanged[2].1
+    );
+}
+
 const REQUIRED_SCENARIOS: &[&str] = &[
     "healthy",
     "busy",

@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 import book_to_skill.pdf_inspector_integration as integration
+from book_to_skill.exceptions import ExtractionError
 
 
 def _fake_result(**overrides):
@@ -102,6 +103,43 @@ def test_hook_uses_existing_pipeline_when_inspector_metadata_is_invalid(
     assert integration._INSPECTIONS == {}
 
 
+def test_failed_reinspection_does_not_reuse_stale_metadata(tmp_path, monkeypatch):
+    integration._reset_state_for_tests()
+    pdf = tmp_path / "book.pdf"
+    pdf.write_bytes(b"%PDF-1.7\nfixture")
+    inspections = iter(
+        [
+            (None, {"engine": "pdf-inspector", "confidence": 0.5}),
+            (None, None),
+        ]
+    )
+    monkeypatch.setattr(integration, "inspect_pdf", lambda _path: next(inspections))
+
+    fake_utils = SimpleNamespace(
+        extract_single_file=lambda *_args: {"extraction_method": "legacy"}
+    )
+    integration.install_pdf_inspector_hook(fake_utils)
+
+    fake_utils.extract_single_file(pdf, "text", "no")
+    fake_utils.extract_single_file(pdf, "text", "no")
+
+    metadata_path = tmp_path / "metadata.json"
+    metadata_path.write_text(
+        json.dumps(
+            {
+                "total_sources": 1,
+                "sources": [{"source_file": str(pdf.resolve())}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    integration.enrich_pdf_inspector_metadata(metadata_path)
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+
+    assert "pdf_inspector" not in metadata
+    assert "pdf_inspector" not in metadata["sources"][0]
+
+
 def test_hook_uses_inspector_for_clean_text_pdf(tmp_path, monkeypatch):
     integration._reset_state_for_tests()
     pdf = tmp_path / "book.pdf"
@@ -146,6 +184,48 @@ def test_hook_uses_inspector_for_clean_text_pdf(tmp_path, monkeypatch):
     assert result["pages"] == 12
     assert original_calls == []
     assert integration._INSPECTIONS[str(pdf.resolve())] == inspection
+
+
+def test_hook_translates_post_extraction_stat_failure(tmp_path, monkeypatch):
+    integration._reset_state_for_tests()
+    pdf = tmp_path / "book.pdf"
+    pdf.write_bytes(b"%PDF-1.7\nfixture")
+
+    fake_utils = SimpleNamespace(
+        extract_single_file=lambda *_args: {"extraction_method": "legacy"},
+        sanitize_extracted_text=lambda text: (text, 0),
+        detect_structure=lambda _text: {
+            "chapters_detected": 1,
+            "chapters_method": "numeric",
+            "chapter_headings_sample": ["Chapter 1"],
+            "has_toc": False,
+        },
+        count_pages=lambda _path: 12,
+        estimate_tokens=lambda _text: 42,
+    )
+    inspection = {
+        "confidence": 0.99,
+        "page_count": 12,
+        "pdf_type": "text_based",
+        "native_markdown_trusted": True,
+        "pages_needing_ocr": [],
+        "has_encoding_issues": False,
+    }
+    monkeypatch.setattr(
+        integration,
+        "inspect_pdf",
+        lambda _path: ("Chapter 1\nBody", inspection),
+    )
+
+    def fail_getsize(_path):
+        raise PermissionError("unavailable")
+
+    monkeypatch.setattr(integration.os.path, "getsize", fail_getsize)
+
+    integration.install_pdf_inspector_hook(fake_utils)
+
+    with pytest.raises(ExtractionError, match="Could not read file size"):
+        fake_utils.extract_single_file(pdf, "text", "no")
 
 
 def test_hook_keeps_technical_mode_on_existing_pipeline(tmp_path, monkeypatch):

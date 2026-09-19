@@ -61,8 +61,8 @@ Button("Filters") { showingFilters = true }
 
 - **Attach the modifier to the anchor control**, not an ancestor — `attachmentAnchor` defaults to the modified view's bounds (`.rect(.bounds)`; `.point(...)` for a unit-point anchor). For toolbar buttons, attach `.popover` to the view inside the `ToolbarItem`.
 - `arrowEdge` was not reliably respected on iOS before 18.1 (always was on macOS).
-- **Default adaptation**: on iPhone a popover becomes a sheet; in vertically compact contexts it becomes a full-screen cover. `PresentationAdaptation` values: `.automatic`, `.none`, `.popover`, `.sheet`, `.fullScreenCover`.
-- **The 27 twist**: a resized iPhone window stays horizontally `.compact` at any width (see skills/layout-ref.md), so "wide window" does NOT mean "popover-capable" — an iPhone app's popovers adapt to sheets even in a Mac-sized Mirroring window unless you opt out with `.presentationCompactAdaptation(.none)`. Decide by testing both, not by assuming iPad behavior.
+- **Default adaptation**: in horizontally compact width a popover becomes a sheet; in vertically compact contexts it becomes a full-screen cover. `PresentationAdaptation` values: `.automatic`, `.none`, `.popover`, `.sheet`, `.fullScreenCover`.
+- **The 27 twist**: a resizable iPhone window (iPhone Mirroring, iPhone-only on iPad) keeps the `.phone` idiom, but its size class follows the window (skills/layout-ref.md), so the same popover presents as a sheet in a narrow window and as a real popover once both size classes are regular (measured on the iOS 27.0 simulator: a sheet at 402×874, a popover at 1000×800). A wide but short window can still be vertically compact — 874×402 reported `.regular`/`.compact` — and there the vertical adaptation applies. Don't choose between sheet and popover from the idiom. If the content must stay a popover in any compact size class, opt out with `.presentationCompactAdaptation(.none)`.
 
 ## Adaptation discipline
 
@@ -70,6 +70,7 @@ Button("Filters") { showingFilters = true }
 - Presentation modifiers (`presentationDetents`, `presentationCompactAdaptation`, ...) go on the presented **content**, not on the presenting view.
 - System presentation containers ship with system-maintained dismissal affordances, and standard controls receive translated indirect input (trackpad, scroll devices, iPhone Mirroring) correctly. A custom ZStack overlay posing as a presentation only gets whatever gestures you wire, and custom pan/drag handling needs explicit indirect-input support — one more reason to use the system containers (see axiom-uikit (skills/uikit-modernization.md)).
 - Keyboard inside a sheet: `scrollDismissesKeyboard(.interactively)` on the sheet's scroll view controls how scrolling dismisses it.
+- **iPhone Duo**: sheets adapt per display — a sheet's toolbar goes vertical on the outer display, sheets center with horizontal bars on the inner display, and a partially folded device slides sheets clear of the fold. Rules and exceptions: skills/iphone-duo.md (Vertical Bars; The Fold and the Camera).
 
 ## Resources
 

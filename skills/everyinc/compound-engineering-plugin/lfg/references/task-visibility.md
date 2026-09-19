@@ -4,8 +4,8 @@ Before step 1, use the platform's task-tracking capability when available to pub
 
 ## Chat narration
 
-Narrate the run in chat as it moves. Narration is chat prose, never entries on the task surface above. One line entering each step names the step and what it should produce; one line when it returns names what it actually produced (plan path, return status, fixes applied, PR URL). Close with a recap that stands on its own: what was built, how it was verified, what shipped, and any leftover findings. Print it alongside the close-out lines `references/shipping-tail.md` defines, so a reader who sees only the final message has the full picture.
+Narrate the run in chat as it moves. Narration is chat prose, never entries on the task surface above. One line entering each step names the step and what it should produce; one line when it returns names what it actually produced (plan path, return status, fixes applied, PR URL). Close with a recap that stands on its own: what was built, how it was verified, what shipped, and any leftover findings. Print it alongside the close-out lines `references/shipping.md` defines, so a reader who sees only the final message has the full picture.
 
 ## Completion discipline
 
-Report a step as done only after it actually ran and returned. Describing what a step would do, or what comes next, is not doing it; invoke it in the same turn. Do not end the turn before `<promise>DONE</promise>` or an explicit GATE stop naming the blocker. Work merely described, or a step skipped outside its stated skip condition, makes DONE false.
+Report a step as done only after it actually ran and returned. Describing what a step would do, or what comes next, is not doing it; invoke it in the same turn. A child skill runs inline, and nothing resumes you when it returns. Its return ends the child, not the run: after writing or reading it, continue with the next numbered step in the same turn. Do not end the turn before `<promise>DONE</promise>` or an explicit GATE stop naming the blocker. Work merely described, or a step skipped outside its stated skip condition, makes DONE false.

@@ -127,11 +127,27 @@
       "name": "2025-10"
     }
   ],
-  "polaris-app-home": [],
+  "polaris-app-home": [
+    {
+      "name": "v1.1",
+      "releaseCandidate": true
+    },
+    {
+      "name": "v1.0",
+      "latestVersion": true
+    }
+  ],
   "polaris-admin-extensions": [
     {
-      "name": "2026-04",
+      "name": "2026-10",
+      "releaseCandidate": true
+    },
+    {
+      "name": "2026-07",
       "latestVersion": true
+    },
+    {
+      "name": "2026-04"
     },
     {
       "name": "2026-01"

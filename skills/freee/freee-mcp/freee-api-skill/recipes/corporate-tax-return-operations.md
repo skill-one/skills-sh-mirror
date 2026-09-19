@@ -9,7 +9,7 @@ freee申告 Public API を使い、法人税申告の状況、国税・地方税
 帳票データの各要素（XMLのxpath、またはJSONのフィールドコード）が紙の帳票のどの項目にあたるかは、以下を参照。
 
 - `tax-return-references/index.md` - 帳票一覧・xpath表記の規則・共通ヘッダ（envelope / 構成管理情報）
-- `tax-return-references/{sheet_code}.md` - 帳票ごとの項目マッピング
+- 帳票ごとの項目マッピングは `index.md` の帳票一覧の「ファイル」列から引く（系列の別表・内訳書・税務代理権限証書は 1 ファイルに複数帳票をまとめている）
 
 ## 前提
 
@@ -104,7 +104,7 @@ freee_api_get {
 XTXやXBRLの要素名だけでは意味を特定できない場合、まず `tax-return-references/` の項目マッピングを引く。
 
 1. 対象帳票の `sheet_code` を `available_sheets` から確認する
-2. `tax-return-references/{sheet_code}.md` を開く（同じ `sheet_code` で様式が分かれる帳票のみ `{sheet_code}_{様式ID}.md`）
+2. `tax-return-references/index.md` の帳票一覧で `sheet_code` を引き、「ファイル」列のファイルを開く。複数帳票をまとめたファイルでは `sheet_code` でファイル内を検索して該当セクションに移動する
 3. 要素名またはxpathでファイル内を検索し、「項目名」列と「帳票項番」列を読む
 4. 共通ヘッダ（国税の `//IT/...`、地方税の `/SHINKOKU_UNIT/...`）は
    `tax-return-references/index.md` にある

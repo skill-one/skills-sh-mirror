@@ -137,14 +137,17 @@ belt app run falai/dia-tts --input '{
 
 # Merge video + audio
 belt app run infsh/video-audio-merger --input '{
-  "video": "solution-reveal.mp4",
-  "audio": "voiceover.mp3"
+  "video_file": "solution-reveal.mp4",
+  "audio_file": "voiceover.mp3"
 }'
 
 # Add captions (critical for silent autoplay)
 belt app run infsh/caption-videos --input '{
-  "video": "ad-with-audio.mp4",
-  "caption_file": "captions.srt"
+  "video_file": "ad-with-audio.mp4",
+  "segments": [
+    {"start": 0.0, "end": 2.5, "text": "Tired of the old way?"},
+    {"start": 2.5, "end": 5.0, "text": "Meet the fix."}
+  ]
 }'
 ```
 
@@ -186,11 +189,16 @@ belt app run falai/dia-tts --input '{
 | Key words in bold/color | Draws eye to important words |
 
 ```bash
-# Generate captions from audio
-# (create SRT file from your script, then burn in)
+# Burn in captions
+# (build timed segments from your script; the app takes segments, not an SRT file)
 belt app run infsh/caption-videos --input '{
-  "video": "ad-video.mp4",
-  "caption_file": "ad-captions.srt"
+  "video_file": "ad-video.mp4",
+  "segments": [
+    {"start": 0.0, "end": 2.5, "text": "Tired of the old way?"},
+    {"start": 2.5, "end": 5.0, "text": "Meet the fix."}
+  ],
+  "font_size": 36,
+  "position": "center-bottom"
 }'
 ```
 

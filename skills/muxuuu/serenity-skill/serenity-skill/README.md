@@ -2,12 +2,24 @@
 
 # Serenity.skill
 
-### 让 AI 用 Serenity 式投研方法，筛出上涨逻辑更清楚的股票和基金方向
+### 让 Agent 用 Serenity 式投研方法，筛出上涨逻辑更清楚的股票和基金方向
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Agent Skill](https://img.shields.io/badge/Agent%20Skill-SKILL.md-black)](SKILL.md)
-[![中文优先](https://img.shields.io/badge/README-%E4%B8%AD%E6%96%87%E4%BC%98%E5%85%88-red)](README.md)
-[![English](https://img.shields.io/badge/English-README.en.md-lightgrey)](README.en.md)
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
+  <a href="SKILL.md"><img src="https://img.shields.io/badge/Agent%20Skill-SKILL.md-black" alt="Agent Skill"></a>
+  <a href="README.md"><img src="https://img.shields.io/badge/README-%E4%B8%AD%E6%96%87-red" alt="中文"></a>
+  <a href="README.en.md"><img src="https://img.shields.io/badge/English-README.en.md-lightgrey" alt="English"></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/muxuuu/serenity-skill/stargazers"><img src="https://img.shields.io/github/stars/muxuuu/serenity-skill?logo=github" alt="GitHub Stars"></a>
+  <a href="https://github.com/muxuuu/serenity-skill/forks"><img src="https://img.shields.io/github/forks/muxuuu/serenity-skill?logo=github" alt="GitHub Forks"></a>
+  <a href="https://skills.sh/muxuuu/serenity-skill"><img src="https://skills.sh/b/muxuuu/serenity-skill" alt="skills.sh installs"></a>
+  <a href="https://deepwiki.com/muxuuu/serenity-skill"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
+  <a href="https://olud.ai/project/muxuuu-serenity-skill.html"><img src="https://olud.ai/badge.php?tool=muxuuu-serenity-skill" alt="serenity-skill 在 olud.ai 的目录徽章"></a>
+</p>
+
+<p align="center"><a href="https://trendshift.io/repositories/47219"><img src="https://trendshift.io/api/badge/trendshift/repositories/47219/daily" alt="TrendShift 全语言日榜第 22 名" width="250" height="55"></a></p>
 
 </div>
 

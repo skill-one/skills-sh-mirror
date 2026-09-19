@@ -52,8 +52,9 @@ API リファレンスが `references/` に含まれます。各リファレン�
 
 法人税の帳票 XML（XTX / XBRL）の各要素と紙の帳票の項目との対応は
 `tax-return-references/` にあります。索引と共通仕様は
-`tax-return-references/index.md`、個別の帳票は
-`tax-return-references/{sheet_code}.md` です。
+`tax-return-references/index.md` にあり、帳票ごとのファイルは
+その索引の帳票一覧から `sheet_code` で引きます（系列の別表や内訳書は
+1 ファイルに複数帳票をまとめています）。
 
 ## 使い方
 

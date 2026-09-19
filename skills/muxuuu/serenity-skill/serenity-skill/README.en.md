@@ -1,8 +1,27 @@
+<div align="center">
+
 # Serenity.skill
 
-**Turn your investment agent into a supply-chain bottleneck hunter.**
+### Turn your investment agent into a supply-chain bottleneck hunter.
 
-[中文 README](README.md)
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
+  <a href="SKILL.md"><img src="https://img.shields.io/badge/Agent%20Skill-SKILL.md-black" alt="Agent Skill"></a>
+  <a href="README.md"><img src="https://img.shields.io/badge/README-%E4%B8%AD%E6%96%87-red" alt="Chinese README"></a>
+  <a href="README.en.md"><img src="https://img.shields.io/badge/English-README.en.md-lightgrey" alt="English README"></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/muxuuu/serenity-skill/stargazers"><img src="https://img.shields.io/github/stars/muxuuu/serenity-skill?logo=github" alt="GitHub Stars"></a>
+  <a href="https://github.com/muxuuu/serenity-skill/forks"><img src="https://img.shields.io/github/forks/muxuuu/serenity-skill?logo=github" alt="GitHub Forks"></a>
+  <a href="https://skills.sh/muxuuu/serenity-skill"><img src="https://skills.sh/b/muxuuu/serenity-skill" alt="skills.sh installs"></a>
+  <a href="https://deepwiki.com/muxuuu/serenity-skill"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
+  <a href="https://olud.ai/project/muxuuu-serenity-skill.html"><img src="https://olud.ai/badge.php?tool=muxuuu-serenity-skill" alt="olud.ai directory rank"></a>
+</p>
+
+<p align="center"><a href="https://trendshift.io/repositories/47219"><img src="https://trendshift.io/api/badge/trendshift/repositories/47219/daily" alt="TrendShift #22 Repository of the Day across all languages" width="250" height="55"></a></p>
+
+</div>
 
 Serenity.skill turns the supply-chain research patterns observed in public [Serenity / @aleabitoreddit](https://x.com/aleabitoreddit) material into a workflow for ordinary investment research. Start with a technology theme, map the system and its constrained inputs, investigate companies, and return research priorities with evidence and counterarguments.
 

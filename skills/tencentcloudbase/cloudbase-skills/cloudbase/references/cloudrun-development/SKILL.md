@@ -1,7 +1,7 @@
 ---
 name: cloudrun-development
-description: CloudBase Run backend development rules (Function mode/Container mode). Use this skill when deploying backend services that require long connections, multi-language support, custom environments, AI agent development, or migrating existing/GitHub apps that need VPC access to MySQL/PostgreSQL/Redis. Also use when diagnosing CloudRun container deploy failures (deploy_failed, readiness/probe failed, image won't start, docker.io pull loops). For stateless HTTP services, prefer HTTP cloud functions.
-version: 2.34.3
+description: CloudBase Run backend development rules (Function mode/Container mode). Use this skill when deploying backend services that require long connections, multi-language support, custom environments, AI agent development, or migrating existing/GitHub apps that need VPC access to MySQL/PostgreSQL/Redis. Also use when diagnosing CloudRun container deploy failures (deploy_failed, readiness/probe failed, image won't start, docker.io pull loops) or a deploy stuck behind a running deploy task. For stateless HTTP services, prefer HTTP cloud functions.
+version: 2.34.4
 alwaysApply: false
 ---
 
@@ -33,6 +33,7 @@ If a referenced sibling skill file is missing from this environment, ask the use
 - The prompt mentions `queryCloudRun`, `manageCloudRun`, Dockerfile, service domains, or public/private access.
 - The app depends on MySQL, PostgreSQL, Redis, or other VPC-private resources over TCP → **先做数据库访问方式决策（SDK/网关优先，见下方「数据库访问方式决策门」）**；确认必须 TCP 直连后 → also read `references/vpc-and-database.md`.
 - You are choosing between CloudRun and HTTP cloud functions for a stateless HTTP service.
+- The service calls CloudBase resources (PG `app.rdb()`, NoSQL, storage, functions) through an SDK → **先过「计算资源访问 CloudBase 的凭证决策门」**：凭证谁签发、怎么注入、怎么吊销，都必须在写代码之前定下来。
 - Container deploy fails (`deploy_failed`, Pod not ready, readiness/probe failed, third-party `imageUrl` won't stay up) → also read `references/image-deploy-troubleshooting.md` and follow the **Container deploy failure SOP** below. Do not start by raising `InitialDelaySeconds`.
 
 ### Then also read
@@ -42,6 +43,7 @@ If a referenced sibling skill file is missing from this environment, ask the use
 - Web authentication for browser callers -> `../auth-web-cloudbase/SKILL.md`
 - Existing app + TCP database networking -> `references/vpc-and-database.md`
 - Container image deploy failure / probe / `deploy_failed` -> `references/image-deploy-troubleshooting.md`
+- Service calls CloudBase resources through an SDK (credential source / injection / revocation) -> `../cloud-functions/references/http-function-credentials.md`
 
 ### Do NOT use for
 
@@ -52,7 +54,9 @@ If a referenced sibling skill file is missing from this environment, ask the use
 ### Common mistakes / gotchas
 
 - Choosing CloudRun when the request only needs a normal cloud function.
-- Forgetting to listen on the platform-provided `PORT`.
+- **Forgetting to listen on the platform-provided `PORT` in Container mode** — and its mirror image in Function mode: calling `app.listen()` there, where the framework already owns the port and the second bind dies with `EADDRINUSE`.
+- **Guessing the credential environment variable name.** `@cloudbase/node-sdk` reads `CLOUDBASE_APIKEY`; an invented name (for example `TCB_API_KEY`) is silently ignored and only shows up later as "no credentials at runtime".
+- **Copying a server credential out of the local client login state** (`auth.json`, `.cloudbase/`) and injecting it into a deployed service. Issue the key with `manageAppAuth(action="createApiKey", keyType="api_key")` instead, so it has an owner, a rotation path, and a `keyId` you can revoke. See `../cloud-functions/references/http-function-credentials.md`.
 - Treating CloudRun as stateful app hosting and storing important state on local disk.
 - Assuming local run is available for Container mode.
 - Opening public access by default when the scenario only needs private or mini-program internal access.
@@ -74,6 +78,7 @@ If a referenced sibling skill file is missing from this environment, ask the use
 - Confirm whether the service should be public, VPC-only, or mini-program internal (**ingress**).
 - If the app uses TCP databases/caches, resolve and set `VpcConf` (**egress / private network**) before deploy — see `references/vpc-and-database.md`.
 - Keep the service stateless and externalize durable data.
+- **Settle the credential path for every CloudBase SDK call before writing code** — a server API Key issued through `manageAppAuth(action="createApiKey")` and injected via `EnvParams`, never a key copied out of the local client login state.
 - Use absolute paths for every local project path.
 - Confirm handlers never echo `x-cloudbase-context`, full headers, or credential env vars; do not deploy httpbin-style reflectors.
 - For third-party images, complete the five-item docs checklist (Cmd / port / bind env / volume / health) before deploy.
@@ -121,6 +126,20 @@ Use CloudBase Run when the task needs a deployed backend service rather than a s
 
 **决策动作：** 扫描到 `DATABASE_URL` / DB 依赖信号时，先停下来回答「这个数据访问能不能换成 SDK/网关」，再决定是否进入 VPC checklist——不要默认按 TCP 直连方案往下走。
 
+### 计算资源访问 CloudBase 的凭证决策门（部署前必答）
+
+> 核心原则：**SDK 路径免掉的是数据库账号密码，不是 CloudBase 资源访问凭证。** 服务代码要调 CloudBase 资源（PG `app.rdb()` / NoSQL / storage / functions）时，先把凭证来源定下来，再写代码、再部署。
+
+三件事必须先答：
+
+1. **谁签发** — CloudBase 服务端 API Key：`manageAppAuth(action="createApiKey", keyType="api_key", keyName="<service>-<env>")`，或 CLI `tcb env apikey create my-key -e env-xxx`。**不要**从本地客户端登录态（`auth.json` / `.cloudbase/`）里取一把来用。
+2. **怎么注入** — 经 `serverConfig.EnvParams` 注入 `CLOUDBASE_APIKEY`（`@cloudbase/node-sdk` 自动读取该变量；显式字段是 `accessKey`）。变量名以官方为准，不要自造。改环境变量时保留已有键值，不要整份覆盖。
+3. **怎么吊销** — 每个服务一把专用 key，记录 `keyName` 与轮换负责人；下线或轮换时 `manageAppAuth(action="deleteApiKey", keyId=...)` 并**重新部署**。轮换后旧实例里残留的副本不会报错，只会静默失效。
+
+不要假设云托管容器已自动带上可用的 CloudBase 凭证 —— 部署后用一次真实的 SDK 读取验证（验证两次以上，不要只看进程起没起来）。完整步骤、Manager SDK 的腾讯云密钥对路径、环境变量合并的安全写法见 `../cloud-functions/references/http-function-credentials.md`。
+
+`api_key` 是**环境级**凭证：可绕过 RLS，单环境签发数量有限。不要给每个服务灌同一把 —— 任一实例失陷即整环境失陷。
+
 ### When CloudRun is a better fit
 
 - Long connections: WebSocket, SSE, server push
@@ -136,7 +155,7 @@ Use CloudBase Run when the task needs a deployed backend service rather than a s
 | Dimension | Function mode | Container mode |
 | --- | --- | --- |
 | Best for | Fast start, Node.js service patterns, built-in framework, Agent flows | Existing containers, arbitrary runtimes, custom system dependencies |
-| Port model | Framework-managed local mode, deployed service still follows platform rules | App must listen on injected `PORT` |
+| Port model | The function framework binds the platform port itself — **your code must not call `app.listen()`** | App must listen on the injected `PORT` |
 | Dockerfile | Not required | Required — but a Dockerfile alone does **not** mean CloudRun; first check whether the service needs long connections / custom runtime. Stateless HTTP services with a Dockerfile may fit HTTP cloud functions better. |
 | Local run through tools | Supported | Not supported |
 | Typical use | Streaming APIs, low-latency backend, Agent service | Custom language stack, migrated container app |
@@ -148,7 +167,8 @@ Use CloudBase Run when the task needs a deployed backend service rather than a s
    - Container mode -> use when Docker/custom runtime is a real requirement
 
 2. **Follow mandatory runtime rules**
-   - Listen on `PORT`
+   - Container mode: listen on the injected `PORT`. Function mode: the framework binds the port for you — **never** call `app.listen()`
+   - Settle the credential gate (who issues / how injected / how revoked) before writing any CloudBase SDK call
    - Keep the service stateless
    - Put durable data in DB/storage/cache
    - Keep dependencies and image size small
@@ -183,6 +203,7 @@ Use CloudBase Run when the task needs a deployed backend service rather than a s
 - `queryCloudRun(action="getProcessLog")` -> **运行日志**（`tcbr/DescribeCloudRunProcessLog`）。返回部署阶段步骤（如 `create_version_check_vpc` / `create_eks_virtual_service` / `check_eks_virtual_service`）+ 容器启动/运行日志（s6-overlay、应用进程、readiness probe 失败原因）。**镜像部署与源码构建均可用，不依赖 CODING**。参数：`detailServerName`/`serverName` + 可选 `runId`（不传则取最新部署的 `RunId`；`RunId` 也可从 `detail` / `getDeployRecords` 的 `latestDeploy.RunId` 取得）
 - `queryCloudRun(action="getDeployRecords")` -> list deploy records (newest first; includes `BuildId` / `RunId` / `FlowRatio` / `Status`) — use to review release history and rollback context before a traffic operation
 - `queryCloudRun(action="envStatus")` -> check whether the environment's CloudRun is opened and its provisioning status (`Status=creating` opening / `normal` opened) — use after `initEnv` to poll progress or before `deploy` to confirm readiness
+- `queryCloudRun(action="getManageTask")` -> **发布任务状态**（`tcbr/DescribeServerManageTask`）。返回 `taskId` / `taskStatus` 与最新部署记录状态 `latestDeployStatus`。用于两件事：撞到「已有部署发布任务运行中」时先确认任务是否真在推进；以及部署长时间无进展时，区分「任务仍在推进」和「任务已卡住」。**不知道任务状态就不要反复重试 deploy**
 
 ### Log query SOP（构建日志 vs 运行日志）
 
@@ -203,13 +224,31 @@ Use CloudBase Run when the task needs a deployed backend service rather than a s
 }
 ```
 
+### Deploy-task SOP（撞到「已有部署发布任务运行中」时）
+
+`manageCloudRun(action="deploy")` 报「已有部署发布任务运行中」/ *already has a deploy task running* 时，**不要盲目重试，也不要反复改 Dockerfile / serverConfig** —— 先确认任务真实状态：
+
+1. `queryCloudRun(action="getManageTask", detailServerName=...)` → 读 `taskId` / `taskStatus` / `latestDeployStatus`
+2. `queryCloudRun(action="getProcessLog")` → 隔 20–40 秒对比两次拉取，确认部署阶段步骤是否还在推进
+3. 按结果分支：
+
+| 观察 | 动作 |
+| --- | --- |
+| `taskStatus` 仍是运行态，部署步骤有推进 | **继续等**，不要重发 deploy |
+| 任务已结束（非运行态），而 deploy 仍被拒 | 才考虑重试 |
+| 任务长时间停在非终态，版本也停在 `creating` 不动 | 记录 `taskId` / `latestDeployStatus` / 时间窗作为证据，不要空转重试 |
+
+**`force=true` 不解决这个问题**：它只跳过本工具的确认提示，不会取消或覆盖服务端已有的发布任务 —— 把它当「强制覆盖」用只会白撞一次。
+
+日志侧的排查顺序（构建日志 vs 运行日志、先日志后配置）见上面的 **Log query SOP** 与 **Container deploy failure SOP**。
+
 ### Write operations
 
 - `manageCloudRun(action="initEnv")` -> **open (initialize) CloudRun for the environment** — async, idempotent (`Status=normal` → already opened, no re-create). Use on a brand-new environment before the first deploy, or when `deploy` is blocked with an "尚未初始化云托管" message. Params: `envId` (defaults to the configured env), `packageType` (default `Trial`). Poll `queryCloudRun(action="envStatus")` until `Status=normal`.
 - `manageCloudRun(action="init")` -> create local project
 - `manageCloudRun(action="download")` -> pull remote code
 - `manageCloudRun(action="run")` -> local run for Function mode
-- `manageCloudRun(action="deploy")` -> trigger deploy + **lightweight wait for registration** (does not hang for full build). Returns `buildId` / `runId` / `taskId` + **DeployType-aware `next_step`**: **source** → `getDeployLog` then `getProcessLog`; **image** (`imageUrl`, BuildId often `0`) → **skip `getDeployLog`**, use `getDeployRecords`/`detail` for `RunId` then `getProcessLog`. Follow the returned `next_step` — do not always poll build logs. Existing services: RMW preserves remote VpcConf / EnvParams keys / OpenAccessTypes; **new services automatically validate that the environment's CloudRun is initialized** — if not, deploy is blocked with guidance to call `initEnv` first
+- `manageCloudRun(action="deploy")` -> trigger deploy + **lightweight wait for registration** (does not hang for full build; pass `waitRegistration=false` to skip even that wait when you don't need `buildId`). Returns `buildId` / `runId` / `taskId` + **DeployType-aware `next_step`**: **source** → `getDeployLog` then `getProcessLog`; **image** (`imageUrl`, BuildId often `0`) → **skip `getDeployLog`**, use `getDeployRecords`/`detail` for `RunId` then `getProcessLog`. Follow the returned `next_step` — do not always poll build logs. Existing services: RMW preserves remote VpcConf / EnvParams keys / OpenAccessTypes; **new services automatically validate that the environment's CloudRun is initialized** — if not, deploy is blocked with guidance to call `initEnv` first
 - `manageCloudRun(action="updateConfig")` -> config-only update (no code upload; VPC / EnvParams / scaling / access types)
 - `manageCloudRun(action="traffic")` -> **traffic management / canary release** (aligns with `tcb cloudrun traffic`): `trafficOp="set"` adjusts the stable/canary traffic ratio (`stablePercent` + `canaryPercent` must equal 100, e.g. 90/10); `trafficOp="promote"` promotes the canary version to full release (100%, closes gray release, irreversible); `trafficOp="rollback"` rolls back to the previous stable version (stops the releasing canary). Check `queryCloudRun(action="getDeployRecords")` first to understand current versions and traffic
 - `manageCloudRun(action="delete")` -> delete service
@@ -379,7 +418,7 @@ PID 1 往往是监督进程，不是 HTTP 应用。用两次日志找子进程�
 
 1. Prefer PRIVATE/VPC or mini-program internal **ingress** when possible.
 2. For TCP database access, always pair private DB URLs with `VpcConf` in the same VPC/region as the database.
-3. Use environment variables for secrets and per-environment configuration — **read them server-side only; never return them in HTTP responses**.
+3. Use environment variables for secrets and per-environment configuration — **read them server-side only; never return them in HTTP responses**. CloudBase API Keys come from `manageAppAuth(action="createApiKey")`, not from a local client login file.
 4. Verify configuration before and after deployment with `queryCloudRun(action="detail")`.
 5. Keep startup work small to reduce cold-start impact.
 6. For Agent scenarios, use the Agent SDK skill for protocol and adapter details instead of duplicating them here.
@@ -390,9 +429,12 @@ PID 1 往往是监督进程，不是 HTTP 应用。用两次日志找子进程�
 - **Access failure** -> check ingress access type, domain setup, and whether the instance scaled to zero.
 - **Deployment blocked with "尚未初始化云托管 / not initialized"** -> the environment needs CloudRun enabled first: call `manageCloudRun(action="initEnv", envId=...)` (异步开通) and poll `queryCloudRun(action="envStatus")` until `Status=normal`; or open the console `环境 → 云托管 → 开通`. For stateless HTTP services, consider an HTTP cloud function instead of CloudRun entirely.
 - **Deployment failure** -> follow the **Container deploy failure SOP** above (and `references/image-deploy-troubleshooting.md`): image deploys skip `getDeployLog` and use `getProcessLog` only; classify scheduling vs port vs exit-on-start with two log pulls. Do **not** raise `InitialDelaySeconds` until logs prove a single slow init. Also inspect Dockerfile (source) and CPU/memory ratio.
+- **Deploy rejected with "a deploy task is already running" / 「已有部署发布任务运行中」** -> read the real task state with `queryCloudRun(action="getManageTask")` first. Do not retry blindly, and do not set `force=true` expecting an override — it only skips this tool's confirmation prompt. See the **Deploy-task SOP** above.
+- **Deploy accepted but the version never leaves `creating`** -> `queryCloudRun(action="getManageTask")` for `latestDeployStatus` + `taskStatus`, then `getProcessLog` for the deploy-phase steps. Only change Dockerfile / serverConfig once the logs actually point at code or config.
 - **Local run failure** -> remember only Function mode is supported by local-run tools.
 - **Performance issues** -> reduce dependencies, optimize initialization, and tune minimum instances.
 - **DB / Redis connection failure after a successful deploy** -> almost always missing or wrong `VpcConf`, wrong private host, or security group. Follow `references/vpc-and-database.md` before rewriting application code.
+- **CloudBase SDK call fails inside the service with missing / invalid credentials** -> the credential gate above was skipped, or the variable name is not the official one. Issue a key with `manageAppAuth(action="createApiKey")`, inject it as `CLOUDBASE_APIKEY` through `EnvParams`, redeploy, then verify a real read. See `../cloud-functions/references/http-function-credentials.md`.
 
 ## Reference index
 

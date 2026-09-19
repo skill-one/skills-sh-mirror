@@ -37,7 +37,7 @@ Invoke-Expression (& wt config shell init powershell | Out-String)
 
 - **Bash**: adds a line to `~/.bashrc`
 - **Zsh**: adds a line to `~/.zshrc` (or `$ZDOTDIR/.zshrc`)
-- **Fish**: creates `~/.config/fish/functions/wt.fish` and `~/.config/fish/completions/wt.fish`
+- **Fish**: creates `~/.config/fish/functions/wt.fish` and `~/.config/fish/completions/wt.fish` (under `$XDG_CONFIG_HOME/fish` when that is set)
 - **Nushell** [experimental]: creates `wt.nu` in Nushell's user vendor-autoload directory — the last entry of `$nu.vendor-autoload-dirs`, under `$nu.data-dir` (typically `~/.local/share/nushell/vendor/autoload` on Linux, `~/Library/Application Support/nushell/vendor/autoload` on macOS)
 - **PowerShell** (Windows): creates both profile files if they don't exist:
   - `Documents/PowerShell/Microsoft.PowerShell_profile.ps1` (PowerShell 7+)
@@ -64,7 +64,7 @@ When shell integration isn't working, `wt switch` shows a warning explaining why
 
 ### "shell wrapper is out of date"
 
-**Meaning**: The active shell still has a retired wrapper loaded. Current versions no longer write to that wrapper's single directive file, so the parent shell cannot follow a directory change.
+**Meaning**: The active shell has a wrapper from an older Worktrunk version loaded, which can't follow a directory change.
 
 **Fix**: Run `wt config shell install`, then restart the shell (or reload its config) to activate the current wrapper.
 
@@ -238,8 +238,6 @@ eval "$(wt config shell init zsh)"
 ```
 
 ### Windows Git Bash issues
-
-Git Bash uses MSYS2, which automatically converts POSIX paths in environment variables. The directive file path is handled correctly without manual conversion.
 
 If you see path issues, make sure you're on a recent Git for Windows version.
 

@@ -29,7 +29,7 @@
   配列の要素:
     - person_id*: integer(int32) - 従業員ID 例: `11`
     - unit_cost_id*: integer(int32) - このプロジェクトで使用する従業員単価マスタID
-      `use_standard_unit_cost: true` の場合は無視されます 例: `3`
+      `use_standard_unit_cost: true` の場合は無視されます（その場合でも値の指定が必要です） 例: `3`
     - budgets_cost*: integer(int32) - 予算計算用の単価(円) 例: `2000`
     - use_standard_unit_cost: boolean - 標準の従業員単価マスタの単価を利用（デフォルト：false） 例: `true`
 - orderer_ids: array[integer] - 発注元として指定する取引先IDの配列
@@ -101,8 +101,10 @@ IDに該当するプロジェクトを編集します。 プロジェクト変�
   プロジェクトの招待リンクを発行できるようにするかどうかを設定します。
 - sales_order_status_id: integer(int32) - 受注ステータスID。nullの場合「指定なし」になります。 例: `2`
 - manager_person_id: integer(int32) - プロジェクトマネージャーの従業員ID
+  指定する場合、 `pm_budgets_cost` の同時指定が必要。
   このパラメータはシステム管理者かプロジェクトマネージャーでログインしているときのみ指定可能。 例: `10`
-- pm_budgets_cost: integer(int32) - プロジェクトマネージャーのコスト(円) 例: `4000`
+- pm_budgets_cost: integer(int32) - プロジェクトマネージャーのコスト(円)
+  指定する場合、 `manager_person_id` の同時指定が必要。 例: `4000`
 - color_id: integer(int32) - プロジェクトの色を指定可能
   { orange: 1, blue_green: 2, green: 3, blue: 4, purple: 5, red: 6, yellow: 7 } 例: `3`
 - members: array[object] - プロジェクトメンバーの配列。
@@ -111,7 +113,7 @@ IDに該当するプロジェクトを編集します。 プロジェクト変�
   配列の要素:
     - person_id*: integer(int32) - 従業員ID 例: `11`
     - unit_cost_id*: integer(int32) - このプロジェクトで使用する従業員単価マスタID
-      `use_standard_unit_cost: true` の場合は無視されます 例: `3`
+      `use_standard_unit_cost: true` の場合は無視されます（その場合でも値の指定が必要です） 例: `3`
     - budgets_cost*: integer(int32) - 予算計算用の単価(円) 例: `2000`
     - use_standard_unit_cost: boolean - 標準の従業員単価マスタの単価を利用（デフォルト：false） 例: `true`
 - orderer_ids: array[integer] - 発注元として指定する取引先IDの配列

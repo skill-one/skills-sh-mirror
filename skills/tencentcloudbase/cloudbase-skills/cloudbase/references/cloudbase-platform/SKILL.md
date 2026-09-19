@@ -1,7 +1,7 @@
 ---
 name: cloudbase-platform
 description: CloudBase platform overview and routing guide. This skill should be used when users need high-level capability selection, platform concepts, console navigation, or cross-platform best practices before choosing a more specific implementation skill.
-version: 2.34.3
+version: 2.34.4
 alwaysApply: false
 ---
 
@@ -33,7 +33,7 @@ If a referenced sibling skill file is missing from this environment, ask the use
 ### Then also read
 
 - Minimal Web + database demo (BaaS-first, no cloud functions by default) -> `../minimal-web-baas-demo/SKILL.md`
-  - **Stack order for 最小前后端 / Lovable-like demos:** Web SDK CRUD > MCP schema > template warmup during credential wait > cloud functions (default count = 0). Capability sniff: connector ready → `envQuery` → lock one DB plane → MCP schema → `@cloudbase/js-sdk` CRUD → preview.
+  - **Stack order for 最小前后端 / Lovable-like demos:** Web SDK CRUD > MCP schema > template warmup during credential wait > cloud functions (default count = 0). Capability sniff: connector ready → `queryEnv` → lock one DB plane → MCP schema → `@cloudbase/js-sdk` CRUD → preview.
 - Web app implementation -> `../web-development/SKILL.md`
 - Web auth and provider setup -> `../auth-tool-cloudbase/SKILL.md`, `../auth-web-cloudbase/SKILL.md`
 - Mini program development -> `../miniprogram-development/SKILL.md`
@@ -93,7 +93,7 @@ Use this skill for **CloudBase platform knowledge** when you need to:
    - Different platforms require different SDKs for data models
    - MySQL data models must use models SDK, not collection API
    - PostgreSQL / CloudBase PG work must route to `postgresql-development-cloudbase`; do not reuse NoSQL `app.database()` / `db.collection(...)` snippets or MySQL `queryMysqlDatabase` / `manageMysqlDatabase` for PG data paths
-   - Use `envQuery` tool to get environment ID
+   - Use `queryEnv` tool to get environment ID
    - In an existing Web application with fixed structure, inspect the existing `src/lib/backend.*`, `src/lib/auth.*`, `src/lib/*service.*`, and bound page handlers before broad concept reading.
 
 4. **Use the canonical CloudBase MCP setup from the main `cloudbase` guideline**
@@ -160,18 +160,25 @@ When a task explicitly requires recording operation steps or results to a file (
 3. **Cloud Storage Public URL**:
    - **CRITICAL**: `manageStorage(action=upload)` and `queryStorage(action=url)` return `temporaryUrl` which is a temporary signed URL that expires (default 1 hour). Do NOT use this as a permanent public URL.
    - To get the permanent public access URL for a cloud storage object:
-     1. Call `envQuery(action=info)` to get environment details
+     1. Call `queryEnv(action=info)` to get environment details
      2. Extract the storage CDN domain from `EnvInfo.Storages[0].CdnDomain` (e.g., `your-env-id.tcb.qcloud.la`)
      3. Construct the public URL: `https://{CdnDomain}/{cloudPath}`
    - Example: If `CdnDomain` is `env-xxx.tcb.qcloud.la` and `cloudPath` is `uploads/avatar.jpg`, the public URL is `https://env-xxx.tcb.qcloud.la/uploads/avatar.jpg`
    - Note: The public URL is accessible only if the storage bucket ACL allows public read (default is `PRIVATE` which requires signed URLs)
 
+4. **Shared-Bucket (ExternalStorage) Environments**:
+   - Some environments keep files in a COS bucket shared with other environments, each isolated under its own directory prefix (BasePath). Detect it with `queryEnv(action="info")`: cloud storage uses a shared bucket when `EnvInfo.Storages[0].Bucket` is empty and `Storages[0].ExternalStorage.Enabled === true`; check static hosting the same way on `EnvInfo.StaticStorages[0]`. Storage and hosting can use different buckets and BasePaths.
+   - **Paths stay logical.** Storage and hosting tools add the BasePath themselves, so pass `cloudPath` exactly as in a normal environment and never prepend the BasePath or bucket name. Example: with BasePath `tenant-a`, upload with `cloudPath="images/a.png"`, not `"tenant-a/images/a.png"` (that nests the file under `tenant-a/tenant-a/`). Build hosting and CDN URLs from the logical path too — the domain resolves the BasePath, and adding it to a hosting URL returns 404.
+   - `manageHosting(action="setWebsiteDocument")` changes a bucket-level setting that would affect every environment in the bucket, so it fails on shared-bucket hosting. Reading with `queryHosting(action="websiteConfig")` still works. Tell the user this setting is managed by the platform instead of retrying.
+   - Storage security rules are maintained per environment, not as a COS bucket ACL, so read and update them the same way as in a normal environment.
+   - What happens to files when a shared-bucket environment is deleted is decided by the platform. Do not promise that its BasePath directory is kept or removed.
+
 ## Environment and Authentication
 
 1. **SDK Initialization**:
    - CloudBase SDK initialization requires environment ID
-   - Can query environment ID via `envQuery` tool
-   - If the user only provides an environment alias, nickname, or other short form, resolve it with `envQuery(action="list", alias=..., aliasExact=true)` first and use the returned full `EnvId`
+   - Can query environment ID via `queryEnv` tool
+   - If the user only provides an environment alias, nickname, or other short form, resolve it with `queryEnv(action="list", alias=..., aliasExact=true)` first and use the returned full `EnvId`
    - Do not pass alias-like short forms directly into SDK init, `auth.set_env`, console URLs, or generated config files
    - For Web, always initialize synchronously:
      - `import cloudbase from "@cloudbase/js-sdk"; const app = cloudbase.init({ env: "your-full-env-id" });`
@@ -184,7 +191,7 @@ When a task explicitly requires recording operation steps or results to a file (
    | Action | Description | Key Parameters |
    |--------|-------------|----------------|
    | `listPackages` | Query available plans | (none) |
-   | `create` | Create new environment (needs confirm) | `alias`, `packageId`, `resources`, `duration` |
+   | `create` | Create new environment (needs confirm) | `alias`, `packageId`, `resources`, `duration`, `region`, `externalStorage` |
    | `modifyPlan` | Change plan (upgrade/downgrade, needs confirm) | `envId`, `packageId` |
    | `renew` | Renew environment (needs confirm) | `envId`, `duration` |
 
@@ -202,6 +209,13 @@ When a task explicitly requires recording operation steps or results to a file (
    - `flexdb` (document database) is **not** offered: new environments are created without a NoSQL tenant. Do not pass it — it is rejected by the schema. To find out whether an environment actually has NoSQL, read `queryEnv(action="info")` → `EnvInfo.RuntimeBackends` rather than assuming.
    - Region is selectable: pass `region` (e.g. `region="ap-shanghai"`) to choose where the environment is created. It is applied as the **`X-TC-Region` request context**, not as a CreateEnv body field — so do **not** put `Region` inside `params`. Omit it to use the current session region (`cloudBaseOptions.region` → `TCB_REGION` → project config / rc binding → site default: `ap-shanghai` for the domestic site, `ap-singapore` for the intl site). Equivalent CLI: `tcb env create --region ap-shanghai`.
    - ⚠️ If you pass `region`, repeat the same value on the confirming call together with `confirm="yes"`; otherwise the second call falls back to the session region and the environment may be created somewhere other than the summary you confirmed.
+   - **`externalStorage`** (optional, create only): `{ bucketName, region, basePath }` creates the environment's **cloud storage** on an existing shared COS bucket instead of a dedicated one, isolating its files under `basePath` (must be unique within the bucket). All three fields are required when the object is passed. Use it only when the user provides the bucket — typically a platform creating many environments under one account, where one bucket per environment would hit the account's COS bucket quota; never invent bucket names. It does **not** cover static hosting: the hosting bucket is chosen by the platform when hosting is enabled and cannot be set through this tool.
+   - ⚠️ Like `region`, repeat the same `externalStorage` on the `confirm="yes"` call. The confirming call reads only its own arguments, so leaving it out creates the environment with a dedicated bucket instead.
+   ```
+   manageEnv(action="create", alias="tenant-a", packageId="baas_personal",
+             externalStorage={ bucketName: "shared-bucket-1250000000", region: "ap-shanghai", basePath: "tenant-a" },
+             confirm="yes")
+   ```
    - ⚠️ **All paid operations** (create / modifyPlan / renew) require `confirm="yes"`.
 
    **Querying available packages before creating:**
@@ -341,7 +355,7 @@ See also: CLI equivalent commands in `cloudbase-cli/references/permission.md`
 
 ## Console Management
 
-After creating/deploying resources, provide corresponding console links. All console URLs follow the pattern: `https://tcb.cloud.tencent.com/dev?envId=${envId}#/{path}` — replace `${envId}` with the real EnvId resolved via `envQuery` (resolve aliases first; see Environment and Authentication below), and resource names with actual values.
+After creating/deploying resources, provide corresponding console links. All console URLs follow the pattern: `https://tcb.cloud.tencent.com/dev?envId=${envId}#/{path}` — replace `${envId}` with the real EnvId resolved via `queryEnv` (resolve aliases first; see Environment and Authentication below), and resource names with actual values.
 
 The CloudBase console is updated frequently. If a live, logged-in console shows a different hash path from this list, prefer the live console path over stale documentation and then update this skill to match.
 

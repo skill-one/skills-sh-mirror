@@ -1,11 +1,11 @@
 {
-  "updatedAt": "2026-09-14",
-  "totalFamilies": 179,
-  "totalModels": 415,
+  "updatedAt": "2026-09-18",
+  "totalFamilies": 181,
+  "totalModels": 419,
   "profileCoverage": {
-    "full": 81,
-    "partial": 333,
-    "structured-only": 1,
+    "full": 375,
+    "partial": 37,
+    "structured-only": 7,
     "none": 0
   },
   "capabilityDistribution": {
@@ -17,9 +17,9 @@
     "ASR": 14,
     "VU": 9,
     "Realtime-ASR": 8,
-    "Multimodal-Omni": 5,
+    "Multimodal-Omni": 6,
+    "Realtime-Audio-Translate": 4,
     "Realtime-Omni": 4,
-    "Realtime-Audio-Translate": 3,
     "ME": 2,
     "Realtime-Chatting": 2,
     "Realtime-Text-to-Speech": 2,
@@ -27,7 +27,7 @@
     "3D-generation": 1
   },
   "providerDistribution": {
-    "qwen": 110,
+    "qwen": 112,
     "qwen-domain-model": 34,
     "wan": 14,
     "mini-max": 4,
@@ -473,7 +473,7 @@
       "providers": [
         "zhipu-ai"
       ],
-      "itemCount": 7,
+      "itemCount": 8,
       "items": [
         "glm-4.5",
         "glm-4.5-air",
@@ -481,7 +481,8 @@
         "glm-4.7",
         "glm-5",
         "glm-5.1",
-        "glm-5.2"
+        "glm-5.2",
+        "glm-5.3"
       ],
       "maxContextWindow": 1000000
     },
@@ -639,14 +640,15 @@
       "providers": [
         "moonshot-ai"
       ],
-      "itemCount": 4,
+      "itemCount": 5,
       "items": [
         "kimi/kimi-k2.6",
         "kimi/kimi-k2.7-code",
         "kimi/kimi-k2.7-code-highspeed",
+        "kimi/kimi-k2.8-preview",
         "kimi/kimi-k3"
       ],
-      "maxContextWindow": 1000000
+      "maxContextWindow": 1048576
     },
     {
       "slug": "kling-models-market-place",
@@ -2344,6 +2346,22 @@
       "maxContextWindow": 1000000
     },
     {
+      "slug": "qwen3.8-livetranslate-flash-realtime",
+      "name": "Qwen3.8-LiveTranslate-Flash-Realtime",
+      "primaryCapability": "Realtime-Audio-Translate",
+      "capabilities": [
+        "Realtime-Audio-Translate"
+      ],
+      "providers": [
+        "qwen"
+      ],
+      "itemCount": 1,
+      "items": [
+        "qwen3.8-livetranslate-flash-realtime"
+      ],
+      "maxContextWindow": 53248
+    },
+    {
       "slug": "qwen3.8-max",
       "name": "Qwen3.8-Max",
       "primaryCapability": "Reasoning",
@@ -2359,6 +2377,22 @@
       "items": [
         "qwen3.8-max",
         "qwen3.8-max-0902"
+      ],
+      "maxContextWindow": 1000000
+    },
+    {
+      "slug": "qwen3.8-omni-flash",
+      "name": "Qwen3.8-Omni-Flash",
+      "primaryCapability": "Multimodal-Omni",
+      "capabilities": [
+        "Multimodal-Omni"
+      ],
+      "providers": [
+        "qwen"
+      ],
+      "itemCount": 1,
+      "items": [
+        "qwen3.8-omni-flash"
       ],
       "maxContextWindow": 1000000
     },

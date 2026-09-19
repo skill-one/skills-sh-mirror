@@ -7,6 +7,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from book_to_skill.exceptions import ExtractionError
+
 _MIN_NATIVE_CONFIDENCE = 0.90
 _INSPECTIONS: dict[str, dict[str, Any]] = {}
 
@@ -143,7 +145,12 @@ def _result_from_inspector(
 
     pages = inspection.get("page_count") or utils_module.count_pages(str(input_path))
     tokens = utils_module.estimate_tokens(text)
-    file_size_mb = os.path.getsize(input_path) / (1024 * 1024)
+    try:
+        file_size_mb = os.path.getsize(input_path) / (1024 * 1024)
+    except OSError as exc:
+        raise ExtractionError(
+            f"Could not read file size for {input_path.name}: {exc}"
+        ) from exc
 
     return {
         "source_file": str(input_path.resolve()),
@@ -191,12 +198,15 @@ def install_pdf_inspector_hook(utils_module: Any | None = None) -> None:
         return
 
     def wrapped(input_path: Path, extraction_mode: str, install_mode: str) -> dict[str, Any]:
+        inspection_key = str(input_path.resolve())
+        _INSPECTIONS.pop(inspection_key, None)
+
         if not _looks_like_pdf(input_path):
             return original(input_path, extraction_mode, install_mode)
 
         markdown, inspection = inspect_pdf(input_path)
         if inspection is not None:
-            _INSPECTIONS[str(input_path.resolve())] = inspection
+            _INSPECTIONS[inspection_key] = inspection
 
         if extraction_mode == "text" and markdown and inspection:
             result = _result_from_inspector(utils_module, input_path, markdown, inspection)

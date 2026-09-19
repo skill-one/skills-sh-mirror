@@ -49,25 +49,26 @@ The Homebrew tap installs prebuilt release tarballs (not bottles) for Linux and 
 ⚠️ **Never run bare `cass` in an agent context** — it launches the interactive TUI. Always use `--robot` or `--json`.
 
 ```bash
-# 1) One-shot agent triage. Follow next_command when present.
-cass triage --json
-#    From zero context, `cass --json` and `cass --robot` also resolve to triage.
+# 1) Check the installed interface once per version (recipe verified on 0.8.0).
+cass --version
+cass search --help
 
 # Verify a newly installed executable without opening the configured archive.
 cass selftest --json
 # `health --binary-only` still reports (and therefore probes) archive readiness.
 
-# 2) Search across all agent history. Default search is hybrid-preferred:
-#    lexical is the fast required path; semantic refinement joins when ready.
-cass search "authentication error" --robot --limit 5 --fields minimal
+# 2) For a quick history question, start with scoped read-only lexical retrieval.
+#    Hybrid remains the product default; lexical is explicit for this workflow.
+cass search "performance regression" --workspace /path/to/project --days 7 \
+  --mode lexical --no-maintenance --robot --robot-meta --fields minimal \
+  --limit 5 --max-tokens 2000 --timeout 2000
 
 # 3) Find the current or recent session for this workspace
 cass sessions --current --json
 cass sessions --workspace "$(pwd)" --json --limit 5
 
 # 4) View + expand a hit (use source_path/line_number from search output)
-cass view /path/to/session.jsonl -n 42 --json
-cass expand /path/to/session.jsonl -n 42 -C 3 --json
+cass view /path/to/session.jsonl -n 42 -C 3 --json --timeout 2000
 
 # 5) Discover the full machine API
 cass capabilities --json
@@ -80,6 +81,19 @@ cass sources agents exclude openclaw
 cass sources agents include openclaw
 ```
 
+The retrieval flags above are available in 0.8.0. On older builds, check help;
+if `--no-maintenance` is absent, report the mismatch instead of dropping the
+read-only constraint. `--timeout` is in milliseconds, while `--max-tokens` limits
+approximate output size. Also set a caller-side deadline (for example, GNU
+`timeout 10s`); an externally interrupted command may leave incomplete JSON.
+Inspect `budget.timed_out` even after exit 0: timed-out empty hits are not proof
+that no history exists. A `maintenance-required` response ends the retrieval
+attempt; indexing or repair is a separate mutating task. Use triage/health/status
+for readiness diagnosis, not as repeated prerequisites to a short summary.
+Broaden scope deliberately, expand useful hits, and preserve source/line citations.
+`view -C` bounds context lines, not bytes; check excerpt size before including
+a long JSONL record in an agent prompt.
+
 **Output conventions**
 - stdout = data only
 - stderr = diagnostics
@@ -91,7 +105,7 @@ cass sources agents include openclaw
 - Hybrid is the default search intent. Robot metadata (`--robot --robot-meta`) reports the requested mode, realized mode, semantic refinement status, and any lexical fallback reason when semantic assets are not ready.
 - Semantic assets are opportunistic background enrichment. Lexical-only results are expected during first indexing, semantic catch-up, disabled semantic policy, or unavailable local model/vector files.
 - Semantic model acquisition is **opt-in**: `cass models install` downloads the default `all-minilm-l6-v2` (alias `minilm`, ~90 MB) only on explicit request; `--model multilingual-minilm` selects the larger multilingual MiniLM L12 model (~480 MB) for CJK/mixed-language archives. Cass never auto-downloads or auto-selects the multilingual space. Air-gapped installs use `--from-file <dir>`. While the selected model is absent, hybrid search uses lexical-only and reports `fallback_mode="lexical"` in health/status.
-- `cass triage --json` is the safest first command for agents: it combines readiness, `next_command`, `recommended_commands[]`, docs/schema pointers, starter workflows, and accepted recoveries. `cass health --json` and `cass status --json` remain the narrower truth surfaces for readiness, active rebuilds, and recovery.
+- `cass triage --json` combines readiness, `next_command`, `recommended_commands[]`, docs/schema pointers, starter workflows, and accepted recoveries for diagnosis. Review recommended mutations before executing them. `cass health --json` and `cass status --json` remain the narrower truth surfaces for readiness, active rebuilds, and recovery.
 
 **Lexical publish durability (atomic-swap)**
 - Every lexical publish is an atomic renameat2(RENAME_EXCHANGE) on Linux, or a parked-rename + restore-on-failure dance elsewhere. Readers never see a half-torn index — they see either the old or the new generation, never a mix. See `src/indexer/mod.rs::publish_staged_lexical_index`.
@@ -1076,11 +1090,23 @@ cass swarm lint --json --bead coding_agent_session_search-example
 cass swarm dependency-drift --json
 ```
 
-`swarm status`, `swarm work-packet`, and `swarm lint` currently compose their
-snapshot from checked-in fixtures (`--fixture <file>` or `--fixture-dir <dir>
---fixture-id <id>`); without a fixture the live provider path reports every
-source as `live-provider-unimplemented`. Only `swarm dependency-drift` has a
-live path today.
+`swarm status` and `swarm work-packet` collect bounded read-only Git state and
+Beads exports when run from the repository root without a fixture. Git uses
+porcelain-v2 with optional locks disabled. Beads uses `br 0.6.x --no-db`, so its
+JSONL snapshot is explicitly partial: unexported database changes may exist.
+Recheck Beads and reservations before claiming work. Child commands share a
+single 15-second request budget and each has an 8 MiB output cap; Beads categories
+cap at 512 issues.
+Failures report unavailable providers and unknown summary counts, not zero work.
+RCH contributes aggregate active/queued job counts, fleet slots and posture from
+`rch status --json` (API 1.0, schema 1.0.0). Responses older than 60 seconds or
+more than 5 seconds in the future are unavailable. Worker addresses, commands
+and job details are omitted. This provider remains partial: local Cargo/CPU
+state and build admission are unknown, even when RCH reports no active jobs.
+Agent Mail and CASS evidence remain unwired. `swarm lint` still uses the placeholder
+live snapshot. Fixture selection (`--fixture <file>` or `--fixture-dir <dir>
+--fixture-id <id>`) retains deterministic behavior; `swarm dependency-drift`
+also has a live path.
 
 `swarm status` composes Beads, Agent Mail metadata, git state, rch/build
 pressure, cass health/status, and proof references. Stale candidates are
@@ -2472,10 +2498,18 @@ An index that is always a little behind is the most common complaint about any l
 | Layer | What | When it runs | Enable |
 |-------|------|--------------|--------|
 | **Stale-on-read catch-up** | `search`, `pack`, and TUI launch check index freshness. If the index is stale (> 30 min), partial, or has pending sessions, a *detached* incremental `cass index --background` is spawned in its own process group and the current results are returned immediately. The next search is fresh. | On demand, at most once per 5 min per data dir (`CASS_AUTO_REFRESH_COOLDOWN_SECS`). Never for data dirs under the OS temp dir, and never for `search --no-maintenance`. A catch-up that ends without advancing the index is not respawned blindly: 1 h, then 6 h between attempts, and three failures trip the breaker until any run completes. | On by default. `CASS_AUTO_REFRESH=0` disables globally. `--robot-meta` reports `index_freshness.auto_refresh.{outcome,trigger,pid,consecutive_failures,detail}`. |
-| **OS scheduler** (`cass schedule install`) | launchd LaunchAgents (macOS) or systemd user timers (Linux): an **incremental** job every 15 min and a **nightly** job (03:00) that runs `index --full`, then bounded `models backfill --scheduled` batches (fast/hash tier always; quality/MiniLM tier when the model is installed), plus any remote-source syncs whose `sync_schedule` in `sources.toml` is due. Priority is delegated to the OS (`ProcessType=Background`/`Nice`/`LowPriorityIO`, `Nice=19`/`IOSchedulingClass=idle`/`CPUSchedulingPolicy=idle`). | On the timer, even when no cass process is running; survives reboots (`Persistent=true` / launchd). | `cass schedule install [--interval-mins 15] [--nightly-hour 3] [--no-nightly] [--no-semantic] [--dry-run]`; `cass schedule status`; `cass schedule uninstall`. |
+| **OS scheduler** (`cass schedule install`) | launchd LaunchAgents (macOS) or systemd user timers (Linux): an **incremental** job every 15 min and a **nightly** job (03:00) that performs a full source census with conditional lexical rebuilding, then one bounded `models backfill --scheduled` worker per tier (fast/hash always; quality/MiniLM when installed). Due remote-source syncs run first. Priority is delegated to the OS (`ProcessType=Background`/`Nice`/`LowPriorityIO`, `Nice=19`/`IOSchedulingClass=idle`/`CPUSchedulingPolicy=idle`). | On the timer, even when no cass process is running; survives reboots (`Persistent=true` / launchd). | `cass schedule install [--interval-mins 15] [--nightly-hour 3] [--no-nightly] [--no-semantic] [--dry-run]`; `cass schedule status`; `cass schedule uninstall`. |
 | **Resident daemon timer** | The warm-model daemon (`cass daemon`, auto-spawned by semantic/hybrid searches) can also kick an incremental background index while it is resident. | Every `CASS_DAEMON_INDEX_INTERVAL_SECS` seconds while the daemon lives (it exits after its idle timeout). | Off by default; `CASS_DAEMON_INDEX_INTERVAL_SECS=900` recommended. |
 
 Idle awareness: scheduled work skips a run when the machine is under severe load (Linux `/proc/loadavg` + PSI; macOS `sysctl vm.loadavg`). On macOS you can additionally require the console to have been idle — `CASS_RESPONSIVENESS_MIN_USER_IDLE_SECS=600` makes the nightly job and scheduled semantic backfill wait until nobody has touched the keyboard for ten minutes (the gate fails open where idle time is unavailable). Foreground `cass index` is never gated.
+
+For a slow hosted disk, start with `cass schedule install --interval-mins 60` and measure before shortening the interval. On Linux, `cass index --json` reports `indexing_stats.bytes_written`: the process block-write counter increase during indexing, including final checkpointing. It measures physical writes across all indexing layers, not just new transcript bytes or lexical segments; a cache-backed filesystem can report zero. The field is omitted when the counter is unavailable, including on other platforms. Check this alongside `elapsed_ms` on both changed-source and unchanged-source runs.
+
+Nightly indexing retains `index --full` source coverage because timestamp-only connectors can miss restored files with old modification times. Connectors with valid durable source observations can reuse unchanged sources. When a completed checkpoint matches the archive and the lexical index passes validation, new messages are indexed inline. Missing or invalid checkpoint evidence, sparse or corrupt lexical assets, deferred lexical updates, and provenance repairs retain authoritative rebuilding from SQLite. Explicit `cass index --full` and `--full --force-rebuild` keep their existing repair behavior.
+
+The nightly census still pays for source discovery and archive integrity, salvage, analytics, and FTS maintenance where required. A run that resumes an interrupted lexical rebuild can finish canonical recovery before returning; source discovery resumes on a later indexing run. Disappearing source files do not erase the preserved canonical history.
+
+Each semantic worker retains its loaded model across its admitted batches and releases the previous batch's messages, vectors, storage handle, and lock at every checkpoint. `CASS_SCHEDULE_MAX_BACKFILL_BATCHES` bounds total attempts across tiers. Standalone `cass models backfill --max-batches N` uses the same worker; its default remains one batch.
 
 Everything a scheduled job did is recorded under `<data_dir>/schedule/` (`state.json`, `runs.jsonl`, per-job logs) and the last stale-on-read spawn under `<data_dir>/auto-refresh-state.json` / `auto-refresh.log`; `cass schedule status --json` reads all of it.
 
@@ -2928,7 +2962,7 @@ cass completions bash > ~/.bash_completion.d/cass
 | `index --full` | Discover sessions and refresh the canonical DB plus derived search assets |
 | `index --background` | Same as `index`, but lowers its own CPU/I/O priority first (used by auto-refresh, `schedule`, and the daemon timer) |
 | `index --watch` | Foreground watch loop: reindex automatically on file changes |
-| `schedule install\|uninstall\|status\|run` | Register incremental (15 min) + nightly (full index + semantic backfill) jobs with launchd / systemd user timers |
+| `schedule install\|uninstall\|status\|run` | Register incremental (15 min) + nightly (full source census, conditional lexical rebuild, bounded semantic backfill) jobs with launchd / systemd user timers |
 | `search --robot` | JSON output for automation pipelines |
 | `pack --robot` | Deterministic cited answer packs for agent/human handoffs; reports health, freshness, privacy, and warnings |
 | `triage` / `ready` / `preflight` | One-shot agent preflight: readiness, exact next command, docs, schemas, workflows, and recoveries |
@@ -3293,7 +3327,7 @@ Update check state is stored in the data directory:
 | `CASS_BACKGROUND_NICE` | `15` | nice value `cass index --background` applies to itself (0..=19) |
 | `CASS_BACKGROUND_IONICE_CLASS` | `3` | ionice class for `cass index --background` on Linux (3 = idle) |
 | `CASS_DAEMON_INDEX_INTERVAL_SECS` | `0` | While the semantic daemon is resident, spawn an incremental background index every N seconds (`900` recommended; 0 = off) |
-| `CASS_SCHEDULE_MAX_BACKFILL_BATCHES` | `200` | Cap on `models backfill --scheduled` batches per nightly `cass schedule run` |
+| `CASS_SCHEDULE_MAX_BACKFILL_BATCHES` | `200` | Maximum backfill batch attempts shared across the nightly workers; each tier retains one loaded model while running its remaining allowance |
 | `CASS_RESPONSIVENESS_MIN_USER_IDLE_SECS` | `0` | Require N seconds of console idle (macOS `HIDIdleTime`) before the nightly job / scheduled backfill runs; fails open where unavailable |
 | **Indexing & Redaction** | | |
 | `CASS_INDEX_REDACTION` | `full` | Index-time secret redaction: `full` scrubs API keys/tokens/passwords/private keys from every persisted message, title, snippet, and metadata blob before they reach SQLite or the lexical index; `off` skips redaction for faster ingest. **`off` means raw text is indexed** — note that the original session files and the cass raw-mirror blobs (`<data_dir>/raw-mirror/v1/`) already contain the same raw text unencrypted on the same disk, so `full` protects the queryable surfaces (search results, exports, robot output), not disk-at-rest secrecy. Unrecognized values warn and behave as `full`. |
@@ -3351,6 +3385,22 @@ Update check state is stored in the data directory:
 
 ## Dependency Source Contract
 
+The next release candidate prepares the entire SQLite family (including
+`fsqlite-types`) at `=0.4.4`, with `asupersync =0.5.0`.
+The published SQLite repair covers the reserved-page WAL conflict in GH#462;
+upstream GH#411 is also closed. Neither proves recovery of an already damaged
+archive. `franken-agent-detection =0.3.0` is published. SQLite `0.4.2` adds
+explicit derived WAL-index recovery for read-only opens (GH#477); its
+upstream recovery, compiler, and package gates passed. All 25 SQLite packages
+are now published at 0.4.4, which adds durable pending-freelist repairs.
+`frankensearch =0.6.1` publication and CASS consumer runtime qualification
+remain pending.
+Until those complete, the lockfile and table below describe the previous graph;
+the candidate must not be released. The build guard enforces the reviewed
+uniform SQLite 0.4.4 versions, a single resolution per package, and registry sources.
+Cargo resolution on 2026-09-17 stopped at unpublished FrankenSearch 0.6.1;
+the SQLite update is not yet locked or runtime-qualified.
+
 `cass` pins its contract-critical ecosystem dependencies with exact registry requirements in [`Cargo.toml`](Cargo.toml); other direct dependencies use normal semver requirements, and `Cargo.lock` freezes the complete resolved graph. No active dependency or patch currently resolves from git. Optional sibling-path overrides stay commented out by default and must never be committed active.
 
 | Dependency | Pinned source |
@@ -3364,7 +3414,7 @@ Update check state is stored in the data directory:
 
 **Build-time validation**
 - `build.rs` validates every named dependency contract against its exact registry requirement, package name, enabled features, and `default-features` policy. It also rejects git/revision fields for these registry-only contracts.
-- The fsqlite-family gate additionally checks `Cargo.lock` for one converged version resolved from the pinned upstream revision, requires the single facade `[patch.crates-io].fsqlite` redirect, and rejects any other patch entry for that family.
+- The fsqlite-family gate additionally checks `Cargo.lock` for exactly one registry resolution per package at `0.4.4` and rejects every `[patch.crates-io]` redirect for the family, including the facade.
 - Enable optional sibling-manifest validation with `rch exec -- env CARGO_TARGET_DIR=/data/tmp/cass-strict-target cargo check --features strict-path-dep-validation` or `rch exec -- env CARGO_TARGET_DIR=/data/tmp/cass-strict-target CASS_STRICT_PATH_DEP_VALIDATION=1 cargo check`. For sibling checkouts that are present, this verifies package names, versions, and required features before you switch to local path overrides; registry-only contracts do not require a particular sibling branch or clean worktree.
 - Use `cass swarm dependency-drift --json` for a fast read-only preflight. It reports each manifest pin, optional sibling checkout HEAD/dirty state, upstream status as `not_checked`, and the exact strict-validation commands to run; it never fetches remotes or mutates files.
 

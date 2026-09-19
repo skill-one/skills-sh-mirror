@@ -1,6 +1,6 @@
 # 百炼模型市场索引
 
-> 自动生成 · 共 179 个模型家族 · 415 个主干模型 · 更新于 2026-09-14
+> 自动生成 · 共 181 个模型家族 · 419 个主干模型 · 更新于 2026-09-18
 
 **机器查询走结构化文件**：
 
@@ -19,16 +19,16 @@ join：`models.jsonl[].family == families.jsonl[].slug == index.json.families[].
 
 ## 文本生成 `TG` — 39 个家族
 
-- [DeepSeek](groups/deepseek.json) — DeepSeek是由深度求索提供的开源模型，包含 V3.1、V3、R1以及基于Qwen2.5系列蒸馏的大语言模型。
+- [DeepSeek](groups/deepseek.json) — DeepSeek 系列模型覆盖通用对话、复杂推理与多模态理解等场景，提供 Flash、Pro 等不同规格，可根据效果、响应速度和成本灵活选择。
   - 模型：`deepseek-r1`, `deepseek-r1-0528`, `deepseek-r1-distill-qwen-1.5b`, `deepseek-r1-distill-qwen-14b`, `deepseek-r1-distill-qwen-32b`, `deepseek-r1-distill-qwen-7b`, `deepseek-v3`, `deepseek-v3.1`, `deepseek-v3.2`, `deepseek-v3.2-exp`, `deepseek-v4-flash`, `deepseek-v4-flash-0731`, `deepseek-v4-pro`, `deepseek-v4-pro-0813`, `deepseek-v4.1-flash`
 - [GLM](groups/glm-4.5.json) — GLM是由智谱提供的开源模型。
-  - 模型：`glm-4.5`, `glm-4.5-air`, `glm-4.6`, `glm-4.7`, `glm-5`, `glm-5.1`, `glm-5.2`
+  - 模型：`glm-4.5`, `glm-4.5-air`, `glm-4.6`, `glm-4.7`, `glm-5`, `glm-5.1`, `glm-5.2`, `glm-5.3`
 - [GLM-5.2-Fast](groups/glm-fast.json) — GLM-5.2-Fast-Preview 是智谱 AI 旗舰模型 GLM-5.2 的高速版本，支持 1M 超长上下文，模型能力对齐 GLM-5.2 标准版，具备逻辑推理、长文本理解与代码生成能力。通过…
   - 模型：`glm-5.2-fast-preview`
 - [Kimi](groups/Kimi-K2.json) — Kimi是由月之暗面提供的开源模型，包含k3、k2.7-code、k2.6、k2.5等多模态和大语言模型。
   - 模型：`kimi-k2-thinking`, `kimi-k2.5`, `kimi-k2.6`, `kimi-k2.7-code`, `kimi-k3`, `Moonshot-Kimi-K2-Instruct`
 - [Kimi](groups/kimi-models-market-place.json) — 由月之暗面提供的Kimi系列模型的API服务。
-  - 模型：`kimi/kimi-k2.6`, `kimi/kimi-k2.7-code`, `kimi/kimi-k2.7-code-highspeed`, `kimi/kimi-k3`
+  - 模型：`kimi/kimi-k2.6`, `kimi/kimi-k2.7-code`, `kimi/kimi-k2.7-code-highspeed`, `kimi/kimi-k2.8-preview`, `kimi/kimi-k3`
 - [MiMo文本模型](groups/xiaomi-models-market-place.json) — 由小米MiMo提供的MiMo文本模型API服务
   - 模型：`xiaomi/mimo-v2.5-pro`
 - [MiniMax文本模型](groups/minimax-models-market-place.json) — 由MiniMax提供的MiniMax-M系列文本模型API服务。
@@ -357,7 +357,7 @@ join：`models.jsonl[].family == families.jsonl[].slug == index.json.families[].
 - [Qwen3-LiveTranslate-Flash](groups/qwen3-livetranslate-flash.json) — Qwen3-LiveTranslate-Flash，一款高精度、高响应、高鲁棒性的多语言实时音视频同传大模型。依托Qwen3-Omni强大的基座能力、海量多模态数据、跨语言跨模态对齐和视觉增强等技术，…
   - 模型：`qwen3-livetranslate-flash`
 
-## 全模态 `Multimodal-Omni` — 5 个家族
+## 全模态 `Multimodal-Omni` — 6 个家族
 
 - [Qwen-Omni-Turbo](groups/qwen-omni-turbo.json) — 千问全新多模态理解生成大模型，支持文本, 图像，语音，视频输入理解和混合输入理解，具备文本和语音同时流式生成能力，多模态内容理解速度显著提升，提供了4种自然对话音色。
   - 模型：`qwen-omni-turbo`, `qwen-omni-turbo-latest`
@@ -369,6 +369,19 @@ join：`models.jsonl[].family == families.jsonl[].slug == index.json.families[].
   - 模型：`qwen3.5-omni-flash`
 - [Qwen3.5-Omni-Plus](groups/qwen3.5-omni-plus.json) — Qwen3.5-Omni是Qwen最新一代全模态大模型，支持文本，图片，音频，音视频理解与交互。作为 Qwen3-Omni 的全面进化版本， 支持超过 10 小时的音频理解及超过 400 秒的 720…
   - 模型：`qwen3.5-omni-plus`
+- [Qwen3.8-Omni-Flash](groups/qwen3.8-omni-flash.json) — Qwen3.8-Omni-Flash 是面向多模态理解与实时交互的新一代全模态模型，支持文本、图像、音频和视频输入。模型具备百万级上下文窗口，支持深度思考、流式输出及 OpenAI 兼容接口。离线模式…
+  - 模型：`qwen3.8-omni-flash`
+
+## 实时音频翻译 `Realtime-Audio-Translate` — 4 个家族
+
+- [Qwen3-LiveTranslate-Flash-Realtime](groups/qwen3-livetranslate-flash-realtime.json) — Qwen3-LiveTranslate-Flash-Realtime的实时版本，一款高精度、高响应、高鲁棒性的多语言实时音视频同传大模型。依托Qwen3-Omni强大的基座能力、海量多模态数据、跨语言…
+  - 模型：`qwen3-livetranslate-flash-realtime`
+- [Qwen3.5-LiveTranslate-Flash-Realtime](groups/qwen3.5-livetranslate-flash-realtime.json) — Qwen3.5-LiveTranslate-Flash的实时版本，一款高精度、高响应、高鲁棒性的多语言实时音视频同传大模型。依托Qwen3.5-Omni强大的基座能力、海量多模态数据、跨语言跨模态对齐…
+  - 模型：`qwen3.5-livetranslate-flash-realtime`
+- [Qwen3.8-LiveTranslate-Flash-Realtime](groups/qwen3.8-livetranslate-flash-realtime.json) — Qwen3.8-LiveTranslate-Flash的实时版本，一款高精度、高响应、高鲁棒性的多语言实时音视频同传大模型。依托Qwen-Omni强大的基座能力、海量多模态数据、跨语言跨模态对齐和视觉…
+  - 模型：`qwen3.8-livetranslate-flash-realtime`
+- [实时语音识别及翻译V1.0](groups/gummy-realtime-v1.json) — 多语言语音转写及翻译的多模态大模型。本模型提供长时间、高准确率、实时转写中/英/日/韩等10个混合语种的服务。同时支持中英日韩互译，以其他6个语种翻译成中文或英文。
+  - 模型：`gummy-realtime-v1`
 
 ## 实时全模态 `Realtime-Omni` — 4 个家族
 
@@ -380,15 +393,6 @@ join：`models.jsonl[].family == families.jsonl[].slug == index.json.families[].
   - 模型：`qwen3.5-omni-flash-realtime`
 - [Qwen3.5-Omni-Plus-Realtime](groups/qwen3.5-omni-plus-realtime.json) — Qwen3.5-Omni是Qwen最新一代全模态大模型，支持文本，图片，音频，音视频理解与交互。作为 Qwen3-Omni 的全面进化版本，支持60+种语言音频输入，30+语言语音输出以及可控语音对话…
   - 模型：`qwen3.5-omni-plus-realtime`
-
-## 实时音频翻译 `Realtime-Audio-Translate` — 3 个家族
-
-- [Qwen3-LiveTranslate-Flash-Realtime](groups/qwen3-livetranslate-flash-realtime.json) — Qwen3-LiveTranslate-Flash-Realtime的实时版本，一款高精度、高响应、高鲁棒性的多语言实时音视频同传大模型。依托Qwen3-Omni强大的基座能力、海量多模态数据、跨语言…
-  - 模型：`qwen3-livetranslate-flash-realtime`
-- [Qwen3.5-LiveTranslate-Flash-Realtime](groups/qwen3.5-livetranslate-flash-realtime.json) — Qwen3.5-LiveTranslate-Flash的实时版本，一款高精度、高响应、高鲁棒性的多语言实时音视频同传大模型。依托Qwen3.5-Omni强大的基座能力、海量多模态数据、跨语言跨模态对齐…
-  - 模型：`qwen3.5-livetranslate-flash-realtime`
-- [实时语音识别及翻译V1.0](groups/gummy-realtime-v1.json) — 多语言语音转写及翻译的多模态大模型。本模型提供长时间、高准确率、实时转写中/英/日/韩等10个混合语种的服务。同时支持中英日韩互译，以其他6个语种翻译成中文或英文。
-  - 模型：`gummy-realtime-v1`
 
 ## 多模态嵌入 `ME` — 2 个家族
 

@@ -52,7 +52,7 @@ Discipline-enforcing skill for building layouts that respond to available space 
     │   → Geometry + custom threshold
     │
     ├─ "Auto show/hide columns"
-    │   → NavigationSplitView (automatic in iOS 26)
+    │   → NavigationSplitView (adapts automatically)
     │
     └─ "Window lifecycle"
         → @Environment(\.scenePhase)
@@ -212,12 +212,13 @@ VStack {
     Button("Next") { }
 }
 
-// ❌ WRONG: Unconstrained (greedy)
+// ❌ WRONG: Unconstrained
 VStack {
     GeometryReader { geo in
         Text("Width: \(geo.size.width)")
     }
-    // Takes all available space, crushes siblings
+    // No intrinsic size: it takes the space the stack has left. Against a
+    // sibling that is also flexible, the two split the space evenly.
     Button("Next") { }
 }
 ```
@@ -235,7 +236,7 @@ ViewThatFits(in: .vertical) {
 }
 ```
 
-The `ScrollView` variant must come **last** — a ScrollView compresses to any proposed size, so as the first child it would always "fit" and win. When the fixed variant fits, you keep non-scrolling behavior (Spacer-based centering, no bounce).
+The `ScrollView` variant must come **last** — when nothing fits, `ViewThatFits` displays the *last* child, so a ScrollView in first place leaves the user with the clipped, unscrollable form. Measured with `ViewThatFits(in: .vertical)`, 300-point content in a 200×100 frame: ScrollView-first displayed the fixed branch, ScrollView-last displayed the ScrollView. The ScrollView does not always "fit" — in a 200×400 frame, where the fixed form fits, ScrollView-first displayed the ScrollView, the first child that fits, as documented. When the fixed variant fits, you keep non-scrolling behavior (Spacer-based centering, no bounce).
 
 If the content should simply always scroll, skip `ViewThatFits`:
 
@@ -244,7 +245,7 @@ ScrollView { CheckoutForm() }
     .scrollBounceBehavior(.basedOnSize)   // no bounce while everything fits
 ```
 
-**Watch view identity:** the two `ViewThatFits` branches are different subtrees, so `@State` inside `CheckoutForm` dies when the fit flips mid-resize — keep drafts and focus in the model (see State Survives the Transition below).
+**View identity survives the flip:** `ViewThatFits` keeps every branch in the tree and only changes which one it displays, so `@State` inside `CheckoutForm` is preserved when the fit flips — measured across a fit flip, the branch came back with the same state, while the same child behind an `if`/`else` was rebuilt with fresh state. Drafts and focus still belong in the model (see State Survives the Transition below).
 
 ---
 
@@ -287,6 +288,17 @@ UIKit's `readableContentGuide` does all of this automatically, including the Dyn
 
 **Key insight:** Size class only goes `.compact` on iPad at ~33% width or Slide Over. For finer control, use geometry.
 
+## Size Class Truth Table (iPhone Duo)
+
+| Display | Horizontal | Vertical |
+|---|---|---|
+| Outer, portrait | `.compact` | `.regular` |
+| Outer, landscape | `.compact` | `.compact` |
+| Inner, full screen | `.regular` | `.regular` |
+| Inner, one half of Split View | `.compact` | `.regular` |
+
+Opening the device moves the app to the inner display mid-session: horizontal becomes `.regular`, and vertical does too if the outer display was in landscape — adapt, and keep state. Apple's talks left the Split View half unstated; measured on the 27.1 Duo simulator it reports `.compact` width, like the outer display — read it from the environment rather than inferring `.regular` from the display. Full guidance: skills/iphone-duo.md.
+
 ---
 
 ## iOS 26 Free-Form Windows
@@ -309,7 +321,7 @@ UIKit's `readableContentGuide` does all of this automatically, including the Dyn
 ### NavigationSplitView Auto-Adaptation
 
 ```swift
-// iOS 26: Columns automatically show/hide
+// Columns automatically show/hide with the available width
 NavigationSplitView {
     Sidebar()
 } content: {
@@ -417,16 +429,16 @@ if UIDevice.current.userInterfaceIdiom == .pad {
 ### ❌ Unconstrained GeometryReader
 
 ```swift
-// ❌ WRONG: GeometryReader is greedy
+// ❌ WRONG: no intrinsic size, so it takes the stack's leftover space
 VStack {
     GeometryReader { geo in
         Text("Size: \(geo.size)")
     }
-    Button("Next") { }  // Crushed
+    Button("Next") { }
 }
 ```
 
-**Fix:** Constrain with `.frame()` or use `onGeometryChange`.
+**Fix:** Constrain with `.frame()` or use `onGeometryChange`. The reader starves a sibling only when the sibling is flexible too — measured in a 300-point stack, a 40-point sibling kept its 40 points beside a reader at 260, while a flexible sibling beside a reader split 150/150.
 
 ### ❌ Size Class as Orientation Proxy
 
@@ -447,15 +459,28 @@ content
     .environment(\.horizontalSizeClass, isWide ? .regular : .compact)
 ```
 
-**Why it fails:** At 27 an iPhone app runs resizable (mirroring, iPhone-only on iPad) but stays `.phone` idiom and `.compact` no matter the width — idiom is decoupled from available space. Injecting `.regular` flips every environment reader in the subtree, and components don't respond consistently: `NavigationSplitView` may expand, but `TabView(.sidebarAdaptable)` will **not** become an iPad sidebar from injected `.regular` alone. A wide iPhone window is an adaptive iPhone presentation, not an iPad product interface.
+**Why it fails:** A wide window already reports `.regular` on its own. At 27 a resizable iPhone window (iPhone Mirroring, iPhone-only on iPad) keeps the `.phone` idiom, but its size classes follow the window (skills/layout-ref.md, Size Class Follows the Window — measured in the simulator's resize session, physical iPhone Mirroring, and an iPhone-only app on a physical iPad). At best an injected value matches the real trait; wherever it doesn't, the subtree and the scene disagree. With your own threshold, the subtree and the scene switch at different widths. With a fixed `.regular`, a narrow window keeps it, and a `.sidebarAdaptable` `TabView` with `.defaultTabBarPlacement(.sidebar)` then hides its tabs behind a collapsed sidebar at 402 points (measured on the iOS 27.0 simulator).
 
-**Fix:** Drive your *own* layout from geometry. In a wide state, show a custom sidebar and hide the tab bar; keep tab switching in state. Reserve `horizontalSizeClass` for system-container semantics (are system Tabs/Sidebars offered, should menus collapse).
+**Fix:** Read the real `horizontalSizeClass` for roomy-vs-constrained decisions, and let the system place the sidebar. Use geometry only for breakpoints finer than size class.
 
 ```swift
-// ✅ Geometry decides YOUR breakpoint; size class stays semantic
-content
-    .onGeometryChange(for: Bool.self) { $0.size.width > 700 } action: { isWide = $0 }
+// ✅ The system picks tab bar or sidebar from the real size class and available space
+var body: some View {
+    let tabs = TabView {
+        Tab("Summary", systemImage: "heart") { SummaryView() }
+        Tab("Browse", systemImage: "square.grid.2x2") { BrowseView() }
+    }
+    .tabViewStyle(.sidebarAdaptable)
+
+    if #available(iOS 27, *) {            // defaultTabBarPlacement is iOS 27
+        tabs.defaultTabBarPlacement(.sidebar)
+    } else {
+        tabs
+    }
+}
 ```
+
+Regular width doesn't guarantee a visible sidebar. Measured: a tab bar at 402 points and a sidebar at 1000 in the simulator's iPhone resize session; for an iPhone-only app on a physical iPad, a tab bar at 375 points and, at 683 points and `.regular`, the sidebar collapsed behind a toggle. When UI depends on the sidebar, read `@Environment(\.isTabViewSidebarAvailable)` (iOS 27) inside the tab content instead of the size class; Apple's doc comment says it reports a sidebar that "is (or can become) visible". For iPad apps the modifier has no effect; use `defaultAdaptableTabBarPlacement(_:)` (skills/iphone-duo.md).
 
 ---
 
@@ -489,7 +514,7 @@ content
 
 **Temptation:** `.environment(\.horizontalSizeClass, .regular)` on the root.
 
-**Response:** "A `.phone`-idiom app stays `.compact` at any width by design, and injecting `.regular` doesn't make components agree — `TabView(.sidebarAdaptable)` won't become an iPad sidebar from it. I'll read the width with `onGeometryChange` and show a custom sidebar in the wide state, keeping size class for system semantics."
+**Response:** "A wide resizable iPhone window already reports `.regular` — size classes follow the window even though the idiom stays `.phone`. Forcing `.regular` on the root keeps it when the window narrows, and a sidebar-adaptable `TabView` set to prefer a sidebar then hides its tabs. I'll adopt `.sidebarAdaptable` with `.defaultTabBarPlacement(.sidebar)` so the system shows the sidebar when there's room, and use geometry only for finer breakpoints."
 
 ---
 

@@ -33,7 +33,7 @@ description: Use this skill when writing code that calls the Gemini API for text
 
 ### Current Agents
 
-- `antigravity-preview-05-2026`: Antigravity Agent — general-purpose managed agent with code execution, file management, and web access in a sandboxed Linux environment
+- `antigravity-preview-09-2026`: Antigravity Agent — general-purpose managed agent with code execution, file management, and web access in a sandboxed Linux environment
 - `deep-research-preview-04-2026`: Deep Research — fast, interactive
 - `deep-research-max-preview-04-2026`: Deep Research Max — maximum exhaustiveness
 - **Custom agents**: Create your own via `client.agents.create()`
@@ -186,7 +186,7 @@ Managed agents run inside a sandboxed Linux environment hosted by Google. Fetch 
 
 ### Antigravity Agent
 
-The Antigravity agent (`antigravity-preview-05-2026`) is the general-purpose managed agent. It can execute code (Bash, Python, Node.js), manage files, browse the web, and use Google Search. See [Antigravity Agent docs](https://ai.google.dev/gemini-api/docs/antigravity-agent.md.txt) for capabilities, tools, multimodal input, and pricing.
+The Antigravity agent (`antigravity-preview-09-2026`) is the general-purpose managed agent. It can execute code (Bash, Python, Node.js), manage files, browse the web, and use Google Search. See [Antigravity Agent docs](https://ai.google.dev/gemini-api/docs/antigravity-agent.md.txt) for capabilities, tools, multimodal input, and pricing.
 
 #### Python
 ```python
@@ -195,7 +195,7 @@ from google import genai
 client = genai.Client()
 
 interaction = client.interactions.create(
-    agent="antigravity-preview-05-2026",
+    agent="antigravity-preview-09-2026",
     input="Write a Python script that generates the first 20 Fibonacci numbers and saves them to fibonacci.txt. Then read the file and print its contents.",
     environment="remote",
 )
@@ -211,7 +211,7 @@ import { GoogleGenAI } from "@google/genai";
 const client = new GoogleGenAI({});
 
 const interaction = await client.interactions.create({
-    agent: "antigravity-preview-05-2026",
+    agent: "antigravity-preview-09-2026",
     input: "Write a Python script that generates the first 20 Fibonacci numbers and saves them to fibonacci.txt. Then read the file and print its contents.",
     environment: "remote",
 });
@@ -228,7 +228,7 @@ See [Building Custom Agents docs](https://ai.google.dev/gemini-api/docs/custom-a
 ```python
 agent = client.agents.create(
     id="code-reviewer",
-    base_agent="antigravity-preview-05-2026",
+    base_agent="antigravity-preview-09-2026",
     system_instruction="You are a senior code reviewer. Check every file for bugs, style issues, and security vulnerabilities.",
     base_environment={
         "type": "remote",
@@ -255,7 +255,7 @@ print(result.output_text)
 ```typescript
 const agent = await client.agents.create({
     id: "code-reviewer",
-    base_agent: "antigravity-preview-05-2026",
+    base_agent: "antigravity-preview-09-2026",
     system_instruction: "You are a senior code reviewer. Check every file for bugs, style issues, and security vulnerabilities.",
     base_environment: {
         type: "remote",
@@ -370,6 +370,7 @@ For streaming with tools, thinking, agents, and image generation see the full [S
 - [Antigravity Agent](https://ai.google.dev/gemini-api/docs/antigravity-agent.md.txt)
 - [Agent Environments](https://ai.google.dev/gemini-api/docs/agent-environment.md.txt)
 - [Agent Hooks](https://ai.google.dev/gemini-api/docs/agent-hooks.md.txt)
+- [Agent Credentials](https://ai.google.dev/gemini-api/docs/agent-credentials.md.txt)
 - [Building Custom Agents](https://ai.google.dev/gemini-api/docs/custom-agents.md.txt)
 - [Deep Research](https://ai.google.dev/gemini-api/docs/deep-research.md.txt)
 
@@ -432,4 +433,4 @@ An `Interaction` response contains `steps`, an array of typed step objects repre
 
 ## Gemini Live API
 
-For real-time, bidirectional audio/video/text streaming with the Gemini Live API, install the **`google-gemini/gemini-live-api-dev`** skill. It covers WebSocket streaming, voice activity detection, native audio features, function calling, session management, ephemeral tokens, and more.
+For real-time, bidirectional audio/video/text streaming with the Gemini Live API (`gemini-3.8-live`, `gemini-3.8-live-extended-thinking`, and `gemini-3.5-transcribe-live`), install the **`google-gemini/gemini-live-api-dev`** skill. It covers WebSocket streaming, voice activity detection, background reasoning (extended thinking), asynchronous function calling, session management, ephemeral tokens, and more.

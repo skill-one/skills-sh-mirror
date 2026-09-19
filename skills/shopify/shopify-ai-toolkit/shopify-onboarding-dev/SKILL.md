@@ -1,10 +1,10 @@
 ---
 name: shopify-onboarding-dev
 description: "Get started building on Shopify. Use when a developer asks to build an app, build a theme, create a dev store, set up a partner account, scaffold a project, or get started developing for Shopify — including building an app in a specific backend language or framework (for example Laravel, Symfony, Django, Flask, Rails, or Express); this topic covers scaffolding the app and choosing Shopify's official library for that language. When the prompt also involves an extension surface (checkout, admin, POS, customer accounts), learn this topic **in addition to** the surface topic. NOT for merchants managing stores."
-compatibility: Claude Code, Claude Desktop, Cursor
+compatibility: Requires Node.js and Shopify CLI
 metadata:
   author: Shopify
-  version: "1.14.1"
+  version: "1.16.0"
 hooks:
   PostToolUse:
     - matcher: Skill

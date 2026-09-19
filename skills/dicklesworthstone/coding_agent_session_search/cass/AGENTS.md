@@ -169,6 +169,22 @@ The `.env` file exists and **MUST NEVER be overwritten**.
 
 **Dependency source contract:**
 
+Release-candidate transition (2026-09-17): Cargo.toml prepares the entire
+SQLite family, including `fsqlite-types`, at `=0.4.4`, with Asupersync `=0.5.0`.
+All 25 SQLite packages are published and non-yanked; the v0.4.4 tag points to
+`9d3d98778a372aba95d76d05c5c974ac0238c96a`. FAD `=0.3.0` is also published.
+Frankensearch `=0.6.1` is pending publication. Do not commit or publish
+the release candidate until it exists, Cargo.lock is regenerated, and runtime gates pass.
+SQLite `0.4.2` adds explicit derived WAL-index recovery for read-only opens
+(GH#477); upstream recovery, compiler, and package gates passed. CASS consumer
+runtime qualification remains pending.
+The table below is historical during this transition; its GH#411-open statement
+is superseded by upstream closure. The published SQLite 0.4.1 includes the
+GH#462 reserved-page WAL repair, but damaged-archive recovery remains unproven.
+SQLite 0.4.4 adds durable pending-freelist repairs. The strict family guard
+requires uniform 0.4.4 registry versions. Cargo.lock still describes the previous
+graph: resolution on 2026-09-17 failed because FrankenSearch 0.6.1 is unpublished.
+
 | Dependency | Pinned source |
 |------------|-----------------|
 | `frankensqlite` / `fsqlite-types` | crates.io `=0.3.18` (owner-requested update 2026-09-07; release commit `1600766ca698dae99b6018474bc8c150ece4a82d`, 42 commits since 0.3.17). Adds parameterized rowid IN-list seeks (GH#415/cass#382), read-only WAL byte/timestamp preservation, reader-registration error propagation, I/O buffer lifetime fixes, and WAL-mode transition and scalar-query corrections. The async facade and asupersync requirement remain unchanged. Retains 0.3.17's incremental WAL-tail folding, reserved lock-byte/freelist repair (GH#410), FTS metadata/visibility fixes (GH#408), prefix-BM25 ranking and prepared-read cleanup, plus 0.3.16's GH#405 FTS5 savepoint undo log and GH#406 incremental content-backed INSERT. 0.3.15 was evaluated and not adopted; historical evidence remains in bead gh382-fsqlite-pin. This update does not prove repair of the owner's existing archive corruption, and upstream GH#411 mixed-engine concurrent-WAL safety remains unresolved. `build.rs` enforces the exact version for the whole fsqlite family. |

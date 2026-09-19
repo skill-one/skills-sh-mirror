@@ -1276,10 +1276,13 @@ impl QuillCassIndex {
 
     /// Compact when the segment count and cooldown say it is worth doing.
     ///
-    /// Runs the bounded policy in [`plan_bounded_segment_merge`]: every run of
-    /// two or more adjacent *small* segments is folded into one, so an
-    /// append-only archive converges to a handful of large segments plus one
-    /// growing tail instead of accumulating a segment per session (#441).
+    /// Runs the bounded policy in [`plan_capped_balanced_merge_runs`]: a
+    /// balanced run of adjacent *small* segments is folded into one, so an
+    /// append-only archive keeps large segments plus geometric tail tiers
+    /// instead of accumulating a segment per session (#441) or rewriting the
+    /// same large tail after each tiny append (#479). Comparable adjacent
+    /// pairs may also fold; every nonempty output grows its largest input by
+    /// at least half its live-document count.
     /// Tombstone-density compaction runs afterwards so replaced/deleted rows
     /// are reclaimed on the same cadence.
     ///
@@ -1385,7 +1388,7 @@ impl QuillCassIndex {
             .collect())
     }
 
-    /// Apply [`plan_bounded_segment_merge`] until it has nothing left to fold.
+    /// Apply [`plan_capped_balanced_merge_runs`] until it has nothing left to fold.
     /// Returns whether at least one merge ran.
     ///
     /// GH #456: the document-tiered run is split under the merge-output byte
@@ -1402,16 +1405,9 @@ impl QuillCassIndex {
         // belt-and-braces guard.
         for _ in 0..MAX_BOUNDED_MERGE_PASSES {
             let profile = self.published_segment_profile()?;
-            let Some(run) = plan_bounded_segment_merge(&profile) else {
-                break;
-            };
             let fold_profile = self.published_segment_fold_profile()?;
-            let run_profile: Vec<SegmentFoldProfile> = fold_profile
-                .iter()
-                .filter(|segment| run.contains(&segment.segment_id))
-                .copied()
-                .collect();
-            let sub_runs = plan_capped_merge_runs(&run_profile, max_output_bytes);
+            let sub_runs =
+                plan_capped_balanced_merge_runs(&profile, &fold_profile, max_output_bytes);
             if sub_runs.is_empty() {
                 break;
             }
@@ -1489,16 +1485,14 @@ impl QuillCassIndex {
 /// maintenance window instead of holding the writer for the whole backlog.
 const MAX_BOUNDED_MERGE_PASSES: usize = 256;
 
-/// Indexes at or below this many live documents are simply merged into one
-/// segment: the rewrite is cheap and the tiering below would only add
-/// bookkeeping. One Q1 lease (65,536 docids) is the natural boundary.
+/// Indexes at or below this many live documents have no protected big segments,
+/// but still require balanced merge inputs. One Q1 lease is the boundary.
 const BOUNDED_MERGE_SMALL_INDEX_DOCS: u64 = 1 << 16;
 
 /// A segment holding at least `total / BOUNDED_MERGE_BIG_DIVISOR` live docs is
 /// "big" and never rewritten by the bounded policy; only runs of small
-/// segments are folded. Eight bounds the big-segment count at eight (each is
-/// at least an eighth of the corpus) plus at most one small run between any
-/// two, and keeps every incremental merge to at most an eighth of the index.
+/// segments are folded. There are at most eight protected big segments;
+/// smaller segments accumulate in geometric size tiers between them.
 const BOUNDED_MERGE_BIG_DIVISOR: u64 = 8;
 
 /// Pick the next run of adjacent segments to concat-merge, or `None` when the
@@ -1513,40 +1507,17 @@ const BOUNDED_MERGE_BIG_DIVISOR: u64 = 8;
 /// preserves ids and tolerates those gaps, so counting live rows is the
 /// measure that actually predicts merge cost and query cost here.
 ///
-/// Returns the longest run of two or more adjacent small segments. Ties go to
-/// the earliest run so the result is deterministic for a given manifest.
+/// Returns the longest balanced run of adjacent small segments. The largest
+/// input must not exceed the other inputs combined: an existing tail cannot
+/// be rewritten on every tiny append (GH #479). Ties go to the earliest run.
+#[cfg(test)]
 fn plan_bounded_segment_merge(profile: &[(u64, u64)]) -> Option<Vec<u64>> {
-    if profile.len() < 2 {
-        return None;
-    }
-    let total: u64 = profile
-        .iter()
-        .map(|(_, live)| *live)
-        .fold(0, u64::saturating_add);
-    if total <= BOUNDED_MERGE_SMALL_INDEX_DOCS {
-        return Some(profile.iter().map(|(id, _)| *id).collect());
-    }
-    let big_threshold = (total / BOUNDED_MERGE_BIG_DIVISOR).max(1);
     let mut best: Option<(usize, usize)> = None;
-    let mut run_start: Option<usize> = None;
-    for (index, (_, live)) in profile.iter().enumerate() {
-        let small = *live < big_threshold;
-        match (small, run_start) {
-            (true, None) => run_start = Some(index),
-            (false, Some(start)) => {
-                let len = index - start;
-                if len >= 2 && best.is_none_or(|(_, best_len)| len > best_len) {
-                    best = Some((start, len));
-                }
-                run_start = None;
-            }
-            _ => {}
-        }
-    }
-    if let Some(start) = run_start {
-        let len = profile.len() - start;
-        if len >= 2 && best.is_none_or(|(_, best_len)| len > best_len) {
-            best = Some((start, len));
+    for (start, end) in small_segment_ranges(profile) {
+        if let Some((offset, len)) = balanced_segment_subrun(&profile[start..end])
+            && best.is_none_or(|(_, best_len)| len > best_len)
+        {
+            best = Some((start + offset, len));
         }
     }
     best.map(|(start, len)| {
@@ -1555,6 +1526,133 @@ fn plan_bounded_segment_merge(profile: &[(u64, u64)]) -> Option<Vec<u64>> {
             .map(|(id, _)| *id)
             .collect()
     })
+}
+
+fn small_segment_ranges(profile: &[(u64, u64)]) -> Vec<(usize, usize)> {
+    let total: u64 = profile
+        .iter()
+        .map(|(_, live)| *live)
+        .fold(0, u64::saturating_add);
+    if total <= BOUNDED_MERGE_SMALL_INDEX_DOCS {
+        return vec![(0, profile.len())];
+    }
+    let big_threshold = (total / BOUNDED_MERGE_BIG_DIVISOR).max(1);
+    let mut runs = Vec::new();
+    let mut run_start: Option<usize> = None;
+    for (index, (_, live)) in profile.iter().enumerate() {
+        let small = *live < big_threshold;
+        match (small, run_start) {
+            (true, None) => run_start = Some(index),
+            (false, Some(start)) => {
+                runs.push((start, index));
+                run_start = None;
+            }
+            _ => {}
+        }
+    }
+    if let Some(start) = run_start {
+        runs.push((start, profile.len()));
+    }
+    runs
+}
+
+/// Find a contiguous run whose largest input is no larger than its peers
+/// combined. An unbalanced run has one dominant input; no subrun containing
+/// that input can qualify, so search independently on either side of it.
+/// Every split removes more than half the run's live-document mass, bounding
+/// depth by 128 for the u128 aggregate. Each level visits disjoint slices;
+/// zero-mass slices are skipped. The explicit stack avoids recursion.
+fn balanced_segment_subrun(profile: &[(u64, u64)]) -> Option<(usize, usize)> {
+    let mut pending = vec![(0, profile.len())];
+    let mut best: Option<(usize, usize)> = None;
+    while let Some((start, end)) = pending.pop() {
+        let len = end - start;
+        if len < 2 || best.is_some_and(|(_, best_len)| len < best_len) {
+            continue;
+        }
+        let mut total = 0_u128;
+        let mut largest = 0_u128;
+        let mut largest_index = start;
+        for (offset, (_, live)) in profile[start..end].iter().enumerate() {
+            let weight = u128::from(*live);
+            total += weight;
+            if weight > largest {
+                largest = weight;
+                largest_index = start + offset;
+            }
+        }
+        if largest == 0 {
+            continue;
+        }
+        if largest <= total - largest {
+            if best.is_none_or(|(best_start, best_len)| {
+                len > best_len || (len == best_len && start < best_start)
+            }) {
+                best = Some((start, len));
+            }
+        } else {
+            pending.push((largest_index + 1, end));
+            pending.push((start, largest_index));
+        }
+    }
+    best
+}
+
+/// A byte-cap split must retain geometric balance too: a balanced overall
+/// run can otherwise become an expensive large-plus-tiny prefix after capping.
+fn plan_capped_balanced_merge_runs(
+    profile: &[(u64, u64)],
+    fold_profile: &[SegmentFoldProfile],
+    max_output_bytes: u64,
+) -> Vec<Vec<u64>> {
+    let live_counts: std::collections::HashMap<_, _> = profile.iter().copied().collect();
+    let folds: std::collections::HashMap<_, _> = fold_profile
+        .iter()
+        .map(|segment| (segment.segment_id, *segment))
+        .collect();
+    let mut planned = Vec::new();
+    let mut used = std::collections::HashSet::new();
+    for (start, end) in small_segment_ranges(profile) {
+        let run = &profile[start..end];
+        let Some(run_folds) = run
+            .iter()
+            .map(|(id, _)| folds.get(id).copied())
+            .collect::<Option<Vec<_>>>()
+        else {
+            continue;
+        };
+        for capped in plan_capped_merge_runs(&run_folds, max_output_bytes) {
+            let sub_profile: Vec<_> = capped
+                .iter()
+                .filter_map(|id| live_counts.get(id).map(|live| (*id, *live)))
+                .collect();
+            if let Some((offset, len)) = balanced_segment_subrun(&sub_profile) {
+                let ids: Vec<_> = sub_profile[offset..offset + len]
+                    .iter()
+                    .map(|(id, _)| *id)
+                    .collect();
+                used.extend(ids.iter().copied());
+                planned.push(ids);
+            }
+        }
+        // Recover comparable siblings across artificial greedy-cap boundaries.
+        // Do not revisit any input already selected above or by an earlier pair.
+        for (pair, pair_folds) in run.windows(2).zip(run_folds.windows(2)) {
+            let (left_id, left) = pair[0];
+            let (right_id, right) = pair[1];
+            if left == 0 || right == 0 || used.contains(&left_id) || used.contains(&right_id) {
+                continue;
+            }
+            if u128::from(left.max(right)) <= 2 * u128::from(left.min(right))
+                && estimated_fold_output_bytes(pair_folds) <= max_output_bytes
+            {
+                used.insert(left_id);
+                used.insert(right_id);
+                planned.push(vec![left_id, right_id]);
+            }
+        }
+    }
+    planned
 }
 
 /// GH #456: default upper bound on the estimated output of one concat merge
@@ -1650,6 +1748,9 @@ pub(crate) fn plan_capped_merge_runs(
 ) -> Vec<Vec<u64>> {
     let mut runs: Vec<Vec<u64>> = Vec::new();
     let mut current: Vec<SegmentFoldProfile> = Vec::new();
+    let mut current_bytes = 0_u64;
+    let mut current_lo = 0_u64;
+    let mut current_hi = 0_u64;
     let close = |current: &mut Vec<SegmentFoldProfile>, runs: &mut Vec<Vec<u64>>| {
         if current.len() >= 2 {
             runs.push(current.iter().map(|segment| segment.segment_id).collect());
@@ -1658,11 +1759,21 @@ pub(crate) fn plan_capped_merge_runs(
     };
     for &segment in profile {
         if !current.is_empty() {
-            current.push(segment);
-            if estimated_fold_output_bytes(&current) > max_output_bytes {
-                current.pop();
+            let next_bytes = current_bytes.saturating_add(segment.file_len);
+            let next_lo = current_lo.min(segment.docid_lo);
+            let next_hi = current_hi.max(segment.docid_hi);
+            let next_estimate = next_bytes.saturating_add(
+                next_hi
+                    .saturating_sub(next_lo)
+                    .saturating_mul(FOLD_HULL_BYTES_PER_DOCID),
+            );
+            if next_estimate > max_output_bytes {
                 close(&mut current, &mut runs);
             } else {
+                current.push(segment);
+                current_bytes = next_bytes;
+                current_lo = next_lo;
+                current_hi = next_hi;
                 continue;
             }
         }
@@ -1671,6 +1782,9 @@ pub(crate) fn plan_capped_merge_runs(
             continue;
         }
         current.push(segment);
+        current_bytes = segment.file_len;
+        current_lo = segment.docid_lo;
+        current_hi = segment.docid_hi;
     }
     close(&mut current, &mut runs);
     runs
@@ -1776,6 +1890,151 @@ mod tests {
         assert_eq!(plan_bounded_segment_merge(&profile), None);
         let profile = [(1, 300_000), (2, 5), (3, 300_000), (4, 5)];
         assert_eq!(plan_bounded_segment_merge(&profile), None);
+    }
+
+    #[test]
+    fn bounded_merge_plan_defers_disproportionate_tail_rewrites() {
+        let profile = [
+            (1, 160_000),
+            (2, 160_000),
+            (3, 160_000),
+            (4, 63_385),
+            (5, 1_615),
+        ];
+        assert_eq!(plan_bounded_segment_merge(&profile), None);
+        let with_new_sibling = [
+            (1, 160_000),
+            (2, 160_000),
+            (3, 160_000),
+            (4, 63_385),
+            (5, 1_615),
+            (6, 1_615),
+        ];
+        assert_eq!(
+            plan_bounded_segment_merge(&with_new_sibling),
+            Some(vec![5, 6])
+        );
+        assert_eq!(plan_bounded_segment_merge(&[(1, 60_000), (2, 1)]), None);
+        assert_eq!(
+            plan_bounded_segment_merge(&[(1, 60_000), (2, 1), (3, 1)]),
+            Some(vec![2, 3])
+        );
+        assert_eq!(
+            balanced_segment_subrun(&[(1, 1), (2, 1), (3, 100), (4, 1), (5, 1)]),
+            Some((0, 2))
+        );
+        assert_eq!(balanced_segment_subrun(&[(1, 0), (2, 0)]), None);
+        assert_eq!(
+            balanced_segment_subrun(&[(1, u64::MAX), (2, u64::MAX)]),
+            Some((0, 2))
+        );
+    }
+
+    #[test]
+    fn bounded_merge_plan_repeated_appends_have_logarithmic_rewrite_work() {
+        let mut profile = Vec::new();
+        let mut rewritten_docs = 0_u64;
+        let mut next_id = 1_u64;
+        for _ in 0..256 {
+            profile.push((next_id, 1));
+            next_id += 1;
+            loop {
+                let folds: Vec<_> = profile
+                    .iter()
+                    .enumerate()
+                    .map(|(position, (id, docs))| SegmentFoldProfile {
+                        segment_id: *id,
+                        file_len: *docs,
+                        docid_lo: position as u64,
+                        docid_hi: position as u64 + 1,
+                    })
+                    .collect();
+                let runs = plan_capped_balanced_merge_runs(&profile, &folds, u64::MAX);
+                if runs.is_empty() {
+                    break;
+                }
+                for run in runs {
+                    let start = profile.iter().position(|(id, _)| *id == run[0]).unwrap();
+                    let end = start + run.len();
+                    let docs: u64 = profile[start..end].iter().map(|(_, docs)| docs).sum();
+                    rewritten_docs += docs;
+                    profile.splice(start..end, [(next_id, docs)]);
+                    next_id += 1;
+                }
+            }
+            assert!(profile.len() <= 16, "geometric tail stays bounded");
+        }
+        assert_eq!(profile.iter().map(|(_, docs)| docs).sum::<u64>(), 256);
+        assert!(
+            rewritten_docs <= 256 * 16,
+            "geometric growth bounds rewritten documents, got {rewritten_docs}"
+        );
+    }
+
+    #[test]
+    fn bounded_merge_plan_byte_cap_preserves_balance() {
+        let profile = [(1, 100), (2, 1), (3, 1), (4, 100)];
+        let fold_profile: Vec<_> = profile
+            .iter()
+            .map(|(id, _)| SegmentFoldProfile {
+                segment_id: *id,
+                file_len: 100,
+                docid_lo: *id - 1,
+                docid_hi: *id,
+            })
+            .collect();
+        let cap = 3 * (100 + FOLD_HULL_BYTES_PER_DOCID);
+        assert_eq!(
+            plan_capped_merge_runs(&fold_profile, cap),
+            vec![vec![1, 2, 3]]
+        );
+        assert_eq!(
+            plan_capped_balanced_merge_runs(&profile, &fold_profile, cap),
+            vec![vec![2, 3]],
+            "cap must not force the large first segment to absorb two tiny inputs"
+        );
+        assert!(estimated_fold_output_bytes(&fold_profile[1..3]) <= cap);
+    }
+
+    #[test]
+    fn bounded_merge_plan_recovers_siblings_across_cap_boundaries() {
+        let profile = [
+            (1, 1_000_000),
+            (2, 100),
+            (3, 1),
+            (4, 1),
+            (5, 100),
+            (6, 1_000_000),
+            (7, 1),
+            (8, 1),
+        ];
+        let folds: Vec<_> = profile
+            .iter()
+            .map(|(id, _)| SegmentFoldProfile {
+                segment_id: *id,
+                file_len: 100,
+                docid_lo: *id - 1,
+                docid_hi: *id,
+            })
+            .collect();
+        let cap = 2 * (100 + FOLD_HULL_BYTES_PER_DOCID);
+        assert_eq!(
+            plan_capped_balanced_merge_runs(&profile, &folds, cap),
+            vec![vec![3, 4], vec![7, 8]],
+            "recover middle siblings and do not starve a later protected-small run"
+        );
+        assert_eq!(
+            plan_capped_balanced_merge_runs(&[(1, 100), (2, 60)], &folds[..2], cap),
+            vec![vec![1, 2]],
+            "comparable unequal inputs still make geometric progress"
+        );
+        assert!(
+            plan_capped_balanced_merge_runs(&[(1, 0), (2, 0)], &folds[..2], u64::MAX).is_empty(),
+            "empty inputs must not repeatedly rewrite a large empty segment"
+        );
+        assert!(
+            plan_capped_balanced_merge_runs(&[(1, 0), (2, 1)], &folds[..2], u64::MAX).is_empty()
+        );
     }
 
     #[test]
@@ -2042,14 +2301,16 @@ mod tests {
                     .expect("query published document");
                 assert_eq!(page.hits.len(), 1);
                 assert_eq!(page.total_count, Some(1));
+                // Content is searchable but not stored in CASS_SEMANTIC_SCHEMA.
+                // Exercise stored-field hydration with the fixture's title.
                 assert_eq!(
                     stored_text(
                         &reader,
-                        QuillCassFields::compiled().content,
+                        QuillCassFields::compiled().title,
                         page.hits[0].global_docid
                     )
-                    .expect("hydrate content"),
-                    Some(content.to_owned())
+                    .expect("hydrate title"),
+                    Some("bridge session".to_owned())
                 );
                 assert_caller();
                 drop(reader);

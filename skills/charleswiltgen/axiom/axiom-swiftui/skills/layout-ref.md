@@ -13,8 +13,8 @@ This reference covers all SwiftUI layout APIs for building adaptive interfaces:
 - **onGeometryChange** — Efficient geometry reading
 - **GeometryReader** — Layout-phase geometry access
 - **Safe Area Padding** — .safeAreaPadding() vs .padding()
-- **Size Classes** — Coarse trait-context semantics (NOT a width sensor — see below)
-- **Window APIs** — Resizable windows everywhere, menu bar, resize anchors, live-resize signal
+- **Size Classes** — Coarse roomy-vs-constrained signal that follows the window, even for a `.phone` idiom (see below)
+- **Window APIs** — Resizable windows everywhere, menu bar, size preferences, live-resize signal
 
 ---
 
@@ -67,7 +67,7 @@ ViewThatFits(in: .vertical) {
 
 ### How It Works
 
-1. Applies `fixedSize()` to each child
+1. Applies `fixedSize()` along the axes being fit, and proposes the container's own size on the others
 2. Measures ideal size against available space
 3. Returns first child that fits
 4. Falls back to last child if none fit
@@ -368,8 +368,10 @@ GeometryReader { geo in
 ```swift
 // ❌ Unconstrained in VStack
 VStack {
-    GeometryReader { ... }  // Takes ALL space
-    Button("Next") { }       // Invisible
+    // No intrinsic size: the reader takes the space fixed-size siblings leave,
+    // and splits it evenly with any sibling that is also flexible
+    GeometryReader { ... }
+    Button("Next") { }
 }
 
 // ✅ Constrained
@@ -378,39 +380,35 @@ VStack {
         .frame(height: 200)
     Button("Next") { }
 }
-
-// ❌ Causing layout loops
-GeometryReader { geo in
-    content
-        .frame(width: geo.size.width)  // Can cause infinite loop
-}
 ```
 
 ---
 
 ## Safe Area Padding
 
-SwiftUI provides two primary approaches for handling spacing around content: `.padding()` and `.safeAreaPadding()`. Understanding when to use each is critical for proper layout on devices with safe areas (notch, Dynamic Island, home indicator).
+SwiftUI offers two ways to add spacing around content — `.padding()` and `.safeAreaPadding()` — and one way to take the safe area away: `.ignoresSafeArea()`. Which does what is the part that matters on devices with safe areas (notch, Dynamic Island, home indicator).
 
 **Which edge to pad is a layout question (this file). How much to pad is a design question — see axiom-design (skills/hig.md), "What spacing, padding, or margin value should I use?". Short version: omit the length. Both modifiers take `CGFloat?` and `nil` means system-determined; the literals below would be inventing values Apple never published.**
 
 ### The Critical Difference
 
 ```swift
-// ❌ WRONG - Ignores safe areas, content hits notch/home indicator
+// ❌ WRONG - opts the container out of the safe area
 ScrollView {
     content
 }
-.padding(.horizontal)
+.ignoresSafeArea()          // content now runs under the Dynamic Island
 
-// ✅ CORRECT - Respects safe areas, adds padding beyond them
+// ✅ CORRECT - lays out inside the safe area, inset from the edges
 ScrollView {
     content
 }
 .safeAreaPadding(.horizontal)
 ```
 
-**Key insight**: `.padding()` adds fixed spacing from the view's edges. `.safeAreaPadding()` adds spacing beyond the safe area insets.
+**Key insight**: a container already lays out inside the safe area — a `ScrollView` puts its content at the same place under either modifier. Measured on iPhone 17 (iOS 27.2, 402×874 screen, safe area 62 top / 34 bottom): the content's top edge sits at y=62 with `.padding(.horizontal)`, at y=62 with `.safeAreaPadding(.horizontal)`, and at y=0 with `.ignoresSafeArea()`. Only the last one carries content under the island.
+
+The two padding forms differ, just not in where the content lands — the frames come out identical. `.padding` is a plain layout inset; `.safeAreaPadding` adds its length to the *safe area* the modified view reports to its descendants. Measured, in identical 370-point-wide frames, a descendant reports 16 points of leading and trailing safe area under `.safeAreaPadding(.horizontal)` and none under `.padding(.horizontal)`. Reach for `.safeAreaPadding` when the inset should read as safe area to what is inside, and `.padding` for spacing between your own views.
 
 ### When to Use Each
 
@@ -593,10 +591,7 @@ Color.blue
 
 Hand-rolling safe area math with a `GeometryReader` is verbose, forces an extra layout pass, and is easy to get wrong (one forgotten edge). `.safeAreaPadding()` is declarative, safe-area-aware by construction, type-safe per edge, and adds no layout pass.
 
-**Real-world impact**: Using `.padding()` instead of `.safeAreaPadding()` causes content to:
-- Hit the Dynamic Island (top)
-- Overlap the home indicator (bottom)
-- Get cut off by screen corners (rounded edges)
+**Real-world impact**: it is `.ignoresSafeArea()` — on a scrolling container, or on a view holding controls, rather than on a background — that puts content under the Dynamic Island (top), over the home indicator (bottom), and into the rounded corners.
 
 ---
 
@@ -604,19 +599,28 @@ Hand-rolling safe area math with a `GeometryReader` is verbose, forces an extra 
 
 Environment values indicating horizontal and vertical size characteristics.
 
-### Size Class Is Not a Width Sensor
+### Size Class Follows the Window; Idiom Doesn't
 
-This is the single most misread layout fact of the 27 cycle. `horizontalSizeClass` expresses the **coarse semantics of the current trait environment**, not the window's width. It answers "does the system consider this a roomy or constrained context?" — not "how many points wide am I?"
+At iOS 27 an iPhone app runs in resizable windows: iPhone Mirroring on a Mac, and iPhone-only apps on iPad. The **idiom stays `.phone`** (and Mirroring always reports portrait orientation), but **size classes track the window**. Apple's guidance (WWDC 2026-278): stop checking the idiom and "use size classes instead to handle sizing constraints … If you need finer control, use the surrounding view's size".
 
-At iOS 27 Apple deliberately separated **host semantics** (idiom + size class) from **available geometry**. An iPhone app now runs in resizable windows — iPhone Mirroring on a Mac, and iPhone-only apps on iPad. In those windows the **idiom stays `.phone`** and `horizontalSizeClass` stays **`.compact` no matter how wide you drag the window**. A `.phone`-idiom app is no longer equivalent to a narrow-screen layout.
+Measured on the iOS 27.0 simulator's resizable session (`devicectl device appResize`), iPhone-only app:
+
+| Scene | Horizontal | Vertical |
+|---|---|---|
+| 402×874, 640×1000 | `.compact` | `.regular` |
+| 700×1000, 900×675 | `.regular` | `.regular` |
+| 874×402 | `.regular` | `.compact` |
+
+Horizontal flipped between 655 and 700 points wide (undocumented; don't hardcode it). In the same session a `.sidebarAdaptable` `TabView` with `.defaultTabBarPlacement(.sidebar)` showed a tab bar at 402 points and a sidebar at 1000, and a `.popover` presented as a sheet at 402×874 and as a popover at 1000×800. Physical iPhone Mirroring agrees (iPhone 16 Pro Max on iOS 27.0, macOS 27.0): the app went from 440×956 `.compact`/`.regular` to 1144×845 `.regular`/`.regular` when the Mirroring window was dragged wider, still `.phone` idiom and portrait. So does a physical iPad (iPad Pro 12.9-inch, iPadOS 27.0) with Windowed Apps selected: an iPhone-only app's window reported `.regular`/`.regular` at 683×1024 and `.compact`/`.regular` at 477×1024 and 375×1024, and stopped at 683 wide. With Full Screen Apps selected, the same app ran in the fixed iPhone compatibility box instead of a resizable window.
 
 | Decision | Driver | Why |
 |----------|--------|-----|
-| Should menus collapse, are system Tabs/Sidebars offered | `horizontalSizeClass` | This is what the trait reliably expresses |
-| "Switch to two columns past 700pt", "show side nav" | Geometry of the root/container view | Size class won't change with width on a `.phone` host |
-| Branch on device type | Neither — never `userInterfaceIdiom` | Idiom is host semantics, decoupled from layout space |
+| Your own layout: split columns, menu collapse | `horizontalSizeClass` | Follows the window |
+| System containers: sidebar-adaptable `TabView`, `NavigationSplitView`, popovers | Don't branch — they adapt on their own (popovers use both axes; see `skills/presentations.md`) | Branching duplicates, and can contradict, the system's adaptation |
+| Exact breakpoints ("three columns past 900pt") | Geometry of the container view — `onGeometryChange` (above) or `containerRelativeFrame` (see `containers-ref.md`) | Size class is coarse; each axis has one threshold and says nothing about width beyond it |
+| Branch on device type | Neither — never `userInterfaceIdiom` | A `.phone`-idiom window can be over 1,000 points wide |
 
-Read your own breakpoints from geometry — `onGeometryChange` (above) or `containerRelativeFrame` (see `containers-ref.md`) — and reserve size class for system-container semantics. `UIScreen.main` / screen bounds are also unreliable here (your window is a fraction of the screen); see `axiom-uikit (skills/uikit-modernization.md)` for the UIKit side (`effectiveGeometry`, `isInteractivelyResizing`).
+`UIScreen.main` / screen bounds are also unreliable here (your window is a fraction of the screen); see `axiom-uikit (skills/uikit-modernization.md)` for the UIKit side (`effectiveGeometry`, `isInteractivelyResizing`).
 
 ### Reading Size Classes
 
@@ -662,7 +666,7 @@ enum UserInterfaceSizeClass {
 | 33% Split View | `.compact` | `.regular` |
 | Slide Over | `.compact` | `.regular` |
 
-These tables describe an app running under its **native** idiom. They do **not** describe an iPhone app in a resizable window on a Mac (mirroring) or iPad: there the idiom stays `.phone` and `horizontalSizeClass` stays `.compact` at every width. Don't read the iPad table as "wide ⇒ `.regular`" for a `.phone`-idiom app.
+These tables describe apps under their **native** idiom. An iPhone app in a resizable window (iPhone Mirroring, iPhone-only on iPad) keeps the `.phone` idiom, but its size classes follow the window at their own threshold — don't map the iPad rows onto it. See Size Class Follows the Window above.
 
 ### Overriding Size Classes
 
@@ -671,7 +675,7 @@ content
     .environment(\.horizontalSizeClass, .compact)
 ```
 
-**This is not a strategy for making a wide iPhone window look like iPad.** Injecting `.regular` into a `.phone`-idiom subtree based on scene geometry flips every environment reader below it, and components do not respond consistently: `NavigationSplitView` may expand its sidebar, but `TabView(.sidebarAdaptable)` will **not** become an iPad-style sidebar from injected `.regular` alone. A wide iPhone window is still an adaptive iPhone presentation, not an iPad product interface. If you want a sidebar on a wide iPhone, drive your **own** layout from geometry (show a custom sidebar, hide the tab bar, keep tab switching in state) — see the anti-pattern in `layout.md`. Valid uses of the override are narrow and local (forcing a specific child into compact chrome, previews), not a global "fake iPad" switch.
+**Don't inject `.regular` to make an iPhone window look like iPad.** A wide resizable iPhone window already reports `.regular`, and system containers adapt to it. At best an injected value matches the real trait; wherever it doesn't, the subtree and the scene disagree. On the iOS 27.0 simulator, a `.sidebarAdaptable` `TabView` with `.defaultTabBarPlacement(.sidebar)` under injected `.regular` in a 402-point window dropped its tab bar and hid the tabs behind a collapsed sidebar. For a sidebar when there's room on an iPhone window, use those two modifiers on the real size class — see the anti-pattern in `layout.md`. `defaultTabBarPlacement` has no effect for iPad apps (use `defaultAdaptableTabBarPlacement(_:)`; skills/iphone-duo.md), but it does apply to an iPhone-only app on iPad: on iPadOS 27.0 its window showed a tab bar at 375 points and, at 683 points and `.regular`, started with the sidebar collapsed behind a toggle. Valid uses of the override are narrow and local (forcing a specific child into compact chrome, previews).
 
 ---
 
@@ -746,15 +750,19 @@ content
 
 The UIKit equivalent is `UIWindowSceneGeometry.isInteractivelyResizing`. To read the final geometry itself, use `onGeometryChange` (above) — `onInteractiveResizeChange` reports only the in-progress/settled *state*, not the size.
 
-### Window Resize Anchor
+### Window Size Levers
+
+There is no resize-*anchor* on a scene. `windowResizeAnchor(_:)` is a **View** modifier, `@available(macOS 26.0, *)` and unavailable on iOS, tvOS, watchOS, and visionOS — it cannot be applied to a `WindowGroup` on any platform, and not at all on iOS. A scene expresses a size *preference*, not an origin to resize from:
 
 ```swift
 WindowGroup {
     ContentView()
 }
-.windowResizeAnchor(.topLeading)  // Resize originates from top-left
-.windowResizeAnchor(.center)      // Resize from center
+.windowResizability(.contentSize)   // .automatic / .contentSize / .contentMinSize (iOS 17+)
+.defaultSize(width: 900, height: 600)
 ```
+
+Per-scene `UIWindowScene.sizeRestrictions?.minimumSize` is the UIKit-side floor (TN3192). Everything else about the window's size is the user's to choose.
 
 ### Menu Bar Commands (iPad)
 
@@ -787,7 +795,7 @@ struct MyApp: App {
 ### NavigationSplitView Column Control
 
 ```swift
-// iOS 26: Automatic column visibility
+// Automatic column visibility — the split view has adapted since iOS 16
 NavigationSplitView {
     Sidebar()
 } content: {
@@ -869,13 +877,15 @@ extension CoordinateSpaceProtocol where Self == NamedCoordinateSpace {
 
 ### onScrollGeometryChange
 
+iOS 18+. The action receives two values — the old geometry and the new one:
+
 ```swift
 ScrollView {
     content
 }
 .onScrollGeometryChange(for: CGFloat.self) { geometry in
     geometry.contentOffset.y
-} action: { offset in
+} action: { _, offset in
     scrollOffset = offset
 }
 ```
@@ -883,7 +893,7 @@ ScrollView {
 ### ScrollGeometry Properties
 
 ```swift
-.onScrollGeometryChange(for: ScrollGeometry.self) { $0 } action: { geo in
+.onScrollGeometryChange(for: ScrollGeometry.self) { $0 } action: { _, geo in
     let offset = geo.contentOffset      // Current scroll position
     let size = geo.contentSize          // Total content size
     let visible = geo.visibleRect       // Currently visible rect
@@ -960,7 +970,7 @@ HStack {
 }
 ```
 
-- Without `layoutPriority`, an HStack squeezes children roughly equally — the label you care about truncates while a timestamp keeps its full width. Priority is relative among siblings; `1` vs the default `0` is all it takes.
+- Without `layoutPriority`, an HStack gives each same-priority child an equal share of the space *remaining*, and hands back what a child doesn't need — so the last child keeps its ideal size while the first absorbs the shortfall. With the label first, that is the label you care about truncating while a timestamp keeps its full width (measured in a 120-point row: the timestamp kept all 43 of its points, the title truncated to 69). Priority is relative among siblings; `1` vs the default `0` is all it takes.
 - `.middle` truncation is for identifiers whose ends both matter (paths, URLs, account numbers). `.head` is for values where the tail matters ("…/Invoices/March").
 - `minimumScaleFactor` trades legibility for fit — use small reductions and never as a substitute for supporting Dynamic Type: if accessibility text sizes routinely trigger scaling, the layout needs a different arrangement (see skills/layout.md Pattern 2), not smaller text.
 

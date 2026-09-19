@@ -58,7 +58,7 @@ The `getstream` CLI owns onboarding, auth, and credentials. Drive it from the **
 
 ## Onboarding & phase order
 
-Onboarding is owned by the CLI: `getstream init` authenticates, selects or creates the org + app, and writes project credentials; `getstream env` provisions the app's server-side secret without exposing it. If `getstream` isn't installed, ask the user to install it from https://getstream.io and wait - never fetch or run an install script. **The `stream-docs` skill skips onboarding entirely** and never runs the CLI except an on-demand read-only probe when the SDK can't be resolved from user input.
+Onboarding is owned by the CLI: `getstream init` authenticates, selects or creates the org + app, and writes project credentials; `getstream env` provisions the app's server-side secret without exposing it. If `getstream` isn't installed, ask the user to install it from https://getstream.io and wait - never fetch or run an install script. **The `stream-docs` skill skips onboarding entirely** - it only runs `getstream docs`, which needs the binary but no `getstream init`.
 
 - Do not load `references/*.md` (in the `stream-builder` skill) until the user names the product(s).
 - Do not load `builder-ui.md` (in the `stream-builder` skill) before Step 4.
@@ -95,7 +95,7 @@ Always use **`npm`**. Never use bun. Always **`--legacy-peer-deps`** for Stream 
 
 ## Moderation is Dashboard-only
 
-**Never build a moderation review queue, review panel, or flagged-item UI in the app.** Moderation review always happens in the [Stream Dashboard](https://beta.dashboard.getstream.io). The app's role is limited to:
+**Never build a moderation review queue, review panel, or flagged-item UI in the app.** Moderation review always happens in the [Stream Dashboard](https://dashboard.getstream.io). The app's role is limited to:
 - **CLI setup** during scaffold (blocklists, automod config via `references/MODERATION.md` Setup)
 - **End-user actions** (report, block, mute) if the product needs them
 - Do **not** load Review Queue, Flagged Item, or Auto-Mod Status blueprints from `MODERATION-blueprints.md`

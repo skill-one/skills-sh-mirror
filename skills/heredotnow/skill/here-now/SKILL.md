@@ -18,13 +18,15 @@ description: >
 
 # here.now
 
-**Skill version: 1.30.0**
+**Skill version: 1.31.0**
 
 here.now lets agents publish websites and files to live URLs in seconds.
 
 The core primitive is a **Site**: publish a file or folder and get a live URL at `{slug}.here.now` or a custom domain. Every Site has access control: public link (default), password, or restricted invite-only access.
 
 here.now also includes **workspaces** — shared team accounts where Sites belong to the team and serve at `{label}.{workspace}.here.now` (see "Publish to a workspace" below).
+
+A personal account on a paid plan can turn on a **vanity URL**: the user's name at `{name}.here.now`, and from then on every Site they publish (including through you) also serves at a readable `{site-name}.{name}.here.now` address, named from its title. When a user wants every Site under their own name, `PUT /api/v1/vanity-urls/subdomain` with `{"subdomain": "name"}` turns it on; for one Site at one hostname they choose, use a custom domain; for Sites owned by a team, use a workspace. Finalize responses carry `primaryUrl` and `urls[]` (best first); mention `primaryUrl` when it differs from `siteUrl`. See https://here.now/docs#vanity-urls.
 
 To install or update (recommended): `npx skills add heredotnow/skill --skill here-now -g`
 
@@ -49,6 +51,7 @@ Topics that require current docs (do not rely on local skill text alone):
 - workspaces (team accounts, membership, label URLs)
 - Drives and Drive sharing
 - custom domains
+- vanity URLs (`{site-name}.{name}.here.now`; see https://here.now/docs#vanity-urls)
 - buying a domain (search and quote first; state the price and the renewal price and get the user's explicit yes before calling purchase — purchases are final; see https://here.now/docs#buy-domain)
 - Site Data
 - public profiles
@@ -117,7 +120,7 @@ Authenticated updates require a saved API key.
 
 **Stale-base protection.** The live Site may have changed since your local files were published — the owner can edit it from other tools (another agent, the here.now Editor, a teammate). The script records the live `versionId` in `.herenow/state.json` after each publish and sends it as `baseVersionId` on the next update of the same slug from the same directory; if the live Site moved past it, the update is rejected with `code: "version_conflict"` naming the live version and what created it. When that happens, relay the message to the user and offer to (a) read the live files with `GET /api/v1/publish/{slug}/files` (lists them with a `url` each) and `GET /api/v1/publish/{slug}/files/{path}` (the bytes; owner API key, works for password-protected and restricted Sites without the visitor password), reconcile them into the local files, and republish, or (b) re-run with `--overwrite` to replace the live version anyway. Before editing local files for an authenticated Site you haven't touched recently, check for drift first: `GET /api/v1/publish/{slug}` returns `currentVersionId` plus `currentVersionSource` and `currentVersionCreatedAt` (what changed it and when, e.g. `editor`) — if the id differs from your state file's `versionId`, read the live files before editing. The published version is the shared truth; never fetch the public URL to read an owned Site (it is gated for protected Sites) and never ask the user for a visitor password to read their own Site. Anonymous Sites can't call these endpoints; they rely on the saved state and server enforcement. Omitting `baseVersionId` (or using `--overwrite`) is an unchecked full replacement — today's default for raw API callers.
 
-Every publish records an immutable version. If the user asks to see earlier versions of a Site, undo a publish, or roll back: list history with `GET /api/v1/publish/{slug}/versions` and restore instantly with `POST /api/v1/publish/{slug}/versions/{versionId}/restore` (restoring keeps the current access mode, password, and domains). Version access requires a paid plan and is included for workspace Sites; free accounts' history is recorded and unlocks on upgrade. A byte-identical republish returns `unchanged: true` from finalize instead of creating a new version. See https://here.now/docs#versions.
+Every publish records an immutable version. If the user asks to see earlier versions of a Site, undo a publish, or roll back: list history with `GET /api/v1/publish/{slug}/versions` and restore instantly with `POST /api/v1/publish/{slug}/versions/{versionId}/restore` (restoring keeps the current access mode, password, and domains). Version access is included on every plan, personal and workspace alike. A byte-identical republish returns `unchanged: true` from finalize instead of creating a new version. See https://here.now/docs#versions.
 
 Signed-in users also have public profiles. Agents can help users show or hide Sites on their profile and manage profile settings through the API documented at https://here.now/docs#profile.
 

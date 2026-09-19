@@ -34,11 +34,12 @@ The test for a sequential ramp is **flat perceptual derivative** — plot the pe
 - **Hue / lightness / chroma trajectories with easing** (RampenSau) — walk each axis along an easing function, color-space-agnostic; great when you want a deterministic ramp shape rather than random anchors.
 - **Harmony-aware generation with muddy-zone avoidance** (pro-color-harmonies) — adaptive OKLCH harmony with 4 styles × 4 modifiers; skips perceptually muddy regions automatically.
 - **Generation in historical / non-digital color spaces** (RYBitten) — work in RYB or one of 26 historical color cubes when you want a painterly feel that strict sRGB/OKLCH can't reach.
+- **Palette cycling / indexed color** — store an index buffer and a small palette, then animate the palette (rotate, ease, or drive from an OKLCH trajectory) instead of the pixels; motion for one lookup per pixel. Works only if each cycle range is a perceptually even closed ramp. See `references/techniques/color-cycling-indexed-palette-animation.md`.
 - **Scene-light sampling** (ray-color) — raytrace a sphere in a room with up to 3 colored lights and sample colors off its surface; coherence comes from shared illumination physics (like an object photographed under one light) rather than color-space geometry.
 
 See `references/techniques/` for tyler-hobbs, fontana, mattdesl, iq-cosine, spectraljs, poline, rampensau, pro-color-harmonies, rybitten, ray-color (these document the techniques, not styles to imitate).
 
-**General color question** — "what is OKLCH?", "why does my gradient go gray in the middle?", "is APCA better than WCAG?" Answer directly from this skill file or `references/INDEX.md`, and cite the relevant reference. Skip tooling unless they're asking how to do something.
+**General color question** — "what is OKLCH?", "why does my gradient go gray in the middle?", "is APCA better than WCAG?" Answer directly from this skill file or `references/INDEX.md`, and cite the relevant reference. Skip tooling unless they're asking how to do something. **Approachable and accurate usually conflict** — the tidy model (RYB primaries, 12-hue wheel, "red is opposite green") is easy precisely because it summarizes beliefs rather than measurements. Give the tidy version *and* say where it breaks; don't let "easy" quietly become "wrong." (Color Nerd, `references/contemporary/color-theory-dogma-problem.md`)
 
 **Building a generator, tool, or palette algorithm** — "I want to make a palette generator", "how do I generate accessible color scales?", "give me an OKLCH ramp function." Default to recommending an existing library before hand-rolling (Culori, Poline, RampenSau, Spectral.js — see Recommended Tools). Show working code in the user's stack, picking the color space per the table above.
 
@@ -184,7 +185,7 @@ APCA is far more restrictive than WCAG at comparable readability. At APCA 90, on
 
 ### Hue-first harmony is a weak standalone heuristic
 
-Complementary, triadic, tetradic intervals are weak predictors of mood, legibility, or accessibility on their own. Every hue plane has a different shape in perceptual space, so geometric hue intervals do not guarantee perceptual balance.
+Complementary, triadic, tetradic intervals are weak predictors of mood, legibility, or accessibility on their own. Every hue plane has a different shape in perceptual space, so geometric hue intervals do not guarantee perceptual balance. Complements are also **pigment-specific**, not name-specific: measured in OKLAB, cadmium red, quinacridone red and alizarin crimson all sit opposite cobalt teal, and chrome oxide green sits opposite a purple, not red. Compute the opposite from the actual color (OKLCH hue + 180°), never from its category name.
 
 ### Character-first harmony works (Ellen Divers' research)
 
@@ -230,8 +231,11 @@ Grayscale is a quick sanity check for lightness separation, not an accessibility
 | CSS Named Colors      | Web standard               | 147 named colors                   |
 | color-description lib | Emotional adjectives       | "pale, delicate, glistening"       |
 | colornames-oklab      | Perceptually even coverage | "Smaragdine" (rec2020 tier)        |
+| COLIBRI (fuzzy)       | Graded / "between" naming  | 0.6 cyan · 0.4 light blue, medium sat |
 
 Use `color-name-lists` npm package for 18 naming systems in one import. For *naming arbitrary or generated colors* — especially wide-gamut — use `colornames-oklab`: 4444 names blue-noise sampled over the Rec2020 gamut in OKLab, so no query lands far from a name (crowd-sourced lists cluster in reds/skin tones/pastels and leave gamut regions empty). Tiered srgb/p3/rec2020, zero-dep `closest()` with a unique-assignment mode for palettes.
+
+**Naming colours *from an image* — don't eyeball, sample.** Vision-language models (this agent included) name prototypical high-chroma hues reliably and degrade on non-prototypical shades, near-neutrals and fine lightness steps; CLIP-style encoders read the *word* "red" over blue ink and rarely label white/grey/black; no vision encoder yet matches human discrimination thresholds. Extract pixel values with code (sample regions → OKLCH → `colornames-oklab` / ISCC-NBS) and treat a visual impression as a hypothesis. Measured: six VLMs score 83–100% on focal Munsell chips but 64–83% on the full 330, and all converge on the same 21 names (Gomez-Villa 2025). For genuine boundary colours, humans themselves split their votes (COLIBRI, n = 2,496) — report proportions, not a winner. See `references/contemporary/colour-in-computer-vision-vlm.md` and `color-names-in-vlms-gomez-villa.md`.
 
 ## Historical Corrections
 
@@ -300,5 +304,5 @@ Sorting an arbitrary set of colors into a perceptually smooth sequence has **no 
 See `references/INDEX.md` for the detailed files organized as:
 
 - **`historical/`** — Ostwald, Helmholtz, Bezold, Ridgway 1912, ISCC-NBS, Munsell, Albers, Caravaggio's pigments, Moses Harris, Lewis/Ladd-Franklin
-- **`contemporary/`** — Ottosson's OKLAB articles, Briggs lectures, Fairchild, Hunt, CIECAM02, MacAdam ellipses, Koenderink 2026 empirical 3D metric field (RGB supports ~1,000 qualitative regions; cool side coarser than warm; chromatic circle is not well-tempered), Pointer's gamut, CIE 1931/standard observer, Pixar Color Science, Acerola, Juxtopposed, Computerphile, bird tetrachromacy, OLO, GenColor paper. Full scrapes: huevaluechroma.com and colorandcontrast.com
+- **`contemporary/`** — Ottosson's OKLAB articles, Briggs lectures, Fairchild, Hunt, CIECAM02, MacAdam ellipses, Koenderink 2026 empirical 3D metric field (RGB supports ~1,000 qualitative regions; cool side coarser than warm; chromatic circle is not well-tempered), Pointer's gamut, CIE 1931/standard observer, Pixar Color Science, Acerola, Juxtopposed, Computerphile, bird tetrachromacy, OLO, GenCol, colour in computer vision / VLM colour deficiencies (ColorBench, CLIP Stroop test, encoder thresholds)or paper. Full scrapes: huevaluechroma.com and colorandcontrast.com
 - **`techniques/`** — All tools above documented in detail, plus: CSS Color 4/5, ICC workflows, Tyler Hobbs generative color, Harvey Rayner Fontana approach, Goethe edge colors as design hack, mattdesl workshop + K-M simplex, CSS-native generation, IQ cosine presets, Erika Mulvenna interview, Bruce Lindbloom math reference, image extraction tools, Aladdin color analysis
