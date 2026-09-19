@@ -27,7 +27,6 @@ English: [README.md](README.md) · 开发指南(运行 / 校验 / 扩展):[DEVEL
   "id": "vercel-labs/skills/find-skills",
   "installs": 3263512,
   "url": "https://www.skills.sh/vercel-labs/skills/find-skills",
-  "description": "Find and install skills for your agent from skills.sh",
   "hash": "b146008599c31057cef1c145774cea5d5afb30e8f43fa802e47a4b461419aaaf",
   "fetchedAt": "2026-09-05T08:26:00.682Z"
 }
@@ -36,7 +35,6 @@ English: [README.md](README.md) · 开发指南(运行 / 校验 / 扩展):[DEVEL
 | 字段                    | 含义                                                                                    |
 | ----------------------- | --------------------------------------------------------------------------------------- |
 | `id`、`installs`、`url` | 来自 skills.sh 排行榜(id 已编码 source 和 slug:`{owner}/{repo}/{slug}`)                 |
-| `description`           | 取自技能 `SKILL.md` 的 frontmatter;SKILL.md 中没有 `description` 的技能不会被镜像       |
 | `hash`                  | 技能文件的内容版本:按路径不区分大小写排序,逐文件拼 `路径 + 0x00 + 字节 + 0x00` 取 SHA-256([上游的 `hash`](DEVELOPING.zh-CN.md#上游的-hash));未知时为 `null`      |
 | `fetchedAt`             | 当前内容版本首次抓取的时间                                                              |
 | `audits`                | 使用 `--audits` 时:合作方审计结果(`provider`、`status`、`riskLevel`…);`[]` = 尚无人审计 |

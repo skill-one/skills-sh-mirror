@@ -4,15 +4,12 @@
  *
  * Checks skills.jsonl + content directories against the scraper's invariants:
  *   - every line parses; ids unique; rows sorted by installs desc (ties by id)
- *   - required fields well-formed (id, installs, url, fetchedAt, hash, audits,
- *     description)
+ *   - required fields well-formed (id, installs, url, fetchedAt, hash, audits)
  *   - repos.jsonl parses, is well-shaped (repo/stars/description/pushedAt
  *     rows, sorted by repo), and matches the index's repositories exactly
  *   - owners.jsonl + avatars/ are well-shaped and consistent with the index's
  *     owners (every referenced avatar file exists, no orphan files)
  *   - no two rows share a sanitized directory name
- *   - every content directory's SKILL.md carries a description that matches
- *     the index row
  *   - rows and content directories match exactly, in both directions: every
  *     row has a non-empty directory (its files mirror the upstream skill
  *     verbatim, including files like _meta.json that skills may ship) and
@@ -27,7 +24,7 @@
 
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
-import { argValue, avatarPath, dirName, exists, repoOfId, skillDescription } from "./lib.mjs";
+import { argValue, avatarPath, dirName, exists, repoOfId } from "./lib.mjs";
 
 const args = process.argv.slice(2);
 const OUT_DIR = argValue(args, "--out") ?? "data";
@@ -48,7 +45,6 @@ function checkRow(row) {
   if (row.url !== null && typeof row.url !== "string") problem(`${label}: bad url`);
   if (row.fetchedAt !== null && !isIso(row.fetchedAt)) problem(`${label}: bad fetchedAt`);
   if (row.hash !== null && !isHash(row.hash)) problem(`${label}: bad hash`);
-  if (row.description !== null && typeof row.description !== "string") problem(`${label}: bad description`);
   if ("audits" in row && !Array.isArray(row.audits)) problem(`${label}: audits must be an array`);
   return label;
 }
@@ -101,9 +97,6 @@ if (text === null) {
     }
     const entries = await readdir(dir, { recursive: true, withFileTypes: true });
     if (!entries.some((e) => e.isFile())) problem(`${label}: content directory is empty`);
-    const description = skillDescription(await readFile(path.join(dir, "SKILL.md"), "utf8").catch(() => null));
-    if (description === null) problem(`${label}: SKILL.md missing or has no description`);
-    if (row.description !== description) problem(`${label}: description does not match SKILL.md`);
     dirCount++;
   }
   // Every directory under skills/ must be a row's content directory (whose

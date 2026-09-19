@@ -37,9 +37,8 @@
  *                                           counts, failed ids
  *
  * The index lists exactly the skills with content on disk: one row if and
- * only if the skill's directory exists. Duplicate skills, skills without
- * an upstream snapshot, and skills whose SKILL.md carries no description
- * are left out (and retried on the next run). A skill
+ * only if the skill's directory exists. Duplicate skills and skills without
+ * an upstream snapshot are left out (and retried on the next run). A skill
  * whose fetch fails keeps its previous snapshot — index row and content
  * directory — until a later run fetches it again; skills never fetched
  * successfully stay out of the index. A skill that disappears from the
@@ -68,7 +67,7 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import { mkdir, readdir, readFile, rename, rmdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { argValue, avatarPath, canonicalId, dirName, exists, repoOfId, safeSegment, skillDescription } from "./lib.mjs";
+import { argValue, avatarPath, canonicalId, dirName, exists, repoOfId, safeSegment } from "./lib.mjs";
 
 const API_BASE = (process.env.SKILLS_API_BASE ?? "https://skills.sh").replace(/\/+$/, "");
 const GITHUB_API_BASE = (process.env.GITHUB_API_BASE ?? "https://api.github.com").replace(/\/+$/, "");
@@ -304,10 +303,6 @@ async function fetchSkill(skill, prev) {
   if (!Array.isArray(detail.files) || !detail.files.length) {
     return null; // no upstream snapshot; retried next run
   }
-  const skillMd = detail.files.find((f) => f.path === "SKILL.md");
-  if (!skillDescription(skillMd?.contents)) {
-    return null; // SKILL.md missing or carries no description; retried next run
-  }
 
   const dirExists = await exists(dir);
   // Write to a temp dir and swap it in via rename(2), so "directory exists"
@@ -347,7 +342,6 @@ async function fetchSkill(skill, prev) {
     id: skill.id,
     installs: skill.installs,
     url: skill.url,
-    description: skillDescription(skillMd?.contents),
     hash: detail.hash ?? null,
     fetchedAt: unchanged && prev.fetchedAt ? prev.fetchedAt : new Date().toISOString(),
   };

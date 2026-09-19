@@ -13,8 +13,7 @@
 // keeps the previous row), skills.jsonl index shape (only saved skills — duplicates and
 // no-snapshot skills are omitted; skills whose fetch failed keep their
 // previous row and content), pure content directories, path sanitization,
-// SKILL.md description extraction (plain / quoted / folded block scalars;
-// absent -> null), full re-write every run with fetchedAt pinned to the
+// full re-write every run with fetchedAt pinned to the
 // content hash via the previous index, .env.local token loading, 429/5xx
 // retry (Retry-After honored), --audits (kept while the hash is unchanged,
 // re-fetched when it changes), --limit carrying over rows outside the limit
@@ -71,8 +70,8 @@ const FILES = {
   "owner/repo/rate-limited": null, // no upstream snapshot: hash null, files null
   "owner/repo/bad-id": [{ path: "SKILL.md", contents: "---\ndescription: bad-id fixed\n---\n# bad-id\n" }], // detail 400s while badIdBroken
   "owner/flaky-repo/star-skill": [{ path: "SKILL.md", contents: "---\ndescription: star retry\n---\n# star\n" }],
-  "gone/repo/ghost": [{ path: "SKILL.md", contents: "# ghost\n" }], // SKILL.md without frontmatter: no description -> dropped
-  "owner/repo/no-md": [{ path: "README.md", contents: "# no skill md\n" }], // files but no SKILL.md: no description -> dropped
+  "gone/repo/ghost": [{ path: "SKILL.md", contents: "# ghost\n" }], // SKILL.md without frontmatter: still saved
+  "owner/repo/no-md": [{ path: "README.md", contents: "# no skill md\n" }], // files but no SKILL.md: still saved
   // canonical form: the raw leaderboard id is claude-office-skills/skills/facebook/meta-ads
   "claude-office-skills/skills/facebookmeta-ads": [{ path: "SKILL.md", contents: "---\nname: Facebook Meta Ads\ndescription: slash slug normalized\n---\n# fb\n" }],
 };
@@ -106,8 +105,8 @@ const SKILLS = [
   { id: "owner/repo/bad-id", slug: "bad-id", name: "bad", source: "owner/repo", installs: 0, sourceType: "github", installUrl: "npx skills add owner/repo/bad-id", url: "https://skills.sh/owner/repo/bad-id" },
   // a second repo for its own star fetch (flaky on the GitHub side)
   { id: "owner/flaky-repo/star-skill", slug: "star-skill", name: "star-skill", source: "owner/flaky-repo", installs: 4, sourceType: "github", installUrl: "npx skills add owner/flaky-repo/star-skill", url: "https://skills.sh/owner/flaky-repo/star-skill" },
-  // a github skill whose SKILL.md has no frontmatter: no description -> dropped
-  // (its dead repo still gets a star request, pinned to the null that lands nowhere)
+  // a github skill whose SKILL.md has no frontmatter: content is saved as-is
+  // (its dead repo's metadata fetch 404s, so repos.jsonl pins it to null)
   { id: "gone/repo/ghost", slug: "ghost", name: "ghost", source: "gone/repo", installs: 3, sourceType: "github", installUrl: "npx skills add gone/repo/ghost", url: "https://skills.sh/gone/repo/ghost" },
   // raw leaderboard id carries a slash inside the slug (4 segments); skills.sh
   // keys this skill by the slug with the "/" stripped
@@ -115,7 +114,7 @@ const SKILLS = [
   // well-known with a MULTI-SEGMENT source: filtered out like every
   // well-known entry, even though its id would survive normalization
   { id: "affaan-m/ecc/security-review", slug: "security-review", name: "security-review", source: "affaan-m/ecc", installs: 5, sourceType: "well-known", installUrl: null, url: "https://skills.sh/site/affaan-m.ecc/security-review" },
-  // a github skill with files but no describable SKILL.md: dropped
+  // a github skill with files but no SKILL.md at all: still saved (no parsing)
   { id: "owner/repo/no-md", slug: "no-md", name: "no-md", source: "owner/repo", installs: 6, sourceType: "github", installUrl: "npx skills add owner/repo/no-md", url: "https://skills.sh/owner/repo/no-md" },
 ];
 
@@ -371,7 +370,7 @@ test("scraper end-to-end against mock API", async () => {
     const rows1 = await readRows(out1);
     assert.deepEqual(
       rows1.map((r) => r.id),
-      ["vercel-labs/skills/find-skills", "owner/repo/wei rd~x", "owner/repo/flaky-500", "owner/flaky-repo/star-skill"], // installs desc; well-known, dup, no-snapshot, no-description and failed skills omitted
+      ["vercel-labs/skills/find-skills", "owner/repo/wei rd~x", "owner/repo/flaky-500", "owner/repo/no-md", "owner/flaky-repo/star-skill", "gone/repo/ghost"], // installs desc; well-known, dup, no-snapshot and failed skills omitted
     );
     assert.equal(rows1[0].installs, 12345);
     assert.equal(rows1[0].hash, hashOf("vercel-labs/skills/find-skills:0"));
@@ -382,14 +381,15 @@ test("scraper end-to-end against mock API", async () => {
       assert.equal(field in rows1[0], false);
 
     // repository metadata lives in repos.jsonl, one row per repo behind an
-    // indexed row, sorted by repo asc (the dead gone/repo and the
-    // not-yet-listed claude-office-skills/skills have no indexed rows, so
-    // their fetches land nowhere); rows carry no repo fields at all
+    // indexed row, sorted by repo asc (the not-yet-listed
+    // claude-office-skills/skills has no indexed row, so its fetch lands
+    // nowhere); rows carry no repo fields at all
     for (const row of rows1) assert.equal("stars" in row, false);
     const repos1 = await readRepos(out1);
     assert.deepEqual(repos1, [
+      { repo: "gone/repo", stars: null, description: null, pushedAt: null }, // dead repo behind ghost's saved content
       { repo: "owner/flaky-repo", stars: 5, description: null, pushedAt: "2026-07-01T00:00:00.000Z" }, // fetched after a transient 500
-      { repo: "owner/repo", stars: 42, description: "A test repo", pushedAt: "2026-08-15T12:00:00.000Z" }, // shared by rows1[1] and rows1[2]
+      { repo: "owner/repo", stars: 42, description: "A test repo", pushedAt: "2026-08-15T12:00:00.000Z" }, // shared by several rows1 entries
       { repo: "vercel-labs/skills", stars: 1000, description: "Skills for Vercel", pushedAt: "2026-09-01T00:00:00.000Z" },
     ]);
     // one request per unique repo, even though five skills map to owner/repo
@@ -404,6 +404,7 @@ test("scraper end-to-end against mock API", async () => {
     // carry just the URL: the copy's avatars/{owner}.png path is derivable.
     const owners1 = await readOwners(out1);
     assert.deepEqual(owners1, [
+      { owner: "gone", avatarUrl: null }, // dead repo: no owner info -> no avatar
       { owner: "owner", avatarUrl: `${ghBase}/u/2?v=4` },
       { owner: "vercel-labs", avatarUrl: `${ghBase}/u/1?v=4` },
     ]);
@@ -411,12 +412,6 @@ test("scraper end-to-end against mock API", async () => {
     assert.equal(await readFile(path.join(out1, "avatars/vercel-labs.png"), "utf8"), "png-/u/1");
     assert.equal(ghHits["/u/1"], 1);
     assert.equal(ghHits["/u/2"], 1);
-
-    // description comes from the SKILL.md frontmatter (plain / quoted / folded)
-    assert.equal(rows1[0].description, "Find skills on skills.sh."); // plain scalar
-    assert.equal(rows1[1].description, "weird but quoted"); // quoted scalar
-    assert.equal(rows1[2].description, "fetched after a transient 500"); // folded block scalar
-    assert.equal(rows1[3].description, "star retry"); // plain scalar
 
     assert.equal(
       await readFile(dir(out1, "vercel-labs/skills/find-skills", "SKILL.md"), "utf8"),
@@ -435,13 +430,15 @@ test("scraper end-to-end against mock API", async () => {
     assert.equal(await readFile(dir(out1, "owner/flaky-repo/star-skill", "SKILL.md"), "utf8"), FILES["owner/flaky-repo/star-skill"][0].contents);
     // well-known skills never materialize on disk
     assert.equal(await pathExists(dir(out1, "mintlify.com/mintlify")), false);
-    // duplicate / no-snapshot / no-description / failed skills leave nothing on disk
+    // content is mirrored verbatim: a SKILL.md without frontmatter and a skill
+    // shipping no SKILL.md at all are both saved (no SKILL.md is parsed)
+    assert.equal(await readFile(dir(out1, "gone/repo/ghost", "SKILL.md"), "utf8"), FILES["gone/repo/ghost"][0].contents);
+    assert.equal(await readFile(dir(out1, "owner/repo/no-md", "README.md"), "utf8"), FILES["owner/repo/no-md"][0].contents);
+    // duplicate / no-snapshot / failed skills leave nothing on disk
     assert.equal(await pathExists(dir(out1, "owner/repo/dup-skill")), false);
     assert.equal(await pathExists(dir(out1, "owner/repo/rate-limited")), false);
-    assert.equal(await pathExists(dir(out1, "gone/repo/ghost")), false); // SKILL.md without frontmatter
-    assert.equal(await pathExists(dir(out1, "owner/repo/no-md")), false); // no SKILL.md at all
     assert.equal(await pathExists(dir(out1, "owner/repo/bad-id")), false);
-    assert.match(r1.stderr, /changed=4, added=4, removed=0, dropped=4, failed=1/); // run still exits 0
+    assert.match(r1.stderr, /changed=6, added=6, removed=0, dropped=2, failed=1/); // run still exits 0
     // no temp leftovers
     assert.equal(await pathExists(path.join(out1, ".tmp")), false);
 
@@ -456,13 +453,13 @@ test("scraper end-to-end against mock API", async () => {
     assert.equal(stats1.leaderboardTotal, 9); // github-sourced leaderboard entries (drift dupe excluded)
     assert.equal(stats1.nonGithub, 1); // mintlify.com/mintlify
     assert.equal(stats1.githubRepos, 4); // unique repos among the targets
-    assert.equal(stats1.indexedRows, 4);
-    assert.equal(stats1.changed, 4); // every first save re-stamps fetchedAt
-    assert.equal(stats1.added, 4); // all four rows are new to the index
+    assert.equal(stats1.indexedRows, 6);
+    assert.equal(stats1.changed, 6); // every first save re-stamps fetchedAt
+    assert.equal(stats1.added, 6); // all six rows are new to the index
     assert.equal(stats1.removed, 0);
     assert.deepEqual(
       { dropped: stats1.dropped, failed: stats1.failed, carriedOver: stats1.carriedOver },
-      { dropped: 4, failed: 1, carriedOver: 0 },
+      { dropped: 2, failed: 1, carriedOver: 0 },
     );
     assert.deepEqual(stats1.failedIds, ["owner/repo/bad-id"]);
 
@@ -473,7 +470,15 @@ test("scraper end-to-end against mock API", async () => {
     await writeFile(
       path.join(out1, "owners.jsonl"),
       owners1
-        .map((r) => JSON.stringify({ ...r, avatar: r.owner === "owner" ? "avatars/owner.jpg" : "avatars/vercel-labs.png" }))
+        .map((r) =>
+          JSON.stringify(
+            r.owner === "owner"
+              ? { ...r, avatar: "avatars/owner.jpg" }
+              : r.owner === "vercel-labs"
+                ? { ...r, avatar: "avatars/vercel-labs.png" }
+                : r,
+          ),
+        )
         .join("\n") + "\n",
     );
 
@@ -482,11 +487,11 @@ test("scraper end-to-end against mock API", async () => {
     // that first fetched that content version
     const r2 = await run(out1);
     assert.equal(r2.status, 0, `run 2 failed:\n${r2.stderr}`);
-    assert.equal(hits.detail, 18); // +8: the four saves + the two no-description skills + no-snapshot + failed (no retries left)
+    assert.equal(hits.detail, 18); // +8: the six saves + no-snapshot + failed (no retries left)
     assert.equal(hits.audit, 0);
-    assert.match(r2.stderr, /changed=0, added=0, removed=0, dropped=4, failed=1/);
+    assert.match(r2.stderr, /changed=0, added=0, removed=0, dropped=2, failed=1/);
     const rows2 = await readRows(out1);
-    assert.equal(rows2.length, 4);
+    assert.equal(rows2.length, 6);
     assert.equal((await readStats(out1)).changed, 0); // nothing changed: all hashes stable
     assert.deepEqual(rows2.map((r) => r.fetchedAt), rows1.map((r) => r.fetchedAt)); // carried over
     assert.deepEqual(rows2.map((r) => r.hash), rows1.map((r) => r.hash));
@@ -506,7 +511,7 @@ test("scraper end-to-end against mock API", async () => {
     const r3 = await run(out1);
     assert.equal(r3.status, 0, `run 3 failed:\n${r3.stderr}`);
     assert.equal(hits.detail, 26); // +8
-    assert.match(r3.stderr, /changed=1, added=0, removed=0, dropped=4, failed=1/);
+    assert.match(r3.stderr, /changed=1, added=0, removed=0, dropped=2, failed=1/);
     const rows3 = await readRows(out1);
     assert.equal((await readStats(out1)).changed, 1); // exactly the edited skill
     assert.equal(rows3[0].hash, hashOf("vercel-labs/skills/find-skills:1"));
@@ -522,15 +527,15 @@ test("scraper end-to-end against mock API", async () => {
     const r4 = await run(out2, ["--audits"]);
     assert.equal(r4.status, 0, `run 4 failed:\n${r4.stderr}`);
     assert.equal(hits.detail, 34); // +8 new fetches (the duplicate is skipped, no 429/500 retry left)
-    assert.equal(hits.audit, 4); // only the four saved skills reach the audit call
-    assert.match(r4.stderr, /changed=4, added=4, removed=0, dropped=4, failed=1/);
+    assert.equal(hits.audit, 6); // only the six saved skills reach the audit call
+    assert.match(r4.stderr, /changed=6, added=6, removed=0, dropped=2, failed=1/);
 
     const rows4 = await readRows(out2);
     assert.equal(stats1.audits, false); // run 1's stats (out1) unaffected by run 4
     assert.equal((await readStats(out2)).audits, true); // --audits recorded
     assert.deepEqual(
       rows4.map((r) => r.id),
-      ["vercel-labs/skills/find-skills", "owner/repo/wei rd~x", "owner/repo/flaky-500", "owner/flaky-repo/star-skill"],
+      ["vercel-labs/skills/find-skills", "owner/repo/wei rd~x", "owner/repo/flaky-500", "owner/repo/no-md", "owner/flaky-repo/star-skill", "gone/repo/ghost"],
     );
     assert.equal(await pathExists(dir(out2, "owner/repo/dup-skill")), false); // stale duplicate content removed
     assert.deepEqual(rows4[0].audits, AUDITS["vercel-labs/skills/find-skills"]);
@@ -544,7 +549,7 @@ test("scraper end-to-end against mock API", async () => {
     badIdBroken = false;
     const r5 = await run(out1);
     assert.equal(r5.status, 0, `run 5 failed:\n${r5.stderr}`);
-    assert.match(r5.stderr, /changed=1, added=1, removed=0, dropped=4, failed=0/);
+    assert.match(r5.stderr, /changed=1, added=1, removed=0, dropped=2, failed=0/);
     const rows5 = await readRows(out1);
     assert.deepEqual(rows5.map((r) => r.id), [...rows1.map((r) => r.id), "owner/repo/bad-id"]);
     assert.deepEqual(await readRepos(out1), repos1); // bad-id's repo (owner/repo) was already covered
@@ -560,14 +565,14 @@ test("scraper end-to-end against mock API", async () => {
     badIdBroken = true;
     const r6 = await run(out1);
     assert.equal(r6.status, 0, `run 6 failed:\n${r6.stderr}`);
-    assert.match(r6.stderr, /changed=0, added=0, removed=0, dropped=4, failed=1 \(carried over: 1\)/);
+    assert.match(r6.stderr, /changed=0, added=0, removed=0, dropped=2, failed=1 \(carried over: 1\)/);
     const stats6 = await readStats(out1);
     assert.equal(stats6.carriedOver, 1); // machine-readable stats replaced the old stderr metrics line
     assert.equal(stats6.changed, 0); // the carried-over row keeps its old fetchedAt
-    assert.equal(stats6.indexedRows, 5);
+    assert.equal(stats6.indexedRows, 7);
     assert.deepEqual(stats6.failedIds, ["owner/repo/bad-id"]);
     const rows6 = await readRows(out1);
-    assert.deepEqual(rows6[4], rows5[4]); // carried over verbatim: same hash, fetchedAt, stars, fields
+    assert.deepEqual(rows6.at(-1), rows5.at(-1)); // carried over verbatim: same hash, fetchedAt, stars, fields
     assert.equal(await readFile(dir(out1, "owner/repo/bad-id", "SKILL.md"), "utf8"), FILES["owner/repo/bad-id"][0].contents);
 
     // --- run 7: --limit 1 on an existing dataset. The limit constrains only
@@ -576,13 +581,13 @@ test("scraper end-to-end against mock API", async () => {
     // shrink to one row and orphan the rest.
     const r7l = await run(out1, ["--limit", "1"]);
     assert.equal(r7l.status, 0, `run 7 failed:\n${r7l.stderr}`);
-    assert.match(r7l.stderr, /changed=0, added=0, removed=0, dropped=0, failed=0 \(carried over: 4\)/);
+    assert.match(r7l.stderr, /changed=0, added=0, removed=0, dropped=0, failed=0 \(carried over: 6\)/);
     assert.deepEqual((await readRows(out1)).map((r) => r.id), rows6.map((r) => r.id));
     const stats7l = await readStats(out1);
     assert.equal(stats7l.limit, 1);
-    assert.equal(stats7l.carriedOver, 4);
+    assert.equal(stats7l.carriedOver, 6);
     assert.equal(stats7l.changed, 0); // the one fetched skill's hash is unchanged
-    assert.equal(stats7l.indexedRows, 5);
+    assert.equal(stats7l.indexedRows, 7);
     // repos outside the limit were not fetched this run: their rows are
     // carried over from the previous repos.jsonl, so the file still covers
     // every indexed row's repo
@@ -624,14 +629,14 @@ test("scraper end-to-end against mock API", async () => {
     };
     const v1 = await verify(out1);
     assert.equal(v1.status, 0, `verify out1 failed:\n${v1.stdout}${v1.stderr}`);
-    assert.match(v1.stdout, /OK: 5 rows, 5 content directories/); // bad-id carried over from run 6
+    assert.match(v1.stdout, /OK: 7 rows, 7 content directories/); // bad-id carried over from run 6
     const v2 = await verify(out2);
     assert.equal(v2.status, 0, `verify out2 failed:\n${v2.stdout}${v2.stderr}`);
-    assert.match(v2.stdout, /OK: 4 rows, 4 content directories/);
+    assert.match(v2.stdout, /OK: 6 rows, 6 content directories/);
 
     // --- verifier rejects tampered datasets (problems are reported on stderr).
     // Every case is self-contained: it mutates the known-good dataset left by
-    // run 7 (5 index rows, including the carried-over bad-id), expects verify
+    // run 7 (7 index rows, including the carried-over bad-id), expects verify
     // to fail with a specific problem — or, for the pattern-less entries, to
     // pass — and then restores the base state. No case may rely on another's
     // leftovers.
@@ -640,7 +645,7 @@ test("scraper end-to-end against mock API", async () => {
     const GOOD_REPOS = await readRepos(out1);
     const GOOD_OWNERS = await readOwners(out1);
     const GOOD_CURATED = await readCurated(out1);
-    const baseRows = await readRows(out1); // == rows6: 5 rows including bad-id
+    const baseRows = await readRows(out1); // == rows6: 7 rows including bad-id
     const writeIndex = async (rows) =>
       writeFile(path.join(out1, "skills.jsonl"), rows.map((r) => JSON.stringify(r)).join("\n") + "\n");
     const writeJson = (file, value) =>
@@ -723,16 +728,12 @@ test("scraper end-to-end against mock API", async () => {
         rows.splice(2, 0, { ...rows[1], id: "owner/repo/a_b" });
         return rows;
       }),
-      indexCase("description disagrees with the on-disk SKILL.md", /description does not match/, (rows) => {
-        rows[0].description = "bogus";
-        return rows;
-      }),
       indexCase("well-known (two-segment) ids are rejected", /malformed id/, (rows) => {
         rows[1].id = "mintlify.com/mintlify";
         return rows;
       }),
       jsonCase("stats.json", "stats.json is unparseable", /stats\.json: invalid JSON/, "{", GOOD_STATS),
-      jsonCase("stats.json", "stats.json's indexedRows disagrees with the index", /indexedRows 99 != index row count 5/, { ...GOOD_STATS, indexedRows: 99 }, GOOD_STATS),
+      jsonCase("stats.json", "stats.json's indexedRows disagrees with the index", /indexedRows 99 != index row count 7/, { ...GOOD_STATS, indexedRows: 99 }, GOOD_STATS),
       jsonCase("trending.json", "trending.json is unparseable", /trending\.json: invalid JSON/, "{", GOOD_TRENDING),
       jsonCase("trending.json", "trending.json holds something else than an array of ids", /trending\.json: not an array of ids/, { top: 1 }, GOOD_TRENDING),
       jsonCase("trending.json", "trending.json repeats an id", /trending\.json: duplicate id: a\/b\/c/, ["a/b/c", "a/b/c"], GOOD_TRENDING),
@@ -757,7 +758,7 @@ test("scraper end-to-end against mock API", async () => {
         cleanup: () => writeRepos(GOOD_REPOS),
       },
       reposCase("repos.jsonl's rows are not repo/stars/description/pushedAt shaped", /repos\.jsonl: rows must carry/, [{ ...GOOD_REPOS[0], stars: "many" }, ...GOOD_REPOS.slice(1)]),
-      reposCase("repos.jsonl repeats a repo", /repos\.jsonl: duplicate repo: owner\/repo/, [GOOD_REPOS[1], GOOD_REPOS[1], ...GOOD_REPOS.slice(2)]),
+      reposCase("repos.jsonl repeats a repo", /repos\.jsonl: duplicate repo: owner\/repo/, [GOOD_REPOS[2], GOOD_REPOS[2], ...GOOD_REPOS.slice(3)]),
       reposCase("repos.jsonl is not sorted by repo", /repos\.jsonl: rows not sorted by repo at owner\/repo/, [...GOOD_REPOS].reverse()),
       reposCase("repos.jsonl lacks an indexed row's repository", /repos\.jsonl: no row for owner\/repo/, GOOD_REPOS.filter((r) => r.repo !== "owner/repo")),
       reposCase("repos.jsonl holds a row no index row references", /repos\.jsonl: orphan row \(no index row\): extra\/repo/, [...GOOD_REPOS, { repo: "extra/repo", stars: 1, description: null, pushedAt: null }]),
@@ -768,7 +769,7 @@ test("scraper end-to-end against mock API", async () => {
         cleanup: () => writeOwners(GOOD_OWNERS),
       },
       ownersCase("owners.jsonl's rows are not owner/avatarUrl shaped", /owners\.jsonl: rows must carry/, [{ ...GOOD_OWNERS[0], avatarUrl: 5 }, ...GOOD_OWNERS.slice(1)]),
-      ownersCase("owners.jsonl repeats an owner", /owners\.jsonl: duplicate owner: owner/, [GOOD_OWNERS[0], GOOD_OWNERS[0], ...GOOD_OWNERS.slice(1)]),
+      ownersCase("owners.jsonl repeats an owner", /owners\.jsonl: duplicate owner: owner/, [GOOD_OWNERS[1], GOOD_OWNERS[1], ...GOOD_OWNERS.slice(2)]),
       ownersCase("owners.jsonl is not sorted by owner", /owners\.jsonl: rows not sorted by owner at owner\n/, [...GOOD_OWNERS].reverse()),
       ownersCase("owners.jsonl lacks an indexed row's owner", /owners\.jsonl: no row for owner/, GOOD_OWNERS.filter((r) => r.owner !== "owner")),
       ownersCase("owners.jsonl holds a row no index row references", /owners\.jsonl: orphan row \(no index row\): extra/, [...GOOD_OWNERS, { owner: "extra", avatarUrl: null }]),
@@ -809,22 +810,22 @@ test("scraper end-to-end against mock API", async () => {
     vercelAvatarRev = 5; // vercel-labs changed its avatar upstream
     const r10 = await run(out1);
     assert.equal(r10.status, 0, `run 10 failed:\n${r10.stderr}`);
-    assert.match(r10.stderr, /changed=1, added=0, removed=1, dropped=4, failed=1 \(carried over: 1\)/);
+    assert.match(r10.stderr, /changed=1, added=0, removed=1, dropped=2, failed=1 \(carried over: 1\)/);
     const stats10 = await readStats(out1);
     assert.equal(stats10.removed, 1);
     assert.equal(stats10.added, 0);
     assert.deepEqual(
       (await readRows(out1)).map((r) => r.id),
-      ["vercel-labs/skills/find-skills", "owner/repo/wei rd~x", "owner/flaky-repo/star-skill", "owner/repo/bad-id"],
+      ["vercel-labs/skills/find-skills", "owner/repo/wei rd~x", "owner/repo/no-md", "owner/flaky-repo/star-skill", "gone/repo/ghost", "owner/repo/bad-id"],
     );
     assert.equal(await pathExists(dir(out1, "owner/repo/flaky-500")), false); // delisted content removed
     // the bumped avatar URL forces exactly that one re-download; unchanged URLs stay cached
     assert.equal(ghHits["/u/1"], 3);
     assert.equal(ghHits["/u/2"], 2);
-    assert.deepEqual((await readOwners(out1))[1], { owner: "vercel-labs", avatarUrl: `${ghBase}/u/1?v=5` });
+    assert.deepEqual((await readOwners(out1))[2], { owner: "vercel-labs", avatarUrl: `${ghBase}/u/1?v=5` });
     const v10 = await verify(out1);
     assert.equal(v10.status, 0, `verify out1 failed after removal:\n${v10.stdout}${v10.stderr}`);
-    assert.match(v10.stdout, /OK: 4 rows, 4 content directories/);
+    assert.match(v10.stdout, /OK: 6 rows, 6 content directories/);
 
     // --- run 11: upstream re-lists the skill -> it comes back as added, and
     // changed (a fresh first fetch re-stamps its fetchedAt even though the
@@ -832,7 +833,7 @@ test("scraper end-to-end against mock API", async () => {
     gone.delete("owner/repo/flaky-500");
     const r11 = await run(out1);
     assert.equal(r11.status, 0, `run 11 failed:\n${r11.stderr}`);
-    assert.match(r11.stderr, /changed=1, added=1, removed=0, dropped=4, failed=1 \(carried over: 1\)/);
+    assert.match(r11.stderr, /changed=1, added=1, removed=0, dropped=2, failed=1 \(carried over: 1\)/);
     const stats11 = await readStats(out1);
     assert.equal(stats11.added, 1);
     assert.equal(stats11.removed, 0);
@@ -846,7 +847,7 @@ test("scraper end-to-end against mock API", async () => {
     gone.delete("claude-office-skills/skills/facebook/meta-ads");
     const r12 = await run(out1);
     assert.equal(r12.status, 0, `run 12 failed:\n${r12.stderr}`);
-    assert.match(r12.stderr, /changed=1, added=1, removed=0, dropped=4, failed=1 \(carried over: 1\)/);
+    assert.match(r12.stderr, /changed=1, added=1, removed=0, dropped=2, failed=1 \(carried over: 1\)/);
     const stats12 = await readStats(out1);
     assert.equal(stats12.added, 1);
     assert.deepEqual(stats12.failedIds, ["owner/repo/bad-id"]); // slash slugs no longer fail
@@ -857,7 +858,9 @@ test("scraper end-to-end against mock API", async () => {
         "owner/repo/wei rd~x",
         "owner/repo/flaky-500",
         "claude-office-skills/skills/facebookmeta-ads",
+        "owner/repo/no-md",
         "owner/flaky-repo/star-skill",
+        "gone/repo/ghost",
         "owner/repo/bad-id",
       ],
     );
@@ -871,6 +874,7 @@ test("scraper end-to-end against mock API", async () => {
     // content lands under the fixed .png name
     assert.deepEqual(await readOwners(out1), [
       { owner: "claude-office-skills", avatarUrl: `${ghBase}/u/3?v=4` },
+      { owner: "gone", avatarUrl: null },
       { owner: "owner", avatarUrl: `${ghBase}/u/2?v=4` },
       { owner: "vercel-labs", avatarUrl: `${ghBase}/u/1?v=5` },
     ]);
@@ -883,7 +887,7 @@ test("scraper end-to-end against mock API", async () => {
     ]);
     const v12 = await verify(out1);
     assert.equal(v12.status, 0, `verify out1 failed after run 12:\n${v12.stdout}${v12.stderr}`);
-    assert.match(v12.stdout, /OK: 6 rows, 6 content directories/);
+    assert.match(v12.stdout, /OK: 8 rows, 8 content directories/);
 
     // --- run 13: a well-known skill whose source spans several segments
     // ("affaan-m/ecc") is filtered out like every well-known entry — even
@@ -891,7 +895,7 @@ test("scraper end-to-end against mock API", async () => {
     gone.delete("affaan-m/ecc/security-review");
     const r13 = await run(out1);
     assert.equal(r13.status, 0, `run 13 failed:\n${r13.stderr}`);
-    assert.match(r13.stderr, /changed=0, added=0, removed=0, dropped=4, failed=1 \(carried over: 1\)/);
+    assert.match(r13.stderr, /changed=0, added=0, removed=0, dropped=2, failed=1 \(carried over: 1\)/);
     const stats13 = await readStats(out1);
     assert.equal(stats13.nonGithub, 2); // mintlify.com/mintlify + affaan-m/ecc/security-review
     assert.equal(stats13.added, 0);
@@ -901,7 +905,7 @@ test("scraper end-to-end against mock API", async () => {
     assert.equal(await pathExists(dir(out1, "affaan-m/ecc/security-review")), false);
     const v13 = await verify(out1);
     assert.equal(v13.status, 0, `verify out1 failed after run 13:\n${v13.stdout}${v13.stderr}`);
-    assert.match(v13.stdout, /OK: 6 rows, 6 content directories/);
+    assert.match(v13.stdout, /OK: 8 rows, 8 content directories/);
   } finally {
     server.close();
     ghServer.close();

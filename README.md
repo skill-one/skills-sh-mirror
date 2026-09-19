@@ -27,7 +27,6 @@ Each `skills.jsonl` row:
   "id": "vercel-labs/skills/find-skills",
   "installs": 3263512,
   "url": "https://www.skills.sh/vercel-labs/skills/find-skills",
-  "description": "Find and install skills for your agent from skills.sh",
   "hash": "b146008599c31057cef1c145774cea5d5afb30e8f43fa802e47a4b461419aaaf",
   "fetchedAt": "2026-09-05T08:26:00.682Z"
 }
@@ -36,7 +35,6 @@ Each `skills.jsonl` row:
 | Field | Meaning |
 |---|---|
 | `id`, `installs`, `url` | from the skills.sh leaderboard (the id encodes source and slug: `{owner}/{repo}/{slug}`) |
-| `description` | from the skill's `SKILL.md` frontmatter; skills whose SKILL.md has none are not mirrored |
 | `hash` | Content version of the skill's files: SHA-256 over each file's `path + 0x00 + bytes + 0x00`, files in case-insensitive path order ([the upstream `hash`](DEVELOPING.md#the-upstream-hash)); `null` if unknown |
 | `fetchedAt` | when the current content version was first fetched |
 | `audits` | with `--audits`: partner audit results (`provider`, `status`, `riskLevel`, …); `[]` = none yet |
