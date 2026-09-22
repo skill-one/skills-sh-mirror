@@ -19,8 +19,8 @@ Inputs
 </authority_rules>
 
 <task_scope>
-1. For one component or page, run `node tools/apexctl.mjs context resolve --intent "<normalized intent>" --phase draft`.
-2. For a full application, freeze the application spec and UX contract, then run `node tools/apexctl.mjs context resolve --intent "<normalized intent>" --phase draft` for each implementation unit.
+1. Resolve a page/component with `node tools/apexctl.mjs context resolve --intent "<normalized intent>" --phase draft --require-ready`.
+2. For full apps, freeze the spec and UX contract, then resolve each unit the same way.
 3. Select one implementation unit from the frozen application spec, then resolve a fresh task-specific context capsule for it.
 4. Generate that unit in a fresh model context containing only the application plan, the retrieved unit, its IR pointer, and necessary compiler/tool results. Do not retain prose or capsules from previously generated units.
 5. Prefer one adaptive page unit. Split a page into shell, region, and logic units only when the implementation scope requires it.
@@ -66,6 +66,7 @@ Inputs
 </output_contract>
 
 <stop_conditions>
+- If either status is `blocked` or `missingInputs` is non-empty, stop before planning or emission. Route metadata explains the blocker; it never authorizes generation.
 - Stop with Missing Inputs when database objects, mappings, targets, compiler legality, or a required high-impact design decision cannot be proven.
 - Stop on same-rank authority conflicts.
 - Do not compensate for missing evidence by widening template scans or inventing richer UI behavior.

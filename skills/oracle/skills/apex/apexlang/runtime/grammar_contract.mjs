@@ -7,7 +7,7 @@ import { promises as fs } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 
-const CONTRACT_SCHEMA_VERSION = 3;
+const CONTRACT_SCHEMA_VERSION = 5;
 const DEFAULT_CORE_PRODUCTIONS = [
   "nl",
   "blank-lines",
@@ -40,9 +40,28 @@ const COMPILER_VALUE_FALLBACKS = new Map([
   ["form", "NATIVE_FORM"],
   ["standard", "STANDARD"],
   ["redirectThisApp", "REDIRECT_PAGE"],
+  ["databaseColumn", "DB_COLUMN"],
   ["true", "Y"],
   ["false", "N"]
 ]);
+
+const COMPILER_TO_DSL_PROPERTY_ALIASES = new Map([
+  ["newCol", "newColumn"],
+  ["databaseCol", "databaseColumn"]
+]);
+
+export function normalizeCompilerPropertyName(propertyName) {
+  const normalized = String(propertyName ?? "").trim();
+  return COMPILER_TO_DSL_PROPERTY_ALIASES.get(normalized) || normalized;
+}
+
+function normalizeCompilerDslValue(property, value) {
+  const normalized = String(value ?? "").trim();
+  if (String(property?.propertyId ?? "") === "94" && normalized.startsWith("themeTemplateComponent/")) {
+    return `TMPL_${normalized.slice("themeTemplateComponent/".length)}`;
+  }
+  return normalized;
+}
 const INSTANCE_POLICY_RULES = [
   {
     id: "VALIDATION_CANONICAL_STRUCTURE_001",
@@ -318,20 +337,22 @@ function grammarVariantProperties(productions, root) {
 }
 
 function grammarPropertyGroup(productions, component, property) {
+  const dslProperty = normalizeCompilerPropertyName(property);
   const directName = `${component}-direct-property`;
-  if (productions.get(directName)?.includes(`"${property}"`)) return null;
+  if (productions.get(directName)?.includes(`"${dslProperty}"`)) return null;
   const prefix = `${component}-`;
   const suffix = "-property";
   const matches = [...productions.entries()]
     .filter(([name, definition]) => name.startsWith(prefix)
       && name.endsWith(suffix)
-      && definition.includes(`"${property}"`))
+      && definition.includes(`"${dslProperty}"`))
     .map(([name]) => name.slice(prefix.length, -suffix.length));
   return matches.length === 1 ? matches[0] : null;
 }
 
 function matchGrammarVariant(productions, alternatives, record) {
-  const compilerProperties = new Set(compilerRecordProperties(record).map(({ propertyName }) => propertyName));
+  const compilerProperties = new Set(compilerRecordProperties(record)
+    .map(({ propertyName }) => normalizeCompilerPropertyName(propertyName)));
   const scored = alternatives.map((production) => {
     const grammarProperties = grammarVariantProperties(productions, production);
     const overlap = [...grammarProperties].filter((property) => compilerProperties.has(property)).length;
@@ -341,6 +362,21 @@ function matchGrammarVariant(productions, alternatives, record) {
   if (!scored[0] || scored[0].overlap === 0) return null;
   if (scored[1] && scored[0].similarity === scored[1].similarity && scored[0].overlap === scored[1].overlap) return null;
   return scored[0];
+}
+
+function compilerChildDeclaration(productions, grammarProduction, child, hasVariants) {
+  const directProperties = productions.get(`${grammarProduction}-direct-property`) || "";
+  const usesNameAsIdentity = /"name"\s*":"[^\n]*\(\*\s*required\b/.test(directProperties);
+  if (usesNameAsIdentity) {
+    return {
+      declaration: `${child} <name> (`,
+      componentIdPolicy: "required-as-name"
+    };
+  }
+  return {
+    declaration: `${child} (`,
+    componentIdPolicy: hasVariants ? "omit-to-disambiguate-variant" : "optional"
+  };
 }
 
 function resolveCompilerChildren({ map, productions, requestedChildren, assumptionIndex }) {
@@ -377,15 +413,19 @@ function resolveCompilerChildren({ map, productions, requestedChildren, assumpti
       const selected = selectable[0];
       const grammar = matchGrammarVariant(productions, grammarAlternatives, selected.record);
       if (!grammar) continue;
+      const declaration = compilerChildDeclaration(
+        productions,
+        grammar.production,
+        child,
+        grammarAlternatives.length > 1
+      );
       resolved.push({
         parent,
         child,
-        compilerComponentTypeId: selected.record.componentTypeId,
         compilerState: selected.state,
         grammarProduction: grammar.production,
         grammarSimilarity: Number(grammar.similarity.toFixed(4)),
-        declaration: `${child} (`,
-        componentIdPolicy: grammarAlternatives.length > 1 ? "omit-to-disambiguate-variant" : "optional",
+        ...declaration,
         record: selected.record
       });
     }
@@ -417,7 +457,9 @@ function buildInstanceContracts(resolvedChildren, requestedInstances, requestedG
         throw new Error(`Instance property '${condition.selector}' is not present in compiler metadata`);
       }
       const value = compilerValue(found.property, condition.value);
-      const path = [selector, found.group, found.property.propertyName].filter(Boolean).join(".");
+      const path = [selector, found.group, normalizeCompilerPropertyName(found.property.propertyName)]
+        .filter(Boolean)
+        .join(".");
       assumptions.push({
         path,
         dslValue: condition.value,
@@ -448,7 +490,7 @@ function buildInstanceContracts(resolvedChildren, requestedInstances, requestedG
     const requiredActiveProperties = propertyStates
       .filter(({ property, state }) => property.required && state === "active")
       .map(({ group, property }) => ({
-        path: [selector, group, property.propertyName].filter(Boolean).join("."),
+        path: [selector, group, normalizeCompilerPropertyName(property.propertyName)].filter(Boolean).join("."),
         compilerPropertyId: property.propertyId || null
       }))
       .sort((left, right) => left.path.localeCompare(right.path));
@@ -456,7 +498,7 @@ function buildInstanceContracts(resolvedChildren, requestedInstances, requestedG
       .filter(({ group, property, state }) => group && assumedGroups.has(group)
         && property.required && state === "inactive")
       .map(({ group, property }) =>
-        [selector, group, property.propertyName].filter(Boolean).join(".")))]
+        [selector, group, normalizeCompilerPropertyName(property.propertyName)].filter(Boolean).join(".")))]
       .sort((left, right) => left.localeCompare(right));
     const repositoryPolicies = INSTANCE_POLICY_RULES
       .filter((rule) => rule.family === conditions[0].family)
@@ -488,7 +530,6 @@ function buildInstanceContracts(resolvedChildren, requestedInstances, requestedG
       selector,
       family: conditions[0].family,
       id: conditions[0].id,
-      compilerComponentTypeId: resolved.compilerComponentTypeId,
       grammarProduction: resolved.grammarProduction,
       declaration: resolved.declaration,
       componentIdPolicy: resolved.componentIdPolicy,
@@ -506,7 +547,7 @@ function findCompilerProperty(record, condition) {
     ...(record.properties || []).map((property) => ({ group: null, property })),
     ...Object.entries(record.groups || {}).flatMap(([group, properties]) =>
       properties.map((property) => ({ group, property })))
-  ].filter(({ property }) => property.propertyName === condition.property);
+  ].filter(({ property }) => normalizeCompilerPropertyName(property.propertyName) === condition.property);
   if (condition.group) {
     return candidates.find(({ group }) => group === condition.group) || null;
   }
@@ -514,20 +555,103 @@ function findCompilerProperty(record, condition) {
 }
 
 function compilerValue(property, dslValue) {
+  const normalizedDslValue = normalizeCompilerDslValue(property, dslValue);
   const values = property.lov?.values || [];
   const match = values.find(({ name, returnValue }) =>
-    normalizedToken(name) === normalizedToken(dslValue)
-    || normalizedToken(returnValue) === normalizedToken(dslValue));
-  return match?.returnValue || COMPILER_VALUE_FALLBACKS.get(dslValue) || dslValue;
+    normalizedToken(name) === normalizedToken(normalizedDslValue)
+    || normalizedToken(returnValue) === normalizedToken(normalizedDslValue));
+  return match?.returnValue || COMPILER_VALUE_FALLBACKS.get(normalizedDslValue) || normalizedDslValue;
+}
+
+function grammarRequiredPropertyNames(definition = "") {
+  return [...String(definition).split(/\r?\n/).map((line) => {
+    const match = line.match(/"([A-Za-z][A-Za-z0-9]*)"\s*":"\s*<ws>/);
+    return match && /\(\*\s*required\b/.test(line) ? match[1] : "";
+  }).filter(Boolean)];
+}
+
+function grammarRequiredChildPaths(productions, grammarProduction, selector) {
+  const paths = new Set(grammarRequiredPropertyNames(productions.get(`${grammarProduction}-direct-property`) || "")
+    .map((property) => `${selector}.${property}`));
+  const groupDefinition = productions.get(`${grammarProduction}-group-block`) || "";
+  for (const reference of groupDefinition.matchAll(/<([^>]+)>/g)) {
+    const productionName = reference[1];
+    const blockDefinition = productions.get(productionName) || "";
+    const blockName = blockDefinition.match(/::=.*?"([A-Za-z][A-Za-z0-9]*)"\s*<ws>\s*"\{"/)?.[1];
+    if (!blockName) continue;
+    for (const property of grammarRequiredPropertyNames(productions.get(`${productionName}-property`) || "")) {
+      paths.add(`${selector}.${blockName}.${property}`);
+    }
+  }
+  return paths;
+}
+
+function grammarCompilerConformance(productions, compilerContract) {
+  if (compilerContract?.status !== "resolved") return [];
+  return (compilerContract.resolvedChildren || [])
+    .filter((child) => `${child.parent}.${child.child}` === "region.column")
+    .map((child) => {
+    const selector = `${child.parent}.${child.child}`;
+    const grammarRequired = grammarRequiredChildPaths(productions, child.grammarProduction, selector);
+    const compilerProperties = new Map((compilerContract.requiredActiveProperties || [])
+      .filter(({ path: propertyPath }) => propertyPath.startsWith(`${selector}.`))
+      .map((entry) => [entry.path, entry]));
+    // A compiler default does not make a property optional. The metadata keeps
+    // these facts separate: `isRequired` controls structural presence while
+    // `defaultValue` supplies the value used by the builder UI/compiler.
+    // Treating every defaulted property as optional caused a false mismatch for
+    // Media List column source.type (required, default DB_COLUMN).
+    const compilerRequired = new Set([...compilerProperties]
+      .filter(([, entry]) => entry.compilerRequired !== false)
+      .map(([propertyPath]) => propertyPath));
+    const compilerDefaulted = new Set([...compilerProperties]
+      .filter(([, entry]) => entry.defaulted)
+      .map(([propertyPath]) => propertyPath));
+    const sourceTypePath = `${selector}.source.type`;
+    // This probe owns the source.type contract. Other column groups are only
+    // comparable after their compiler metadata has been projected into the
+    // matching grammar group; treating an unselected group as a direct
+    // property would create unrelated false mismatches.
+    const mismatches = [sourceTypePath]
+      .filter((propertyPath) => grammarRequired.has(propertyPath) !== compilerRequired.has(propertyPath))
+      .map((propertyPath) => ({
+        path: propertyPath,
+        grammarRequired: grammarRequired.has(propertyPath),
+        compilerRequired: compilerRequired.has(propertyPath),
+        compilerDefaulted: compilerDefaulted.has(propertyPath)
+      }));
+    const sourceType = {
+      path: sourceTypePath,
+      grammarRequired: grammarRequired.has(sourceTypePath),
+      compilerRequired: compilerRequired.has(sourceTypePath),
+      compilerDefaulted: compilerDefaulted.has(sourceTypePath),
+      compilerDefaultValue: compilerProperties.get(sourceTypePath)?.defaultValue ?? null,
+      emission: compilerRequired.has(sourceTypePath) ? "required" : compilerDefaulted.has(sourceTypePath) ? "omit" : "unresolved"
+    };
+    return {
+      selector,
+      grammarProduction: child.grammarProduction,
+      status: mismatches.length ? "mismatch" : "matched",
+      blocking: mismatches.length > 0,
+      mismatches,
+      sourceType
+    };
+    });
+}
+
+export function probeMediaListGrammarConformance({ contract } = {}) {
+  return (contract?.compilerContract?.grammarConformance || [])
+    .filter(({ selector }) => selector === "region.column");
 }
 
 function dslValue(property, value) {
-  const match = (property?.lov?.values || []).find((item) => String(item.returnValue) === String(value));
-  if (match?.name) return match.name;
   if (value === "Y") return true;
   if (value === "N") return false;
   const fallback = [...COMPILER_VALUE_FALLBACKS].find(([, compilerToken]) => compilerToken === value);
-  return fallback?.[0] || value;
+  if (fallback) return fallback[0];
+  const match = (property?.lov?.values || []).find((item) => String(item.returnValue) === String(value));
+  if (match?.name) return match.name;
+  return value;
 }
 
 function conditionLeaves(condition) {
@@ -544,7 +668,7 @@ function activationCondition(condition, siblingProperties) {
   }
   const dependency = siblingProperties.find((property) =>
     String(property.propertyId || "") === String(condition.propertyId || "")
-    || property.propertyName === condition.propertyName);
+    || normalizeCompilerPropertyName(property.propertyName) === normalizeCompilerPropertyName(condition.propertyName));
   if (!dependency) return null;
   const operator = {
     EQUALS: "equals",
@@ -556,7 +680,7 @@ function activationCondition(condition, siblingProperties) {
   }[condition.type];
   if (!operator) return null;
   const result = {
-    property: dependency.propertyName,
+    property: normalizeCompilerPropertyName(dependency.propertyName),
     operator,
     missingAllowed: condition.hasToExist === false
   };
@@ -565,7 +689,16 @@ function activationCondition(condition, siblingProperties) {
   return result;
 }
 
-async function buildCompilerContract(layout, productions, requestedComponents, requestedChildren, requestedInstances, requestedGroups, selectedConditions) {
+async function buildCompilerContract(
+  layout,
+  productions,
+  requestedComponents,
+  requestedChildren,
+  requestedInstances,
+  requestedGroups,
+  selectedConditions,
+  compilerOracleHome
+) {
   const toolRoot = layout.packaged
     ? path.join(layout.root, "tools")
     : path.join(layout.root, "references/policies", "apexlang", "compiler-prop-map");
@@ -574,7 +707,7 @@ async function buildCompilerContract(layout, productions, requestedComponents, r
       import(pathToFileURL(path.join(toolRoot, "query-valid-props-normalize.mjs")).href),
       import(pathToFileURL(path.join(toolRoot, "query-valid-props-runtime.mjs")).href)
     ]);
-    const runtime = resolveOracleRuntime();
+    const runtime = resolveOracleRuntime(compilerOracleHome);
     const { metadata, buildId, metadataHash } = readOracleRuntimeMetadata(runtime.compilerJarPath);
     const map = buildOracleNormalizedMap({
       metadata,
@@ -598,7 +731,9 @@ async function buildCompilerContract(layout, productions, requestedComponents, r
         || grammarPropertyGroup(productions, condition.component, found.property.propertyName);
       assumptions.push({
         selector: condition.selector,
-        path: [condition.component, grammarGroup, found.property.propertyName].filter(Boolean).join("."),
+        path: [condition.component, grammarGroup, normalizeCompilerPropertyName(found.property.propertyName)]
+          .filter(Boolean)
+          .join("."),
         dslValue: condition.value,
         compilerPropertyId: found.property.propertyId || null,
         compilerValue: value
@@ -642,7 +777,7 @@ async function buildCompilerContract(layout, productions, requestedComponents, r
           const activeWhen = activationCondition(property.dependsOn, items);
           if (!activeWhen) continue;
           activationRules.push({
-            path: `${component}.${group}.${property.propertyName}`,
+            path: `${component}.${group}.${normalizeCompilerPropertyName(property.propertyName)}`,
             activeWhen,
             otherwise: "omit"
           });
@@ -661,9 +796,17 @@ async function buildCompilerContract(layout, productions, requestedComponents, r
           ? compilerConditionState(property.dependsOn, assumptionIndex)
           : "active";
         if (state !== "active") continue;
+        const propertyPath = [component, group, normalizeCompilerPropertyName(property.propertyName)]
+          .filter(Boolean)
+          .join(".");
         properties.push({
-          path: [component, group, property.propertyName].filter(Boolean).join("."),
-          compilerPropertyId: property.propertyId || null
+          path: propertyPath,
+          compilerPropertyId: property.propertyId || null,
+          ...(component === "region.column"
+            && property.defaultValue !== null
+            && property.defaultValue !== undefined
+            ? { defaulted: true, defaultValue: dslValue(property, property.defaultValue) }
+            : {})
         });
       }
     }
@@ -680,7 +823,8 @@ async function buildCompilerContract(layout, productions, requestedComponents, r
       resolvedChildren: resolvedChildren.map(({ record: _record, ...child }) => child),
       instances: instanceContracts,
       activationRules: [...new Map(activationRules.map((item) => [`${item.path}:${JSON.stringify(item.activeWhen)}`, item])).values()]
-        .sort((left, right) => left.path.localeCompare(right.path))
+        .sort((left, right) => left.path.localeCompare(right.path)
+          || JSON.stringify(left.activeWhen).localeCompare(JSON.stringify(right.activeWhen)))
     };
   } catch (error) {
     return {
@@ -847,7 +991,16 @@ function cacheFileName(grammarSha256, semanticRulesSha256, compilerIdentity, com
  * Child selector rules are retained as summaries but recursively expanded only
  * for child components included in the explicit selection.
  */
-export async function buildGrammarContract({ components, children = [], instances = [], groups = [], conditions = [], cacheDir = "", useCache = true } = {}) {
+export async function buildGrammarContract({
+  components,
+  children = [],
+  instances = [],
+  groups = [],
+  conditions = [],
+  cacheDir = "",
+  useCache = true,
+  compilerOracleHome = ""
+} = {}) {
   const requestedComponents = normalizeComponents(components || []);
   const requestedGroups = normalizeComponents(groups || []);
   const requestedChildren = normalizeChildren(children || [], requestedComponents);
@@ -876,8 +1029,10 @@ export async function buildGrammarContract({ components, children = [], instance
     requestedChildren,
     requestedInstances,
     requestedGroups,
-    selectedConditions
+    selectedConditions,
+    compilerOracleHome
   );
+  compilerContract.grammarConformance = grammarCompilerConformance(productions, compilerContract);
   const compilerIdentity = compilerContract.status === "resolved"
     ? `${compilerContract.buildID}:${compilerContract.metadataHash}`
     : `unavailable:${compilerContract.reason}`;

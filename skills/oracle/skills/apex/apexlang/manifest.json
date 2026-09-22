@@ -438,6 +438,10 @@
       "source": "skills/apexlang/page-components/regions/references/interactive-report/workflow-interactive-report.md"
     },
     {
+      "path": "references/domains/page-components/regions/region-display-selector/workflow-region-display-selector.md",
+      "source": "skills/apexlang/page-components/regions/references/region-display-selector/workflow-region-display-selector.md"
+    },
+    {
       "path": "references/domains/page-components/regions/registry.md",
       "source": "skills/apexlang/page-components/regions/references/registry.md"
     },
@@ -472,6 +476,10 @@
     {
       "path": "references/domains/shared-components/workflow-translations.md",
       "source": "skills/apexlang/shared-components/references/workflow-translations.md"
+    },
+    {
+      "path": "references/domains/template-components/comments.md",
+      "source": "skills/apexlang/page-components/template-components/references/comments.md"
     },
     {
       "path": "references/domains/template-components/registry.md",
@@ -608,6 +616,10 @@
     {
       "path": "references/policies/memory-bank/30-pages/apex.calendar.md",
       "source": "ai-context/memory-bank/30-pages/apex.calendar.md"
+    },
+    {
+      "path": "references/policies/memory-bank/30-pages/apex.cards-page.md",
+      "source": "ai-context/memory-bank/30-pages/apex.cards-page.md"
     },
     {
       "path": "references/policies/memory-bank/30-pages/apex.chart-page.md",
@@ -2262,6 +2274,14 @@
       "source": "ai-context/apexlang/templates/region-components/cards/cards._template_options.md"
     },
     {
+      "path": "templates/region-components/cards/cards.refresh-after-dialog.md",
+      "source": "ai-context/apexlang/templates/region-components/cards/cards.refresh-after-dialog.md"
+    },
+    {
+      "path": "templates/region-components/cards/cards.refresh-on-change.md",
+      "source": "ai-context/apexlang/templates/region-components/cards/cards.refresh-on-change.md"
+    },
+    {
       "path": "templates/region-components/cards/cards.rest-source.md",
       "source": "ai-context/apexlang/templates/region-components/cards/cards.rest-source.md"
     },
@@ -2754,6 +2774,10 @@
       "source": "ai-context/apexlang/templates/region-components/region-display-selector/region-display-selector._index.md"
     },
     {
+      "path": "templates/region-components/region-display-selector/region-display-selector.permutations.md",
+      "source": "ai-context/apexlang/templates/region-components/region-display-selector/region-display-selector.permutations.md"
+    },
+    {
       "path": "templates/region-components/region-display-selector/region-display-selector.standard.md",
       "source": "ai-context/apexlang/templates/region-components/region-display-selector/region-display-selector.standard.md"
     },
@@ -3238,12 +3262,28 @@
       "source": "ai-context/apexlang/templates/template-components/comments/README.md"
     },
     {
+      "path": "templates/template-components/comments/comments._common.md",
+      "source": "ai-context/apexlang/templates/template-components/comments/comments._common.md"
+    },
+    {
       "path": "templates/template-components/comments/comments._index.md",
       "source": "ai-context/apexlang/templates/template-components/comments/comments._index.md"
     },
     {
       "path": "templates/template-components/comments/comments._template_options.md",
       "source": "ai-context/apexlang/templates/template-components/comments/comments._template_options.md"
+    },
+    {
+      "path": "templates/template-components/comments/comments.apex-task-comments.md",
+      "source": "ai-context/apexlang/templates/template-components/comments/comments.apex-task-comments.md"
+    },
+    {
+      "path": "templates/template-components/comments/comments.partial-column.md",
+      "source": "ai-context/apexlang/templates/template-components/comments/comments.partial-column.md"
+    },
+    {
+      "path": "templates/template-components/comments/comments.permutations.md",
+      "source": "ai-context/apexlang/templates/template-components/comments/comments.permutations.md"
     },
     {
       "path": "templates/template-components/content-row/README.md",
@@ -3322,12 +3362,40 @@
       "source": "ai-context/apexlang/templates/template-components/media-list/README.md"
     },
     {
+      "path": "templates/template-components/media-list/media-list._common.md",
+      "source": "ai-context/apexlang/templates/template-components/media-list/media-list._common.md"
+    },
+    {
       "path": "templates/template-components/media-list/media-list._index.md",
       "source": "ai-context/apexlang/templates/template-components/media-list/media-list._index.md"
     },
     {
       "path": "templates/template-components/media-list/media-list._template_options.md",
       "source": "ai-context/apexlang/templates/template-components/media-list/media-list._template_options.md"
+    },
+    {
+      "path": "templates/template-components/media-list/media-list.partial.md",
+      "source": "ai-context/apexlang/templates/template-components/media-list/media-list.partial.md"
+    },
+    {
+      "path": "templates/template-components/media-list/media-list.report-avatar-badge.md",
+      "source": "ai-context/apexlang/templates/template-components/media-list/media-list.report-avatar-badge.md"
+    },
+    {
+      "path": "templates/template-components/media-list/media-list.report-base.md",
+      "source": "ai-context/apexlang/templates/template-components/media-list/media-list.report-base.md"
+    },
+    {
+      "path": "templates/template-components/media-list/media-list.report-grouped.md",
+      "source": "ai-context/apexlang/templates/template-components/media-list/media-list.report-grouped.md"
+    },
+    {
+      "path": "templates/template-components/media-list/media-list.report-layouts.md",
+      "source": "ai-context/apexlang/templates/template-components/media-list/media-list.report-layouts.md"
+    },
+    {
+      "path": "templates/template-components/media-list/media-list.report-link.md",
+      "source": "ai-context/apexlang/templates/template-components/media-list/media-list.report-link.md"
     },
     {
       "path": "templates/template-components/metric-card/README.md",
@@ -3344,6 +3412,30 @@
     {
       "path": "templates/template-components/metric-card/metric-card._template_options.md",
       "source": "ai-context/apexlang/templates/template-components/metric-card/metric-card._template_options.md"
+    },
+    {
+      "path": "templates/template-components/metric-card/metric-card.partial-minimal.md",
+      "source": "ai-context/apexlang/templates/template-components/metric-card/metric-card.partial-minimal.md"
+    },
+    {
+      "path": "templates/template-components/metric-card/metric-card.permutations.md",
+      "source": "ai-context/apexlang/templates/template-components/metric-card/metric-card.permutations.md"
+    },
+    {
+      "path": "templates/template-components/metric-card/metric-card.report-avatar-badge.md",
+      "source": "ai-context/apexlang/templates/template-components/metric-card/metric-card.report-avatar-badge.md"
+    },
+    {
+      "path": "templates/template-components/metric-card/metric-card.report-grouping-selection.md",
+      "source": "ai-context/apexlang/templates/template-components/metric-card/metric-card.report-grouping-selection.md"
+    },
+    {
+      "path": "templates/template-components/metric-card/metric-card.report-link.md",
+      "source": "ai-context/apexlang/templates/template-components/metric-card/metric-card.report-link.md"
+    },
+    {
+      "path": "templates/template-components/metric-card/metric-card.report-minimal.md",
+      "source": "ai-context/apexlang/templates/template-components/metric-card/metric-card.report-minimal.md"
     },
     {
       "path": "templates/template-components/template-component-profiles.json",

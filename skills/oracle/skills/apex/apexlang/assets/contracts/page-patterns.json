@@ -8,6 +8,26 @@
   },
   "patterns": [
     {
+      "id": "visual-summary-cards",
+      "name": "Visual summary cards",
+      "intent_keywords": ["visual summary", "people cards", "person cards", "product cards", "status cards", "status tiles", "entity cards", "cards region", "cards"],
+      "selection_require_any": ["visual summary", "people cards", "person cards", "product cards", "status cards", "status tiles", "entity cards", "cards region", "cards"],
+      "selection_exclude_any": ["faceted search", "facets", "filters", "filtering", "smart filters", "search page", "search cards", "cards search"],
+      "required_inputs": ["cards_source", "source_mode", "title_mapping"],
+      "generated_components": ["cards_region"],
+      "validation_rules": [
+        "CARDS_VISUAL_SUMMARY_PATTERN_REQUIRED_001",
+        "CARDS_SOURCE_MAPPING_REQUIRED_001",
+        "CARDS_INTERACTION_BOUNDARY_REQUIRED_001",
+        "CARDS_SECURITY_REQUIRED_001",
+        "CARDS_CONDITIONAL_STYLE_ALLOWLIST_REQUIRED_001"
+      ],
+      "reference_paths": [
+        "references/policies/memory-bank/30-pages/apex.cards-page.md",
+        "templates/region-components/cards/cards._common.md"
+      ]
+    },
+    {
       "id": "report-modal-form",
       "name": "Report plus modal form",
       "intent_keywords": ["report", "interactive report", "crud", "modal form", "drawer form", "create edit"],
@@ -48,12 +68,25 @@
       "reference_paths": ["references/domains/README.md", "references/workflows/apexlang/application-spec.template.md"]
     },
     {
+      "id": "smart-filter-search",
+      "name": "Smart Filter Search",
+      "intent_keywords": ["smart filter", "smart filters", "smart filter search", "smart filters region"],
+      "required_inputs": ["results_source", "base_region_static_id", "searchable_attributes", "match_semantics", "min_chars", "max_len", "tokenization_policy", "settings_contract", "security_scope", "performance_readiness", "generation_plan"],
+      "readiness_required_inputs": ["results_source", "base_region_static_id", "searchable_attributes", "match_semantics", "min_chars", "max_len", "tokenization_policy", "settings_contract", "security_scope", "performance_readiness", "generation_plan"],
+      "generated_components": ["smart_filters_region", "search_filter", "filtered_results_region"],
+      "validation_rules": ["SMART_FILTER_TOPOLOGY_REQUIRED_001", "SMART_FILTER_RESULTS_REGION_REQUIRED_001", "SMART_FILTER_RESULTS_REGION_ORDER_REQUIRED_001", "SMART_FILTER_BASE_SOURCE_CONTRACT_REQUIRED_001", "SMART_FILTER_SEARCH_SOURCE_REQUIRED_001", "SMART_FILTER_SEARCHABLE_COLUMNS_BASE_PROJECTION_REQUIRED_001", "SMART_FILTER_SECURITY_SCOPE_MATCH_REQUIRED_001", "SMART_FILTER_REFINEMENT_SOURCE_SCOPE_REQUIRED_001", "SMART_FILTER_SEARCH_BEHAVIOR_CONTRACT_REQUIRED_001", "SMART_FILTER_SETTINGS_VALUE_REQUIRED_001", "SMART_FILTER_PERFORMANCE_READINESS_REQUIRED_001", "SMART_FILTER_ACCESSIBILITY_GUIDANCE_REQUIRED_001", "SMART_FILTER_RUNTIME_ACCEPTANCE_REQUIRED_001"],
+      "reference_paths": [
+        "references/policies/memory-bank/30-pages/apex.smart-filter-search.md",
+        "templates/region-components/smart-filter-search/smart-filter-search._common.md"
+      ]
+    },
+    {
       "id": "faceted-search",
       "name": "Faceted search",
-      "intent_keywords": ["faceted search", "facets", "filters", "search page"],
+      "intent_keywords": ["faceted search", "facets", "filters", "filtering", "smart filters", "search page", "search cards", "cards search"],
       "required_inputs": ["results_source", "facet_columns", "results_region_alias"],
       "generated_components": ["faceted_search_region", "filtered_results_region", "facet_items"],
-      "validation_rules": ["FACET_SOURCE_DATA_TYPE_REQUIRED_001", "SMART_FILTER_RESULTS_REGION_REQUIRED_001"],
+      "validation_rules": ["FACET_SOURCE_DATA_TYPE_REQUIRED_001"],
       "reference_paths": [
         "templates/page-examples/faceted-search/faceted-search.example.md",
         "templates/region-components/faceted-search/faceted-search._common.md"

@@ -46,7 +46,7 @@
       {
         "id": "database-evidence",
         "rule_ids": ["DB_MODE_PROMPT_REQUIRED_001", "DB_CONN_REQUIRED_001", "DB_OBJECT_EVIDENCE_REQUIRED_001", "DB_METADATA_REQUIRED_REPORT_001", "DB_VERIFY_BEFORE_GENERATION_001"],
-        "profile_ids": ["interactive-report", "classic-report", "standalone-avatar", "form", "faceted-search"],
+        "profile_ids": ["interactive-report", "classic-report", "standalone-avatar", "media-list", "form", "faceted-search"],
         "enforcement_paths": ["tools/apexctl.mjs", "references/ops/sqlcl.md", "references/workflows/apex-generation/agents/20-agent-draft.md", "references/workflows/apex-generation/agents/30-agent-critique.md"],
         "source_sections": [
           {"heading": "DB Metadata Prerequisite Gate (NON-NEGOTIABLE)", "instruction_count": 49, "instruction_digest": "cca8061238d3156def2a38d6900f7a9821ae74f8f78cdc7c86806c7bf0cdd3ea"},
@@ -236,10 +236,75 @@
       ]
     },
     {
+      "id": "media-list",
+      "component_ids": ["media-list"],
+      "keywords": ["media list", "media list template component", "media list region", "standalone media list", "theme template component media list", "themetemplatecomponent medialist"],
+      "rule_ids": ["MEDIA_LIST_TEMPLATE_COMPONENT_CONTRACT_REQUIRED_001", "MEDIA_LIST_SOURCE_CAPABILITY_REQUIRED_001", "MEDIA_LIST_PARENT_REGION_REQUIRED_001", "MEDIA_LIST_PARENT_SLOT_UNSUPPORTED_001", "MEDIA_LIST_GRAMMAR_COMPILER_CONFORMANCE_REQUIRED_001", "DB_OBJECT_EVIDENCE_REQUIRED_001"],
+      "directives": [
+        "Use themeTemplateComponent/mediaList in partial or report mode and select the narrowest Media List scenario that covers the request.",
+        "For report mode, resolve region.column under themeTemplateComponent/mediaList from the active target-build grammar contract and emit exactly that named or unnamed column variant for every projection.",
+        "Require a verified source, deterministic top-level orderBy, and complete source projection coverage in report mode; keep partial mode free of report-only structures.",
+        "Synchronize Avatar and Badge display toggles with their plugin blocks and apply their shared accessibility, icon, URL, datatype, and semantic-state rules.",
+        "Use native responsive layout values and at most one sequenced link action with a structured same-app target; reject triggerAction until an owning dynamic action can be proven; emit grouping or nested optional properties only when the active target-build component contract exposes them.",
+        "Reject custom structural HTML/CSS, arbitrary URLs, custom link attributes, and fabricated empty rows.",
+        "Route only the supported source adapter localDatabase/sqlQuery for report mode; return Missing Inputs for REST, JSON, property graph, function-body, and sample-data adapters until an explicit adapter exists.",
+        "For nested regions, resolve the existing parent's exact template and allowed slot from the target catalog; use regionBody by default and never create a parent implicitly.",
+        "Use Content Row guidance only as a semantic comparison for compact repeated media rows; it must not override an explicit Media List owner."
+      ],
+      "guidance_paths": ["references/policies/memory-bank/10-global/apex.global.md", "references/policies/memory-bank/20-data/apex.sql.md", "references/policies/memory-bank/40-components/apex.templates.md", "references/policies/memory-bank/40-components/apex.region-contracts.md", "references/policies/memory-bank/40-components/apex.region-data-source.md", "references/policies/memory-bank/40-components/apex.region-interactions.md", "templates/template-components/content-row/content-row._common.md"],
+      "template_projections": [
+        {"path": "templates/template-components/media-list/media-list._common.md", "sections": ["Generation Rules", "Variable Contract", "Conditional Rendering Rules", "Responsive and Accessibility Contract", "Validation Checklist"]}
+      ],
+      "template_routes": [
+        {"keywords": ["partial", "single item"], "path": "templates/template-components/media-list/media-list.partial.md", "sections": ["Output Template", "Conditional Rendering Rules", "Validation Checklist"]},
+        {"keywords": ["avatar", "badge", "initials", "user initials", "profile picture", "profile pictures", "profile image", "status indicator", "status indicators", "status value"], "featureSignals": ["avatar", "image", "badge"], "path": "templates/template-components/media-list/media-list.report-avatar-badge.md", "sections": ["Output Template", "Avatar Variants", "Badge Variants", "Conditional Rendering Rules", "Validation Checklist"]},
+        {"keywords": ["link", "navigation", "action"], "featureSignals": ["link"], "path": "templates/template-components/media-list/media-list.report-link.md", "sections": ["Output Template", "Interaction Contract", "Conditional Rendering Rules", "Validation Checklist"]},
+        {"keywords": ["group", "grouping", "grouped"], "featureSignals": ["grouping"], "path": "templates/template-components/media-list/media-list.report-grouped.md", "sections": ["Capability Gate", "Output Template", "Conditional Rendering Rules", "Validation Checklist"]},
+        {"keywords": ["layout", "responsive", "grid", "horizontal"], "featureSignals": ["layout"], "path": "templates/template-components/media-list/media-list.report-layouts.md", "sections": ["Output Template", "Responsive Selection Matrix", "Conditional Rendering Rules", "Validation Checklist"]}
+      ],
+      "routing": {
+        "owner": "media-list",
+        "selectorGroups": {"direct": ["themeTemplateComponent/mediaList", "Media List template component"], "list-region": ["list region", "list-region", "shared list", "list template"], "classic-report": ["classic report", "classic report region", "report template"]},
+        "precedence": ["direct", "list-region", "classic-report"], "selectorWeights": {"direct": 2, "classic-report": 1, "list-region": 0.5}, "competingOrder": ["cards", "content-row", "timeline", "classic-report", "interactive-report"], "suppressedCandidates": {"media-list": ["list-region"], "list-region": ["media-list"], "classic-report": ["list-region", "media-list"]},
+        "aliases": ["media list", "media-list", "themeTemplateComponent/mediaList", "Media List template component"],
+        "semanticFallback": {"requiredSignalGroups": ["collection", "compact", "media"], "requireRowEvidence": true},
+        "mode": {"default": "report", "partialSignals": ["partial", "single item", "one item", "current item", "individual item"]},
+        "signalGroups": {
+          "collection": ["list", "feed", "directory", "rows", "items", "entries", "records", "results"],
+          "compact": ["compact", "scannable", "recent", "activity", "people"],
+          "media": ["image", "images", "thumbnail", "thumbnails", "avatar", "avatars", "profile picture", "profile pictures", "icon", "icons", "badge", "badges", "status", "statuses", "status indicator", "status indicators"]
+        },
+        "rowEvidence": ["list", "feed", "directory", "row", "rows", "item", "items", "entry", "entries", "record", "records", "result", "results"],
+        "competingSignals": {
+          "cards": ["card", "cards", "cards region"],
+          "content-row": ["content row", "content rows", "content-row"],
+          "timeline": ["timeline", "activity timeline", "event timeline"],
+          "classic-report": ["classic report", "classic report region", "report template"],
+          "interactive-report": ["interactive report", "interactive report region", "interactive data table"],
+          "list-region": ["list region", "list-region", "shared list", "list template", "@/media-list"]
+        },
+        "featureSignals": {
+          "avatar": ["avatar", "avatars", "profile picture", "profile pictures", "profile image", "profile images", "initials"],
+          "badge": ["badge", "badges", "status", "statuses", "status value", "status indicator", "status indicators"],
+          "image": ["image", "images", "thumbnail", "thumbnails", "icon", "icons"],
+          "link": ["link", "links", "navigation", "navigate", "action", "actions"],
+          "layout": ["layout", "responsive", "grid", "horizontal", "two column", "three column"],
+          "grouping": ["group", "groups", "grouping", "grouped"]
+        },
+        "sourceAdapters": {"partial": ["sessionState"], "report": ["localDatabase/sqlQuery"]},
+        "unsupportedFeatures": ["grouping"],
+        "placement": {
+          "topLevel": {"slot": "body"},
+          "nested": {"requiresParentRegion": true, "defaultSlot": "regionBody", "parentTemplates": {"@/standard": ["regionBody", "subRegions"], "@/content-block": ["regionBody", "subRegions"]}}
+        },
+        "semanticSupport": ["references/policies/memory-bank/40-components/apex.region-contracts.md", "templates/template-components/content-row/content-row._common.md"]
+      }
+    },
+    {
       "id": "dashboard",
-      "keywords": ["dashboard", "kpi", "metric card", "scorecard"],
-      "rule_ids": ["DASHBOARD_KPI_METRIC_CARD_REQUIRED_001", "DASHBOARD_LAYOUT_ROW_PLAN_REQUIRED_001", "METRIC_CARD_REGION_NORMALIZATION_REQUIRED_001", "METRIC_CARD_STANDARD_TEMPLATE_FORBIDDEN_001"],
-      "directives": ["Use one normalized Metric Card region for KPI strips and freeze the dashboard row plan before rendering."],
+      "keywords": ["dashboard", "kpi", "metric card", "metric cards", "metric card region", "metric card template component", "scorecard"],
+      "rule_ids": ["DASHBOARD_KPI_METRIC_CARD_REQUIRED_001", "DASHBOARD_LAYOUT_ROW_PLAN_REQUIRED_001", "METRIC_CARD_REGION_NORMALIZATION_REQUIRED_001", "METRIC_CARD_STANDARD_TEMPLATE_FORBIDDEN_001", "METRIC_CARD_REPORT_CONTRACT_REQUIRED_001"],
+      "directives": ["Use one normalized Metric Card region for KPI strips and freeze the dashboard row plan before rendering.", "Require settings.metric, complete source-column coverage, compiler-backed attribute values, mode-correct report-only properties, valid conditional attributes, and link-only Metric Card actions."],
       "guidance_paths": ["references/policies/memory-bank/30-pages/apex.dashboard.md", "references/policies/memory-bank/30-pages/apex.layout.md"],
       "template_projections": [
         {"path": "templates/template-components/metric-card/metric-card._common.md", "sections": ["Generation Rules", "Metric Card Column Data Types", "Guardrails"]}
@@ -266,6 +331,22 @@
       ]
     },
     {
+      "id": "smart-filter-search",
+      "keywords": ["smart filter", "smart filters", "smart filter search", "smart filters region", "searchable attributes"],
+      "rule_ids": ["STRUCTURED_PATTERN_PACK_REQUIRED_001", "COMPILER_TRUTH_EVIDENCE_REQUIRED_001", "DEFAULT_GUIDANCE_LAYER_REQUIRED_001"],
+      "directives": [
+        "Bind exactly one Smart Filters region to exactly one secured base results region through its explicit static id.",
+        "Freeze the searchable-attribute allowlist, match semantics, length bounds, and tokenization policy before generation.",
+        "Keep suggestions, refinements, authorization, and server-side conditions within the base region's effective security scope.",
+        "Require index strategy, statistics status, and expected-cardinality evidence before declaring performance readiness.",
+        "Treat the ticket UI values as compiler-gated requirements and never emit unsupported Smart Filters settings."
+      ],
+      "guidance_paths": ["references/policies/memory-bank/30-pages/apex.smart-filter-search.md"],
+      "template_projections": [
+        {"path": "templates/region-components/smart-filter-search/smart-filter-search._common.md", "sections": ["Generation Rules", "Guardrails"]}
+      ]
+    },
+    {
       "id": "dynamic-actions",
       "keywords": ["dynamic action", "set value", "execute javascript", "dialog closed", "refresh action"],
       "rule_ids": ["MODAL_REPORT_REFRESH_REQUIRED_001", "MASTER_DETAIL_DYNAMIC_ACTION_REQUIRED_001"],
@@ -280,10 +361,16 @@
     },
     {
       "id": "cards",
-      "keywords": ["cards", "cards region", "card navigation", "card media"],
-      "rule_ids": ["TEMPLATE_OPTIONS_EMITTED_VALUES_001"],
-      "directives": ["Select standard versus REST source, media shape, row action, advanced formatting, and exact template-option values before rendering."],
-      "guidance_paths": ["references/policies/memory-bank/40-components/apex.templates.md", "references/policies/memory-bank/40-components/apex.region-data-source.md"],
+      "keywords": ["cards", "cards region", "visual summary", "people cards", "product cards", "status tiles", "card navigation", "card media", "clickable cards", "responsive cards"],
+      "rule_ids": ["TEMPLATE_OPTIONS_EMITTED_VALUES_001", "CARDS_VISUAL_SUMMARY_PATTERN_REQUIRED_001", "CARDS_SOURCE_MAPPING_REQUIRED_001", "CARDS_INTERACTION_BOUNDARY_REQUIRED_001", "CARDS_SECURITY_REQUIRED_001", "CARDS_CONDITIONAL_STYLE_ALLOWLIST_REQUIRED_001"],
+      "directives": [
+        "Select standard SQL versus REST Data Source, then freeze the source-to-attribute mapping before rendering.",
+        "Prefer native title, subtitle, body, media, icon, badge, and action mappings; use only compiler-proven allowlisted conditional style properties.",
+        "Default to the Universal Theme automatic responsive layout and add a targeted Cards refresh only when its trigger is known.",
+        "Apply authenticated page access, evidenced authorization schemes, escaped advanced HTML, safe URL targets, and shared REST Web Credentials with exact URL restrictions.",
+        "Do not add Faceted Search, Smart Filters, search fields, facets, or filter orchestration under the visual-summary Cards pattern."
+      ],
+      "guidance_paths": ["references/policies/memory-bank/30-pages/apex.cards-page.md", "references/policies/memory-bank/40-components/apex.templates.md", "references/policies/memory-bank/40-components/apex.region-data-source.md", "references/policies/memory-bank/40-components/apex.region-interactions.md"],
       "template_projections": [
         {"path": "templates/region-components/cards/cards._common.md", "sections": ["Generation Rules", "Media Source Shapes", "Row Navigation Action Shape", "Conditional Rendering Rules", "Guardrails"]}
       ],
@@ -390,13 +477,13 @@
     {
       "rule_id": "AVATAR_IMAGE_URL_COLUMN_REQUIRED_001",
       "owner": "templates/template-components/avatar/avatar.report-image-url-column.md",
-      "applies_to": ["standalone avatar image", "Timeline nested avatar image", "Timeline avatar image", "avatar URL column image"],
-      "summary": "Standalone and Timeline-nested Avatar images use an image object with type urlColumn and a projected urlColumn value.",
+      "applies_to": ["standalone avatar image", "Timeline nested avatar image", "Timeline avatar image", "Comments nested avatar image", "Comments avatar image", "avatar URL column image"],
+      "summary": "Standalone, Timeline-nested, and Comments-nested Avatar images use an image object with type urlColumn and a projected urlColumn value.",
       "phases": ["generation", "validation", "repair"],
       "profile_ids": ["standalone-avatar"],
-      "component_ids": ["standalone-avatar", "timeline"],
+      "component_ids": ["standalone-avatar", "timeline", "comments"],
       "stop_behavior": "Reject unproven BLOB or alternate standalone Avatar image structures.",
-      "required_load_when": ["standalone avatar image generation", "Timeline avatar image generation", "avatar image validation"],
+      "required_load_when": ["standalone avatar image generation", "Timeline avatar image generation", "Comments avatar image generation", "Comments profile image", "Comments profile picture", "avatar image validation"],
       "enforced_by": ["runtime/internal/python/validate_apexlang.py"],
       "details_doc": "templates/template-components/avatar/avatar.report-image-url-column.md",
       "examples_doc": "templates/template-components/avatar/avatar.report-image-url-column.md"
@@ -404,16 +491,42 @@
     {
       "rule_id": "AVATAR_IMAGE_URL_SAFETY_REQUIRED_001",
       "owner": "templates/template-components/avatar/avatar.report-image-url-column.md",
-      "applies_to": ["standalone avatar image URL", "Timeline nested avatar image URL", "Timeline avatar image", "avatar URL-column security", "avatar external image URL"],
+      "applies_to": ["standalone avatar image URL", "Timeline nested avatar image URL", "Timeline avatar image", "Comments nested avatar image URL", "Comments avatar image", "avatar URL-column security", "avatar external image URL"],
       "summary": "Avatar URL-column images use canonical :APP_FILES or :APEX_FILES SQL bind concatenation with a static relative path, never arbitrary rendered URL values.",
       "phases": ["planning", "generation", "validation", "repair"],
       "profile_ids": ["standalone-avatar"],
-      "component_ids": ["standalone-avatar", "timeline"],
+      "component_ids": ["standalone-avatar", "timeline", "comments"],
       "stop_behavior": "Reject template/substitution tokens, AUTHENTICATED_URL_PREFIX, BLOB endpoints, traversal, raw URL columns, javascript:, data:, protocol-relative URLs, and absolute external URLs.",
-      "required_load_when": ["standalone avatar image generation", "Timeline avatar image generation", "avatar image URL security", "avatar image validation"],
+      "required_load_when": ["standalone avatar image generation", "Timeline avatar image generation", "Comments avatar image generation", "Comments profile image", "Comments profile picture", "avatar image URL security", "avatar image validation"],
       "enforced_by": ["runtime/internal/python/validate_apexlang.py"],
       "details_doc": "templates/template-components/avatar/avatar.report-image-url-column.md",
       "examples_doc": "templates/template-components/avatar/avatar.report-image-url-column.md"
+    },
+    {
+      "rule_id": "COMMENTS_NESTED_BADGE_UNSUPPORTED_001",
+      "owner": "references/domains/template-components/comments.md",
+      "applies_to": ["Comments badge on each comment", "badge inside Comments", "badge within Comments", "nested Comments badge", "badge to every comment", "badge per comment", "badge with each comment", "badge beside every comment"],
+      "summary": "Comments does not expose a compiler-supported nested plugin-badge contract; standalone Badge guidance must not be applied to individual Comments rows.",
+      "phases": ["planning", "generation", "validation", "repair"],
+      "component_ids": ["comments"],
+      "stop_behavior": "Do not emit plugin-badge inside Comments; use plain trusted attributes text, a separate standalone Badge region, or a component family with compiler-supported nested Badge semantics.",
+      "required_load_when": ["Comments badge on each comment", "badge inside Comments", "badge within Comments", "nested Comments badge", "badge to every comment", "badge per comment", "badge with each comment", "badge beside every comment"],
+      "enforced_by": ["assets/component-attributes.json"],
+      "details_doc": "references/domains/template-components/comments.md",
+      "examples_doc": "templates/template-components/comments/comments._common.md"
+    },
+    {
+      "rule_id": "COMMENTS_GROUPING_UNSUPPORTED_001",
+      "owner": "references/domains/template-components/comments.md",
+      "applies_to": ["Comments grouping", "grouped Comments", "comment grouping", "grouped comments"],
+      "summary": "Comments grouping metadata is present in the theme inventory but has no valid generated APEXlang application-source shape in the pinned compiler.",
+      "phases": ["planning", "generation", "validation", "repair"],
+      "component_ids": ["comments"],
+      "stop_behavior": "Do not emit plugin-grouping; use an ungrouped Comments region or a separately proven region composition.",
+      "required_load_when": ["Comments grouping", "grouped Comments", "comment grouping", "grouped comments"],
+      "enforced_by": ["runtime/internal/python/validate_apexlang.py"],
+      "details_doc": "references/domains/template-components/comments.md",
+      "examples_doc": "templates/template-components/comments/comments._common.md"
     },
     {
       "rule_id": "AVATAR_ICON_ALLOWLIST_REQUIRED_001",
@@ -875,6 +988,78 @@
       "examples_doc": "templates/region-components/interactive-report/interactive-report.standard.md"
     },
     {
+      "rule_id": "CARDS_VISUAL_SUMMARY_PATTERN_REQUIRED_001",
+      "owner": "references/policies/memory-bank/30-pages/apex.cards-page.md",
+      "applies_to": ["visual summary", "people cards", "person cards", "product cards", "status cards", "status tiles", "entity cards", "cards region"],
+      "component_ids": ["cards"],
+      "summary": "People, product, status, and entity visual summaries use the structured native Cards page pattern rather than Dashboard, Metric Card, or Interactive Grid synonym inference.",
+      "required_load_when": ["visual summary cards", "people cards", "product cards", "status tiles", "native cards page"],
+      "directives": ["Select SQL query or REST Data Source explicitly.", "Default to one native Cards region with Universal Theme automatic responsive layout.", "Keep filtering and search outside this pattern."],
+      "enforced_by": ["assets/contracts/page-patterns.json", "assets/contracts/page-construction-packs.json", "assets/apex-generation/components.registry.json", "assets/component-attributes.json", "runtime/internal/python/validate_apexlang.py"],
+      "details_doc": "references/policies/memory-bank/30-pages/apex.cards-page.md",
+      "examples_doc": "templates/region-components/cards/cards._common.md"
+    },
+    {
+      "rule_id": "CARDS_SOURCE_MAPPING_REQUIRED_001",
+      "owner": "references/policies/memory-bank/30-pages/apex.cards-page.md",
+      "applies_to": ["cards SQL source", "cards REST Data Source", "cards title", "cards subtitle", "cards body", "cards icon", "cards image", "cards badge", "conditional card style"],
+      "component_ids": ["cards"],
+      "summary": "Every requested Cards role must map to an evidenced SQL projection alias or authoritative REST data-profile column before APEXlang rendering.",
+      "required_load_when": ["cards source mapping", "cards data mapping", "conditional card styling"],
+      "directives": ["Record one source-to-attribute mapping for each requested role.", "Prefer native mappings over HTML expressions.", "Use only compiler-proven CSS-class properties and allowlisted semantic class tokens."],
+      "enforced_by": ["assets/contracts/page-construction-packs.json", "references/workflows/apex-generation/agents/30-agent-critique.md", "runtime/internal/python/validate_apexlang.py"],
+      "details_doc": "references/policies/memory-bank/30-pages/apex.cards-page.md",
+      "examples_doc": "templates/region-components/cards/cards._common.md"
+    },
+    {
+      "rule_id": "CARDS_INTERACTION_BOUNDARY_REQUIRED_001",
+      "owner": "references/policies/memory-bank/30-pages/apex.cards-page.md",
+      "applies_to": ["clickable cards", "cards refresh", "responsive cards", "cards filtering", "cards search"],
+      "component_ids": ["cards"],
+      "summary": "The visual-summary Cards pattern supports native card navigation, targeted refresh, and responsive layout but excludes Faceted Search and Smart Filters orchestration.",
+      "required_load_when": ["clickable cards", "dynamic cards refresh", "responsive cards grid", "cards with filters"],
+      "directives": ["Use declarative Cards targets with evidenced item mappings.", "Name the refresh trigger, Cards static ID, and page items to submit.", "Route filtering or search to its owning page pattern."],
+      "enforced_by": ["assets/contracts/page-construction-packs.json", "references/workflows/apex-generation/agents/30-agent-critique.md", "runtime/internal/python/validate_apexlang.py"],
+      "details_doc": "references/policies/memory-bank/30-pages/apex.cards-page.md",
+      "examples_doc": "templates/region-components/cards/cards._common.md"
+    },
+    {
+      "rule_id": "CARDS_SECURITY_REQUIRED_001",
+      "owner": "references/policies/memory-bank/30-pages/apex.cards-page.md",
+      "applies_to": ["cards", "clickable cards", "cards HTML", "cards authorization", "cards URL"],
+      "component_ids": ["cards"],
+      "summary": "Cards pages require authenticated access, evidenced authorization boundaries, escaped advanced HTML, and allowlisted navigation and media URLs.",
+      "required_load_when": ["cards", "clickable cards", "cards advanced formatting", "cards media"],
+      "directives": ["Authorize Cards data and navigation targets independently.", "Escape untrusted advanced-formatting values with !HTML.", "Reject active-content, protocol-relative, embedded-credential, and untrusted dynamic URLs."],
+      "enforced_by": ["runtime/internal/python/validate_apexlang.py", "references/workflows/apex-generation/agents/30-agent-critique.md"],
+      "details_doc": "references/policies/memory-bank/30-pages/apex.cards-page.md",
+      "examples_doc": "templates/region-components/cards/cards._common.md"
+    },
+    {
+      "rule_id": "CARDS_REST_SECURITY_REQUIRED_001",
+      "owner": "templates/region-components/cards/cards.rest-source.md",
+      "applies_to": ["cards REST Data Source", "REST cards", "REST source", "Web Credential"],
+      "component_ids": ["cards"],
+      "summary": "REST-backed Cards use an existing shared REST Data Source and Web Credential, HTTPS, exact Valid for URLs restrictions, and authoritative profile constraints.",
+      "required_load_when": ["cards REST Data Source", "REST cards", "REST source"],
+      "directives": ["Never emit endpoint or credential literals in the Cards region.", "Restrict Web Credential Valid for URLs to exact HTTPS operation prefixes.", "Constrain REST media fields to documented safe origins."],
+      "enforced_by": ["runtime/internal/python/validate_apexlang.py", "references/workflows/apex-generation/agents/30-agent-critique.md", "templates/region-components/cards/cards.rest-source.md"],
+      "details_doc": "templates/region-components/cards/cards.rest-source.md",
+      "examples_doc": "templates/region-components/cards/cards.rest-source.md"
+    },
+    {
+      "rule_id": "CARDS_CONDITIONAL_STYLE_ALLOWLIST_REQUIRED_001",
+      "owner": "templates/region-components/cards/cards._common.md",
+      "applies_to": ["conditional card style", "card CSS classes", "status card style"],
+      "component_ids": ["cards"],
+      "summary": "Conditional Cards classes must resolve only to the fixed Universal Theme semantic allowlist or NULL.",
+      "required_load_when": ["conditional card styling", "card CSS classes", "status tiles"],
+      "directives": ["Permit only u-normal, u-hot, u-info, u-success, u-warning, u-danger, or NULL.", "Reject raw user or service class values."],
+      "enforced_by": ["runtime/internal/python/validate_apexlang.py"],
+      "details_doc": "templates/region-components/cards/cards._common.md",
+      "examples_doc": "templates/region-components/cards/cards.standard.md"
+    },
+    {
       "rule_id": "DASHBOARD_KPI_METRIC_CARD_REQUIRED_001",
       "owner": "references/policies/memory-bank/30-pages/apex.dashboard.md",
       "applies_to": ["dashboard", "kpi", "metric card"],
@@ -883,6 +1068,60 @@
       "enforced_by": ["runtime/internal/python/validate_apexlang.py"],
       "details_doc": "references/policies/memory-bank/30-pages/apex.dashboard.md",
       "examples_doc": "templates/template-components/metric-card/metric-card._common.md"
+    },
+    {
+      "rule_id": "METRIC_CARD_REPORT_CONTRACT_REQUIRED_001",
+      "owner": "templates/template-components/metric-card/metric-card._common.md",
+      "applies_to": ["metric card", "kpi card", "scorecard"],
+      "summary": "Report-mode Metric Cards require settings.metric, complete child-column coverage, compiler-backed attributes, and correct text versus column-selector mappings.",
+      "required_load_when": ["metric card", "metric cards", "kpi card", "scorecard"],
+      "enforced_by": ["runtime/internal/python/validate_apexlang.py"],
+      "details_doc": "templates/template-components/metric-card/metric-card._common.md",
+      "examples_doc": "templates/template-components/metric-card/metric-card.report-minimal.md"
+    },
+    {
+      "rule_id": "METRIC_CARD_PARTIAL_SCOPE_REQUIRED_001",
+      "owner": "templates/template-components/metric-card/metric-card.partial-minimal.md",
+      "applies_to": ["partial metric card", "metric card partial mode", "metric card permutations"],
+      "summary": "Partial-mode Metric Cards omit report-scoped layout, item classes, grouping, row selection, messages, and pagination while retaining valid component-scope content and link actions.",
+      "required_load_when": ["partial metric card", "metric card partial mode", "metric card permutations"],
+      "enforced_by": ["assets/component-attributes.json", "runtime/internal/python/validate_apexlang.py"],
+      "details_doc": "templates/template-components/metric-card/metric-card._common.md",
+      "examples_doc": "templates/template-components/metric-card/metric-card.partial-minimal.md"
+    },
+    {
+      "rule_id": "METRIC_CARD_AVATAR_BADGE_REQUIRED_001",
+      "owner": "templates/template-components/metric-card/metric-card.report-avatar-badge.md",
+      "applies_to": ["metric card avatar", "metric card badge", "kpi avatar", "kpi badge"],
+      "summary": "Metric Card nested Avatar and Badge groups require compiler-backed properties, matching Avatar payloads, image-safe Avatar style dependencies, complete Badge label/value fields, and projected bare-alias selectors.",
+      "required_load_when": ["metric card avatar", "metric card badge", "metric card avatar and badge", "kpi avatar", "kpi badge"],
+      "enforced_by": ["assets/component-attributes.json", "runtime/internal/python/validate_apexlang.py"],
+      "details_doc": "templates/template-components/metric-card/metric-card._common.md",
+      "examples_doc": "templates/template-components/metric-card/metric-card.report-avatar-badge.md"
+    },
+    {
+      "rule_id": "METRIC_CARD_LINK_ACTION_REQUIRED_001",
+      "owner": "templates/template-components/metric-card/metric-card.report-link.md",
+      "applies_to": ["metric card link", "metric card navigation", "kpi drilldown"],
+      "summary": "Metric Card row navigation uses only action.position link with declarative behavior and no action template.",
+      "directives": [
+        "Use redirectThisApp or redirectOtherApp with a structured target, redirectUrl with a reviewed safe targetUrl, or triggerAction with no target.",
+        "Reject targetUrl substitutions outside query parameters so the scheme, host, path, and fragment remain static; also reject unsafe URL schemes and linkAttributes containing inline handlers, URL overrides, scriptable CSS, unsafe dynamic substitutions, or unsafe new-window attributes."
+      ],
+      "required_load_when": ["metric card link", "metric card drilldown", "kpi navigation"],
+      "enforced_by": ["assets/component-policies.json", "runtime/internal/python/validate_apexlang.py"],
+      "details_doc": "templates/template-components/metric-card/metric-card._common.md",
+      "examples_doc": "templates/template-components/metric-card/metric-card.report-link.md"
+    },
+    {
+      "rule_id": "METRIC_CARD_SELECTION_ITEMS_REQUIRED_001",
+      "owner": "templates/template-components/metric-card/metric-card.report-grouping-selection.md",
+      "applies_to": ["metric card selection", "metric card grouping", "selectable kpi cards"],
+      "summary": "Metric Card selection modes require stable row identity and mode-specific same-page item wiring; grouped output requires grouped columns and deterministic ordering.",
+      "required_load_when": ["metric card selection", "grouped metric cards", "selectable metric cards"],
+      "enforced_by": ["runtime/internal/python/validate_apexlang.py"],
+      "details_doc": "templates/template-components/metric-card/metric-card._common.md",
+      "examples_doc": "templates/template-components/metric-card/metric-card.report-grouping-selection.md"
     },
     {
       "rule_id": "BADGE_TEMPLATE_COMPONENT_CONTRACT_REQUIRED_001",
@@ -903,6 +1142,84 @@
       "enforced_by": ["assets/apex-generation/components.registry.json", "runtime/internal/python/validate_apexlang.py"],
       "details_doc": "templates/template-components/badge/badge._common.md",
       "examples_doc": "templates/template-components/badge/badge.report-minimal.md"
+    },
+    {
+      "rule_id": "MEDIA_LIST_TEMPLATE_COMPONENT_CONTRACT_REQUIRED_001",
+      "owner": "templates/template-components/media-list/media-list._common.md",
+      "component_ids": ["media-list"],
+      "applies_to": ["media list", "media list template component", "media list region", "standalone media list"],
+      "summary": "Media List regions use the native partial or report template component with target-build-resolved report columns, native responsive layouts, and capability-gated Avatar, Badge, grouping, and single-link composition.",
+      "required_load_when": ["media list template component", "media list region", "standalone media list", "themeTemplateComponent/mediaList"],
+      "directives": [
+        "Resolve the Media List report-column declaration and properties from the active target-build grammar and component contracts; never mix named and unnamed variants.",
+        "Require source, deterministic orderBy, and complete projection coverage in report mode; omit report-only blocks and settings in partial mode.",
+        "Keep settings.displayAvatar and settings.displayBadge synchronized with their native plugin blocks and apply the shared Avatar and Badge safety and accessibility contracts.",
+        "Intersect theme inventory with the active target-build component contract before emitting grouping or nested Avatar/Badge properties; use only pinned Font APEX icons in supported features.",
+        "Allow at most one link-position action, require layout.sequence, use a reviewed structured same-app target, reject triggerAction until owning dynamic-action validation exists, and reject targetUrl and custom linkAttributes.",
+        "Use only native layout values for responsive presentation and do not inject structural HTML or CSS into SQL or template settings."
+      ],
+      "enforced_by": ["assets/apex-generation/components.registry.json", "runtime/internal/python/validate_apexlang.py"],
+      "details_doc": "templates/template-components/media-list/media-list._common.md",
+      "examples_doc": "templates/template-components/media-list/media-list.report-base.md"
+    },
+    {
+      "rule_id": "MEDIA_LIST_SOURCE_CAPABILITY_REQUIRED_001",
+      "owner": "templates/template-components/media-list/media-list._common.md",
+      "component_ids": ["media-list"],
+      "applies_to": ["media list source", "media list REST source", "media list JSON source"],
+      "summary": "Media List report generation currently supports only localDatabase/sqlQuery; unsupported source adapters stop with Missing Inputs.",
+      "required_load_when": ["media list source", "media list REST source", "media list JSON source"],
+      "enforced_by": ["runtime/internal/python/validate_apexlang.py", "runtime/lib/catalogs.mjs"],
+      "details_doc": "templates/template-components/media-list/media-list._common.md"
+    },
+    {
+      "rule_id": "MEDIA_LIST_PARENT_REGION_REQUIRED_001",
+      "owner": "templates/template-components/media-list/media-list._common.md",
+      "component_ids": ["media-list"],
+      "applies_to": ["nested media list", "media list parent region"],
+      "summary": "Nested Media List regions require an existing, unambiguous Standard or Content Block parent with a verified supported slot.",
+      "required_load_when": ["nested media list", "media list parent region"],
+      "enforced_by": ["runtime/internal/python/validate_apexlang.py"],
+      "details_doc": "templates/template-components/media-list/media-list._common.md"
+    },
+    {
+      "rule_id": "MEDIA_LIST_PARENT_SLOT_UNSUPPORTED_001",
+      "owner": "templates/template-components/media-list/media-list._common.md",
+      "component_ids": ["media-list"],
+      "applies_to": ["media list parent slot", "nested media list slot"],
+      "summary": "Nested Media List content uses regionBody by default and accepts subRegions only when explicitly requested and supported by the parent template.",
+      "required_load_when": ["media list parent slot", "nested media list slot"],
+      "enforced_by": ["runtime/internal/python/validate_apexlang.py"],
+      "details_doc": "templates/template-components/media-list/media-list._common.md"
+    },
+    {
+      "rule_id": "MEDIA_LIST_GRAMMAR_COMPILER_CONFORMANCE_REQUIRED_001",
+      "owner": "runtime/grammar_contract.mjs",
+      "component_ids": ["media-list"],
+      "applies_to": ["media list grammar", "media list target build"],
+      "summary": "Media List grammar-required properties must agree with target compiler metadata; a required-versus-defaulted mismatch blocks generation.",
+      "required_load_when": ["media list grammar", "media list target build"],
+      "enforced_by": ["runtime/grammar_contract.mjs", "runtime/runtime.bundle.mjs"],
+      "details_doc": "runtime/grammar_contract.mjs"
+    },
+    {
+      "rule_id": "REGION_DISPLAY_SELECTOR_CONTRACT_REQUIRED_001",
+      "owner": "references/domains/page-components/regions/region-display-selector/workflow-region-display-selector.md",
+      "applies_to": ["region display selector", "RDS", "switch between regions", "view single region", "scroll window"],
+      "summary": "A Region Display Selector is one data-free controller for at least two explicitly opted-in sibling regions, with mode-dependent settings and no header or breadcrumb targets.",
+      "phases": ["planning", "generation", "validation", "repair"],
+      "component_ids": ["region-display-selector"],
+      "stop_behavior": "Reject ambiguous membership, multiple controllers, fewer than two targets, data sources, invalid Show All use, and header or breadcrumb targets.",
+      "required_load_when": ["Region Display Selector generation", "RDS generation", "Region Display Selector validation"],
+      "directives": [
+        "Resolve the exact controlled-region list before generation.",
+        "Set advanced.regionDisplaySelector: true only on selected sibling regions.",
+        "Omit settings.includeShowAll for scrollWindow mode.",
+        "Treat RDS visibility as presentation, never authorization."
+      ],
+      "enforced_by": ["runtime/internal/python/validate_apexlang.py"],
+      "details_doc": "references/domains/page-components/regions/region-display-selector/workflow-region-display-selector.md",
+      "examples_doc": "templates/region-components/region-display-selector/region-display-selector.standard.md"
     },
     {
       "rule_id": "APPLICATION_SPEC_REQUIRED_001",
@@ -928,9 +1245,9 @@
     {
       "rule_id": "STRUCTURED_PATTERN_PACK_REQUIRED_001",
       "owner": "assets/contracts/page-construction-packs.json",
-      "applies_to": ["page patterns", "report modal form", "dashboard", "master-detail", "faceted search", "lov-backed form"],
+      "applies_to": ["page patterns", "visual summary cards", "report modal form", "dashboard", "master-detail", "smart filter", "smart filters", "smart filter search", "faceted search", "lov-backed form"],
       "summary": "Common page workflows should be selected from structured pattern packs before falling back to Markdown template inference.",
-      "required_load_when": ["page pattern selection", "report modal form", "dashboard", "master-detail", "faceted search", "lov-backed form"],
+      "required_load_when": ["page pattern selection", "visual summary cards", "report modal form", "dashboard", "master-detail", "smart filter", "smart filters", "smart filter search", "faceted search", "lov-backed form"],
       "enforced_by": ["assets/contracts/page-patterns.json", "assets/contracts/page-construction-packs.json"],
       "details_doc": "assets/contracts/page-construction-packs.json",
       "examples_doc": "assets/contracts/page-patterns.json"

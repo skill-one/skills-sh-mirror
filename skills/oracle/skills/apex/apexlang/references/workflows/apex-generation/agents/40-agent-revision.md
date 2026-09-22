@@ -35,6 +35,7 @@ Inputs
 </repair_contract>
 
 <stop_conditions>
+- Do not revise a blocked context capsule into an artifact. Return its concrete `routing_decision.missingInputs` until a new ready capsule is resolved.
 - Stop with Missing Inputs when a recipe needs an unproven schema object, target, mapping, or property.
 - Stop when the recipe and compiler/live evidence conflict.
 - Do not mark completion until all required checks pass.

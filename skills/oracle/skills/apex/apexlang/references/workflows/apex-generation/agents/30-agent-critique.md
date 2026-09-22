@@ -26,6 +26,7 @@ Inputs
 </task_scope>
 
 <review_contract>
+- Fail a draft or plan that emitted an artifact after a context capsule reported `generation_status: blocked`, `routing_decision.status: blocked`, or non-empty `routing_decision.missingInputs`.
 - Fail unresolved schema objects, pseudo-identifiers, metavariables, target mappings, or compiler legality.
 - Fail plan drift, unsupported component families, invented properties/options/classes, invalid source modes, and missing required guidance/security.
 - Fail when the projected template/rule source and emitted artifact disagree.
@@ -46,7 +47,7 @@ Inputs
 </stop_conditions>
 
 Required coverage remains validator/template owned
-- `GENERATION_PLAN_REQUIRED_001`, `GENERATION_PLAN_DRIFT_001`, `RULES_FIRST_WORKFLOW_REQUIRED_001`, `HUMAN_INTERVENTION_REQUIRED_001`, `COMPILER_TRUTH_EVIDENCE_MALFORMED_001`, `STOP_CONDITION_BYPASSED_001`, `APP_TEMPLATE_ARTIFACT_LEAK_001`, `CLASSIC_REPORT_HIDDEN_COLUMN_HEADING_FORBIDDEN_001`, `CLASSIC_REPORT_COMPONENT_APPEARANCE_REQUIRED_001`, `INTERACTIVE_REPORT_LINK_COLUMN_TYPE_FORBIDDEN_001`, `SMART_FILTER_RESULTS_REGION_REQUIRED_001`, `IMAGE_UPLOAD_LEGACY_PROPERTY_FORBIDDEN_001`, `DASHBOARD_LAYOUT_ROW_PLAN_REQUIRED_001`, `METRIC_CARD_STANDARD_TEMPLATE_FORBIDDEN_001`, `CONTENT_ROW_SELECTION_ITEMS_REQUIRED_001`, `MASTER_DETAIL_CONTENT_ROW_ACTION_REQUIRED_001`, and `SQL_PLSQL_LOB_COMPARISON_KEY_FORBIDDEN_001`.
+- `GENERATION_PLAN_REQUIRED_001`, `GENERATION_PLAN_DRIFT_001`, `RULES_FIRST_WORKFLOW_REQUIRED_001`, `HUMAN_INTERVENTION_REQUIRED_001`, `COMPILER_TRUTH_EVIDENCE_MALFORMED_001`, `STOP_CONDITION_BYPASSED_001`, `APP_TEMPLATE_ARTIFACT_LEAK_001`, `CLASSIC_REPORT_HIDDEN_COLUMN_HEADING_FORBIDDEN_001`, `CLASSIC_REPORT_COMPONENT_APPEARANCE_REQUIRED_001`, `INTERACTIVE_REPORT_LINK_COLUMN_TYPE_FORBIDDEN_001`, `SMART_FILTER_TOPOLOGY_REQUIRED_001`, `SMART_FILTER_RESULTS_REGION_REQUIRED_001`, `SMART_FILTER_BASE_SOURCE_CONTRACT_REQUIRED_001`, `SMART_FILTER_SEARCHABLE_COLUMNS_BASE_PROJECTION_REQUIRED_001`, `SMART_FILTER_SECURITY_SCOPE_MATCH_REQUIRED_001`, `SMART_FILTER_REFINEMENT_SOURCE_SCOPE_REQUIRED_001`, `SMART_FILTER_SEARCH_BEHAVIOR_CONTRACT_REQUIRED_001`, `SMART_FILTER_SETTINGS_VALUE_REQUIRED_001`, `SMART_FILTER_PERFORMANCE_READINESS_REQUIRED_001`, `SMART_FILTER_ACCESSIBILITY_GUIDANCE_REQUIRED_001`, `SMART_FILTER_RUNTIME_ACCEPTANCE_REQUIRED_001`, `IMAGE_UPLOAD_LEGACY_PROPERTY_FORBIDDEN_001`, `DASHBOARD_LAYOUT_ROW_PLAN_REQUIRED_001`, `METRIC_CARD_STANDARD_TEMPLATE_FORBIDDEN_001`, `CONTENT_ROW_SELECTION_ITEMS_REQUIRED_001`, `MASTER_DETAIL_CONTENT_ROW_ACTION_REQUIRED_001`, and `SQL_PLSQL_LOB_COMPARISON_KEY_FORBIDDEN_001`.
 - The selected sources enforce Metric Card multi-row `UNION ALL` patterns, settings/plugin hook legality, five dashboard charts as one `two-up-equal` row followed by one `three-up-equal` row, Cards image mapping through the native cards media block, primary-key identity for row selection, grouped-column ordering, `focusOnly` without page-item references, and master-detail `fullRowLink` context setting. `ORA-22848` remains a blocking LOB comparison signal.
 - Translation capsules require `translationMethod: textMessages` and APP_TEXT consumption rewiring.
 - Repair authority is projected from `assets/validator-fix-recipes.json`; do not load that complete asset.

@@ -367,6 +367,10 @@ Short version pointers for features added in recent releases. Each reference fil
 - `report.to_terminal()`: ASCII report for non-Jupyter runs
 - Overall strategy execution 3.4x faster
 
+## Financial Data Alignment
+
+Never use `reindex()` or `reindex_like()`, including on final positions. FinLabDataFrame automatically reshapes dates and stock columns during arithmetic, comparisons and boolean operations: `sales_to_price = eps_sales / close`. Do not manually align or bypass this behavior with pandas/NumPy. Calculate quarterly shifts and rolling windows before combining with daily data; set rebalance schedules with `sim(position, resample=...)`. Use `index_str_to_date()` only to inspect dates. On errors, inspect types and consult [dataframe-reference.md](dataframe-reference.md).
+
 ## Prevent Lookahead Bias
 
 **Critical:** Avoid using future data to make past decisions:
@@ -379,7 +383,7 @@ prev_close = close.shift(1)
 # prev_close = close.iloc[-2]  # WRONG
 
 # ✅ GOOD: Leave index as-is even with strings like "2025Q1"
-# FinLabDataFrame aligns by shape automatically
+# FinLabDataFrame operators align dates and stock columns automatically
 
 # ❌ BAD: Don't manually assign to df.index
 # df.index = new_index  # FORBIDDEN

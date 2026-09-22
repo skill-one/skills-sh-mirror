@@ -32,11 +32,12 @@ use super::{
     ActivatedSemanticSearch, AdmittedTier, SemanticGenerationReader, SemanticReaderError,
     SemanticReaderResult, SemanticSearchBatch, canonical_document,
 };
-use crate::search::semantic_manifest::selection::SemanticSelectionMetadata;
+use crate::search::semantic_manifest::selection::{
+    SelectedSemanticVectors, SemanticSelectionMetadata,
+};
 use crate::search::semantic_manifest::{
     SemanticArtifactRole, SemanticCorpusSnapshotIdentity, SemanticCurrentPointerV1,
     SemanticGenerationArtifact, SemanticGenerationError, SemanticGenerationManifestV1, TierKind,
-    ValidatedSemanticGeneration,
 };
 
 #[cfg(all(test, any(target_os = "linux", target_os = "android")))]
@@ -141,6 +142,9 @@ impl SemanticSelectionIdentity {
 /// Clones share both artifact images and the complete publication identity.
 /// Selection does not imply complete coverage: consult the manifest's per-tier
 /// covered/selected counts. Hash-control queries remain hash-control queries.
+/// Opening validates mandatory vector files only; missing/corrupt optional ANN
+/// files do not prevent exact retrieval. Graph admission is explicit in with_ann().
+/// Use load_current_semantic_generation for a strict audit of ALL selected files.
 #[derive(Debug, Clone)]
 pub struct SelectedSemanticGeneration {
     data_dir: PathBuf,
@@ -175,7 +179,7 @@ impl SelectedSemanticGeneration {
         };
         let metadata = SemanticSelectionMetadata::read(&data_dir, Some(expected_corpus))?;
         budget.check(&metadata.manifest)?;
-        let selected = metadata.validate_artifacts(&data_dir)?;
+        let selected = metadata.preflight_vectors(&data_dir)?;
 
         let fast = admit_tier(&selected, SemanticArtifactRole::FastVector)?;
         let quality = admit_tier(&selected, SemanticArtifactRole::QualityVector)?;
@@ -213,6 +217,10 @@ impl SelectedSemanticGeneration {
             generation,
             ann: Arc::new(super::ann::AnnSelection::default()),
         };
+        // Authenticate each serving owner exactly once, then close the handoff
+        // against the originally opened file identities before exposing a reader.
+        // Metadata-only selection is never itself a content-validation receipt.
+        selected.verify_paths()?;
         after_admission();
         // All serving bytes are now owned and witness-checked. Revalidate the
         // pointer and manifest through the SAME metadata parser, not every
@@ -293,7 +301,7 @@ impl SelectedSemanticGeneration {
         }
 
         // Metadata is not an admission receipt. Every genuinely new selection
-        // still crosses complete artifact and sealed-owner validation. Recheck
+        // still crosses complete vector and sealed-owner validation. Recheck
         // ordering afterward too: current.json may change while it is opened.
         let candidate = Self::open_current(&self.data_dir, expected_corpus, budget)?;
         if !self
@@ -453,7 +461,7 @@ impl SelectedSemanticBatch {
 }
 
 fn admit_tier(
-    selected: &ValidatedSemanticGeneration,
+    selected: &SelectedSemanticVectors,
     role: SemanticArtifactRole,
 ) -> SemanticSelectionResult<Option<AdmittedTier>> {
     let artifacts: Vec<_> = selected.manifest.artifacts_for(role).collect();

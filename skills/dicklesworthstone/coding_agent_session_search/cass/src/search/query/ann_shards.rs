@@ -8,62 +8,44 @@
 use super::*;
 use crate::search::ann_index::{AnnExactFallbackReason, AnnExactFallbackStats, AnnSearchStats};
 
+mod execution;
+mod refinement;
+use refinement::{NativeRefillBudget, accumulate_native_stats};
+
 pub(super) struct SemanticAnnShardSet {
     artifacts: Arc<Vec<SemanticIndexArtifact>>,
     graphs: Vec<FsHnswIndex>,
 }
 
-impl SemanticAnnShardSet {
-    /// Recover a sparse native message page from the same complete exact cohort.
-    /// Native top-k is selected before metadata filtering and message collapse;
-    /// a full raw window therefore does not prove there are no more matching
-    /// messages. Do not combine native and exact scores, or repair just one shard.
-    /// The existing exact driver owns its bounded message-refill policy.
-    pub(super) fn search_with_exact_fallback(
-        &self,
-        context: &SemanticCandidateContext,
-        embedding: &[f32],
-        fetch_limit: usize,
-        filter: Option<&dyn FsSearchFilter>,
-    ) -> Result<(
-        Vec<VectorSearchResult>,
-        SemanticCandidateRetryState,
-        Option<AnnSearchStats>,
-    )> {
-        let (hits, retry, mut stats) =
-            self.search(&context.artifacts, embedding, fetch_limit, filter)?;
-        if hits.len() >= fetch_limit || !retry.has_more_candidates {
-            return Ok((hits, retry, stats));
-        }
+/// Only errors after query/owner validation may degrade to exact retrieval.
+/// Keep completed native measurements, but never carry partial hits or raw
+/// backend diagnostics across the recovery boundary.
+#[derive(Debug)]
+struct NativeAnnSearchFailure {
+    shard: usize,
+    completed_stats: AnnSearchStats,
+}
 
-        let reason = if filter.is_some() {
-            AnnExactFallbackReason::FilteredCandidateUnderfill
-        } else {
-            AnnExactFallbackReason::MessageCandidateUnderfill
-        };
-        let started = std::time::Instant::now();
-        let (exact, exact_retry) =
-            SearchClient::search_exact_semantic_indexes(context, embedding, fetch_limit, filter)?;
-        let receipt = AnnExactFallbackStats {
-            reason,
-            shard_count: context.artifacts.len(),
-            search_time_us: u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX),
-            returned_messages: exact.len(),
-        };
-        tracing::debug!(
-            ?reason,
-            native_messages = hits.len(),
-            exact_messages = exact.len(),
-            shards = context.artifacts.len(),
-            "native message underfill recovered through the retained exact cohort"
-        );
-        if let Some(stats) = stats.as_mut() {
-            stats.is_approximate = false;
-            stats.exact_fallback = Some(receipt);
+impl NativeAnnSearchFailure {
+    fn new(shard: usize, mut completed_stats: AnnSearchStats) -> Self {
+        // An incomplete native cohort has no meaningful recall estimate.
+        completed_stats.estimated_recall = 0.0;
+        Self {
+            shard,
+            completed_stats,
         }
-        Ok((exact, exact_retry, stats))
     }
+}
 
+impl std::fmt::Display for NativeAnnSearchFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "native ANN shard {} search failed", self.shard)
+    }
+}
+
+impl std::error::Error for NativeAnnSearchFailure {}
+
+impl SemanticAnnShardSet {
     /// Cheap retained metadata check, before allocating any native graph.
     pub(super) fn unavailable_reason(
         artifacts: &[SemanticIndexArtifact],
@@ -124,97 +106,10 @@ impl SemanticAnnShardSet {
         }
         Ok(Self { artifacts, graphs })
     }
-
-    /// Search each admitted graph, then merge by best chunk per message.
-    ///
-    /// Statistics describe actual native calls: sizes, requested/returned raw
-    /// candidates, and native-search times are summed; ef is the maximum and
-    /// estimated recall the minimum of the backend heuristics, NOT a measured
-    /// recall guarantee for the fused message page. Candidate state is O(k),
-    /// not O(k * shards); the retained graphs themselves are not memory-capped.
-    pub(super) fn search(
-        &self,
-        artifacts: &Arc<Vec<SemanticIndexArtifact>>,
-        embedding: &[f32],
-        fetch_limit: usize,
-        filter: Option<&dyn FsSearchFilter>,
-    ) -> Result<(
-        Vec<VectorSearchResult>,
-        SemanticCandidateRetryState,
-        Option<AnnSearchStats>,
-    )> {
-        if !Arc::ptr_eq(&self.artifacts, artifacts) {
-            bail!("native ANN cohort does not match the admitted semantic context");
-        }
-        if fetch_limit == 0 {
-            return Ok((Vec::new(), SemanticCandidateRetryState::default(), None));
-        }
-        let dimension = self.artifacts[0].index().dimension();
-        if embedding.len() != dimension || embedding.iter().any(|value| !value.is_finite()) {
-            bail!("native ANN query must have the admitted dimension and finite values");
-        }
-        let candidate_limit = fetch_limit
-            .saturating_mul(ANN_CANDIDATE_MULTIPLIER)
-            .max(fetch_limit);
-        let mut stats = AnnSearchStats {
-            dimension,
-            estimated_recall: 1.0,
-            ..Default::default()
-        };
-        let mut best_by_message = HashMap::new();
-        let mut has_more_candidates = false;
-        for (ordinal, graph) in self.graphs.iter().enumerate() {
-            // A large global page must not request a huge beam from a small
-            // shard. The native graph count bounds its candidate request.
-            let candidate = candidate_limit.min(graph.len());
-            let ef = FS_HNSW_DEFAULT_EF_SEARCH.max(candidate);
-            // Native underfill repair needs the exact source selected during
-            // admission. Borrow its retained reader, never reopen its path.
-            // The source-backed call also checks extent and returned row IDs.
-            let source = self.artifacts[ordinal].index();
-            let (hits, measured) = graph
-                .knn_search_with_stats_against(source, embedding, candidate, ef)
-                .map_err(|error| anyhow!("native ANN shard {ordinal} search failed: {error}"))?;
-            if measured.dimension != dimension || hits.len() > candidate {
-                bail!("native ANN shard returned inconsistent candidate metadata");
-            }
-            // A failure above returns no partial success assembled from earlier
-            // shards. No graph is skipped because it produced no filtered hits.
-            // Post-top-k document deduplication can shorten a complete window.
-            has_more_candidates |= candidate < measured.index_size;
-            stats.index_size = stats.index_size.saturating_add(measured.index_size);
-            stats.ef_search = stats.ef_search.max(measured.ef_search);
-            stats.k_requested = stats.k_requested.saturating_add(measured.k_requested);
-            stats.k_returned = stats.k_returned.saturating_add(measured.k_returned);
-            stats.search_time_us = stats.search_time_us.saturating_add(measured.search_time_us);
-            stats.estimated_recall = stats.estimated_recall.min(measured.estimated_recall as f32);
-            stats.is_approximate |= measured.is_approximate;
-            for hit in &hits {
-                if filter.is_none_or(|filter| filter.matches(&hit.doc_id, None)) {
-                    SearchClient::record_fs_semantic_hit(&mut best_by_message, hit);
-                }
-            }
-            best_by_message = SearchClient::collapse_semantic_results(best_by_message, fetch_limit)
-                .into_iter()
-                .map(|hit| (hit.message_id, hit))
-                .collect();
-        }
-        tracing::debug!(
-            shards = self.graphs.len(),
-            native_candidates = stats.k_returned,
-            returned_messages = best_by_message.len(),
-            "native ANN shard merge complete"
-        );
-        Ok((
-            SearchClient::collapse_semantic_results(best_by_message, fetch_limit),
-            SemanticCandidateRetryState {
-                has_more_candidates,
-                exact_window_may_omit_competitor: false,
-            },
-            Some(stats),
-        ))
-    }
 }
+
+#[cfg(test)]
+mod wal_tests;
 
 #[cfg(test)]
 mod tests {
@@ -333,7 +228,7 @@ mod tests {
     }
 
     #[test]
-    fn filtered_native_underfill_recovers_matching_messages_from_every_shard() {
+    fn filtered_native_underfill_refills_every_shard_before_exact_recovery() {
         let dir = tempfile::tempdir().unwrap();
         let context = recovery_context(Arc::new(vec![
             selective_shard(dir.path(), "select-a", 1, 0.6),
@@ -356,22 +251,17 @@ mod tests {
         assert_eq!(ids(&hits), vec![2, 1]);
         assert!(!retry.exact_window_may_omit_competitor);
         let stats = stats.unwrap();
-        assert!(!stats.is_approximate);
-        assert_eq!(stats.index_size, 82);
-        assert_eq!(stats.k_requested, 16, "retain actual native work counters");
-        let receipt = stats.exact_fallback.as_ref().unwrap();
-        assert_eq!(
-            receipt.reason,
-            AnnExactFallbackReason::FilteredCandidateUnderfill
+        assert_eq!(stats.index_size, 82, "count the retained cohort only once");
+        // Per shard: 8 initial candidates, 32 on the first refill, and all 41
+        // on the second. These are real backend requests, not result counts.
+        assert_eq!(stats.k_requested, 2 * (8 + 32 + 41));
+        assert!(stats.exact_fallback.is_none());
+        assert!(
+            serde_json::to_value(&stats)
+                .unwrap()
+                .get("exact_fallback")
+                .is_none()
         );
-        assert_eq!(receipt.shard_count, 2);
-        assert_eq!(receipt.returned_messages, 2);
-        let json = serde_json::to_value(&stats).unwrap();
-        assert_eq!(
-            json["exact_fallback"]["reason"],
-            "filtered_candidate_underfill"
-        );
-        assert_eq!(json["is_approximate"], false);
         assert_eq!(snapshot(dir.path()), before);
     }
 
@@ -406,11 +296,9 @@ mod tests {
             .unwrap();
         assert_eq!(ids(&hits), vec![1, 2, 3]);
         let stats = stats.unwrap();
-        assert!(!stats.is_approximate);
-        assert_eq!(
-            stats.exact_fallback.unwrap().reason,
-            AnnExactFallbackReason::MessageCandidateUnderfill
-        );
+        assert!(stats.exact_fallback.is_none());
+        assert_eq!(stats.index_size, 42);
+        assert_eq!(stats.k_requested, 12 + 42);
     }
 
     #[test]
@@ -474,7 +362,7 @@ mod tests {
     }
 
     #[test]
-    fn exact_recovery_keeps_empty_filters_empty_and_rejects_wrong_owners() {
+    fn native_refinement_keeps_empty_filters_empty_and_rejects_wrong_owners() {
         let dir = tempfile::tempdir().unwrap();
         let context =
             recovery_context(Arc::new(vec![selective_shard(dir.path(), "empty", 1, 0.8)]));
@@ -487,7 +375,7 @@ mod tests {
             .search_with_exact_fallback(&context, &[1.0, 0.0], 2, Some(&filter))
             .unwrap();
         assert!(hits.is_empty());
-        assert_eq!(stats.unwrap().exact_fallback.unwrap().returned_messages, 0);
+        assert!(stats.unwrap().exact_fallback.is_none());
         let other = recovery_context(Arc::new(context.artifacts.as_ref().clone()));
         assert!(
             set.search_with_exact_fallback(&other, &[1.0, 0.0], 2, Some(&filter))
@@ -500,7 +388,7 @@ mod tests {
     }
 
     #[test]
-    fn exact_recovery_uses_retained_readers_after_paths_are_renamed() {
+    fn native_refinement_uses_retained_readers_after_paths_are_renamed() {
         let dir = tempfile::tempdir().unwrap();
         let context = recovery_context(Arc::new(vec![selective_shard(
             dir.path(),
@@ -527,8 +415,109 @@ mod tests {
             .search_with_exact_fallback(&context, &[1.0, 0.0], 2, Some(&filter))
             .unwrap();
         assert_eq!(ids(&hits), vec![1]);
-        assert!(stats.unwrap().exact_fallback.is_some());
+        assert!(stats.unwrap().exact_fallback.is_none());
         assert_eq!(snapshot(dir.path()), before);
+    }
+
+    #[test]
+    fn refill_call_budget_is_shared_and_still_recovers_the_complete_exact_cohort() {
+        let dir = tempfile::tempdir().unwrap();
+        // Seventeen shards admit one extra full-cohort pass, not two: the
+        // shared allowance is 32 graph calls. Neither 8 nor 32 candidates
+        // reaches the selected source behind 40 unrelated messages.
+        let artifacts = (1..=17)
+            .map(|message| {
+                selective_shard(dir.path(), &format!("budget-{message}"), message, 0.8)
+            })
+            .collect();
+        let context = recovery_context(Arc::new(artifacts));
+        let set = SemanticAnnShardSet::open(Arc::clone(&context.artifacts)).unwrap();
+        let filter = selected_source();
+        let before = snapshot(dir.path());
+        let (expected, expected_retry) =
+            SearchClient::search_exact_semantic_indexes(&context, &[1.0, 0.0], 2, Some(&filter))
+                .unwrap();
+        let (hits, retry, stats) = set
+            .search_with_exact_fallback(&context, &[1.0, 0.0], 2, Some(&filter))
+            .unwrap();
+        assert_eq!(ids(&hits), ids(&expected));
+        assert_eq!(hits.len(), 2);
+        assert_eq!(retry.has_more_candidates, expected_retry.has_more_candidates);
+        assert!(!retry.exact_window_may_omit_competitor);
+        let stats = stats.unwrap();
+        assert_eq!(stats.index_size, 17 * 41);
+        assert_eq!(stats.k_requested, 17 * (8 + 32));
+        assert!(!stats.is_approximate);
+        let receipt = stats.exact_fallback.unwrap();
+        assert_eq!(
+            receipt.reason,
+            AnnExactFallbackReason::FilteredCandidateUnderfill
+        );
+        assert_eq!(receipt.shard_count, 17);
+        assert_eq!(receipt.returned_messages, 2);
+        assert_eq!(snapshot(dir.path()), before);
+    }
+
+    #[test]
+    fn refined_pages_do_not_erase_pagination_when_the_last_native_pass_is_exhaustive() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut rows = (0..40)
+            .map(|n| (doc(1000 + n, 4), [1.0, 0.0]))
+            .collect::<Vec<_>>();
+        rows.extend([
+            (doc(1, 3), [0.8, 0.6]),
+            (doc(2, 3), [0.6, 0.8]),
+            (doc(3, 3), [0.0, 1.0]),
+        ]);
+        let context = recovery_context(Arc::new(vec![shard_with_config(
+            dir.path(),
+            "pagination",
+            &rows,
+            HnswConfig {
+                m: 64,
+                ..Default::default()
+            },
+        )]));
+        let set = SemanticAnnShardSet::open(Arc::clone(&context.artifacts)).unwrap();
+        let (hits, retry, stats) = set
+            .search_with_exact_fallback(&context, &[1.0, 0.0], 2, Some(&selected_source()))
+            .unwrap();
+        assert_eq!(ids(&hits), vec![1, 2]);
+        assert!(
+            retry.has_more_candidates,
+            "message 3 still exists beyond this page"
+        );
+        assert!(stats.unwrap().exact_fallback.is_none());
+    }
+
+    #[test]
+    fn exhaustive_initial_native_windows_keep_omitted_message_pagination() {
+        let dir = tempfile::tempdir().unwrap();
+        let rows = [
+            (doc(1, 3), [1.0, 0.0]),
+            (doc(2, 3), [0.8, 0.6]),
+            (doc(3, 3), [0.6, 0.8]),
+        ];
+        for split in [false, true] {
+            let artifacts = if split {
+                vec![
+                    shard(dir.path(), "page-a", &rows[..1]),
+                    shard(dir.path(), "page-b", &rows[1..]),
+                ]
+            } else {
+                vec![shard(dir.path(), "page-all", &rows)]
+            };
+            let context = recovery_context(Arc::new(artifacts));
+            let set = SemanticAnnShardSet::open(Arc::clone(&context.artifacts)).unwrap();
+            let (hits, retry, stats) = set
+                .search_with_exact_fallback(&context, &[1.0, 0.0], 1, None)
+                .unwrap();
+            assert_eq!(ids(&hits), vec![1]);
+            assert!(retry.has_more_candidates, "two eligible messages were omitted");
+            let stats = stats.unwrap();
+            assert_eq!(stats.k_requested, 3, "one exhaustive native pass is enough");
+            assert!(stats.exact_fallback.is_none());
+        }
     }
 
     #[test]
@@ -901,5 +890,142 @@ mod tests {
             error.reason,
             SemanticAnnUnavailableReason::SidecarOpenFailed
         ));
+    }
+
+    fn runtime_failure_cohort(
+        dir: &Path,
+        failed_shard: usize,
+    ) -> (SemanticCandidateContext, SemanticAnnShardSet) {
+        let context = recovery_context(Arc::new(vec![
+            selective_shard(dir, "runtime-a", 1, 0.6),
+            selective_shard(dir, "runtime-b", 2, 0.8),
+        ]));
+        let mut set = SemanticAnnShardSet::open(Arc::clone(&context.artifacts)).unwrap();
+        let wrong = shard(dir, "runtime-wrong", &[(doc(999, 3), [1.0, 0.0])]);
+        // Real HNSW source-extent validation fails at query time. No mocked
+        // result, artifact mutation, or relaxed production admission is used.
+        set.graphs[failed_shard] =
+            open_fs_semantic_ann_index(wrong.index(), wrong.ann_path().unwrap()).unwrap();
+        (context, set)
+    }
+
+    #[test]
+    fn runtime_failure_recovers_every_shard_and_reports_only_completed_native_work() {
+        for failed_shard in 0..2 {
+            let dir = tempfile::tempdir().unwrap();
+            let (context, set) = runtime_failure_cohort(dir.path(), failed_shard);
+            let filter = selected_source();
+            let before = snapshot(dir.path());
+            assert!(
+                set.search(&context.artifacts, &[1.0, 0.0], 2, Some(&filter))
+                    .is_err(),
+                "fixture must actually fail in the native backend"
+            );
+            let (expected, expected_retry) = SearchClient::search_exact_semantic_indexes(
+                &context,
+                &[1.0, 0.0],
+                2,
+                Some(&filter),
+            )
+            .unwrap();
+            let (hits, retry, stats) = set
+                .search_with_exact_fallback(&context, &[1.0, 0.0], 2, Some(&filter))
+                .unwrap();
+            let signature = |hits: &[VectorSearchResult]| {
+                hits.iter()
+                    .map(|hit| (hit.message_id, hit.chunk_idx, hit.score.to_bits()))
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(ids(&hits), vec![2, 1]);
+            assert_eq!(signature(&hits), signature(&expected));
+            assert_eq!(retry.has_more_candidates, expected_retry.has_more_candidates);
+            assert_eq!(
+                retry.exact_window_may_omit_competitor,
+                expected_retry.exact_window_may_omit_competitor
+            );
+            let stats = stats.unwrap();
+            assert!(!stats.is_approximate);
+            assert_eq!(stats.estimated_recall, 0.0);
+            assert_eq!(stats.index_size, failed_shard * 41);
+            assert_eq!(stats.k_requested, failed_shard * 2 * ANN_CANDIDATE_MULTIPLIER);
+            let receipt = stats.exact_fallback.as_ref().unwrap();
+            assert_eq!(receipt.reason, AnnExactFallbackReason::NativeSearchFailed);
+            assert_eq!(receipt.shard_count, 2);
+            assert_eq!(receipt.returned_messages, 2);
+            let json = serde_json::to_value(&stats).unwrap();
+            assert_eq!(json["exact_fallback"]["reason"], "native_search_failed");
+            assert_eq!(json["is_approximate"], false);
+            assert!(!json.to_string().contains("runtime-wrong"));
+            assert_eq!(snapshot(dir.path()), before);
+        }
+    }
+
+    #[test]
+    fn runtime_failure_never_widens_empty_scope_or_recovers_invalid_requests() {
+        let dir = tempfile::tempdir().unwrap();
+        let (context, set) = runtime_failure_cohort(dir.path(), 0);
+        let filter = SemanticFilter {
+            sources: Some(HashSet::new()),
+            ..selected_source()
+        };
+        let before = snapshot(dir.path());
+        let (hits, _, stats) = set
+            .search_with_exact_fallback(&context, &[1.0, 0.0], 2, Some(&filter))
+            .unwrap();
+        assert!(hits.is_empty());
+        assert_eq!(stats.unwrap().exact_fallback.unwrap().returned_messages, 0);
+        for embedding in [
+            &[1.0][..],
+            &[f32::NAN, 0.0][..],
+            &[f32::INFINITY, 0.0][..],
+            &[][..],
+        ] {
+            let error = set
+                .search_with_exact_fallback(&context, embedding, 2, Some(&filter))
+                .unwrap_err();
+            assert!(error.to_string().contains("admitted dimension"));
+        }
+        let other = recovery_context(Arc::new(context.artifacts.as_ref().clone()));
+        for limit in [0, 2] {
+            let error = set
+                .search_with_exact_fallback(&other, &[1.0, 0.0], limit, None)
+                .unwrap_err();
+            assert!(error.to_string().contains("cohort does not match"));
+        }
+        let (hits, _, stats) = set
+            .search_with_exact_fallback(&context, &[], 0, None)
+            .unwrap();
+        assert!(hits.is_empty());
+        assert!(stats.is_none(), "zero target must not run either backend");
+        assert_eq!(snapshot(dir.path()), before);
+    }
+
+    #[test]
+    fn runtime_failure_recovery_uses_retained_readers_after_rename() {
+        let dir = tempfile::tempdir().unwrap();
+        let (context, set) = runtime_failure_cohort(dir.path(), 1);
+        for artifact in context.artifacts.iter() {
+            for path in [artifact.fsvi_path(), artifact.ann_path().unwrap()] {
+                std::fs::rename(
+                    path,
+                    path.with_extension(format!(
+                        "{}-retained",
+                        path.extension().unwrap().to_str().unwrap()
+                    )),
+                )
+                .unwrap();
+            }
+        }
+        let before = snapshot(dir.path());
+        let filter = selected_source();
+        let (hits, _, stats) = set
+            .search_with_exact_fallback(&context, &[1.0, 0.0], 2, Some(&filter))
+            .unwrap();
+        assert_eq!(ids(&hits), vec![2, 1]);
+        assert_eq!(
+            stats.unwrap().exact_fallback.unwrap().reason,
+            AnnExactFallbackReason::NativeSearchFailed
+        );
+        assert_eq!(snapshot(dir.path()), before);
     }
 }

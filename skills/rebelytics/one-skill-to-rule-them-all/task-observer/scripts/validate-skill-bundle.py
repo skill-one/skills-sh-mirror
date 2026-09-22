@@ -60,7 +60,14 @@ SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+$")
 # TARGET is the size the core is trying to reach. The gap between CEILING and
 # TARGET is reported on every run, passing or failing, so the debt stays
 # visible rather than being rediscovered by a contributor with a line counter.
-MAX_CORE_LINES = 728
+# The ceiling is a property of the SKILL, not of this script. It is read from
+# the skill under test — `core_max_lines:` in SKILL.md frontmatter, or a
+# `.core-ceiling` file beside it holding the number. A skill that declares
+# neither has not opted in: the count is reported and nothing is gated. This
+# script ships inside task-observer but is run against every skill in a
+# library, and a constant that describes one skill must never bound another.
+CORE_CEILING_FILE = ".core-ceiling"
+CORE_CEILING_KEY = "core_max_lines"
 TARGET_CORE_LINES = 500
 PATH_RE = re.compile(r"`((?:references|scripts|assets)/[^`\s*?]+\.[A-Za-z0-9]+)`")
 BUILD_JUNK = {"__pycache__", ".DS_Store"}
@@ -155,8 +162,37 @@ def check_frontmatter_shape(fm, fails, yaml_available):
               "not parsed. Install PyYAML for the stronger check.")
 
 
+def read_core_ceiling(skill_md):
+    """The skill's own ceiling, or None if it has not declared one.
+
+    Two sources, frontmatter first: `core_max_lines: N` in SKILL.md, else a
+    `.core-ceiling` file beside it containing the number. None means the skill
+    has not opted in — which is not a failure and must not be treated as one.
+    A malformed value is also None, and says so, because silently falling back
+    to some default is how one skill's number ends up bounding another.
+    """
+    text = skill_md.read_text(encoding="utf-8")
+    m = re.match(r"(?s)^---\n(.*?)\n---\n", text)
+    if m:
+        km = re.search(r"(?m)^%s:\s*(\S+)\s*$" % CORE_CEILING_KEY, m.group(1))
+        if km:
+            if km.group(1).isdigit():
+                return int(km.group(1))
+            print(f"note: {CORE_CEILING_KEY} is not a whole number "
+                  f"({km.group(1)!r}) — core size not gated")
+            return None
+    f = skill_md.parent / CORE_CEILING_FILE
+    if f.exists():
+        raw = f.read_text(encoding="utf-8").strip()
+        if raw.isdigit():
+            return int(raw)
+        print(f"note: {CORE_CEILING_FILE} is not a whole number ({raw!r}) — "
+              f"core size not gated")
+    return None
+
+
 def check_core_size(skill_md, fails):
-    """The ratchet. See MAX_CORE_LINES.
+    """The ratchet, against the skill's OWN declared ceiling.
 
     Counted with splitlines() so the number matches `wc -l` on a
     newline-terminated file. Counting newlines and adding one reports 755 for
@@ -165,13 +201,21 @@ def check_core_size(skill_md, fails):
     """
     lines = len(skill_md.read_text(encoding="utf-8").splitlines())
     over_target = lines - TARGET_CORE_LINES
-    if lines > MAX_CORE_LINES:
+    ceiling = read_core_ceiling(skill_md)
+    if ceiling is None:
+        note = f"core SKILL.md {lines} lines (no ceiling declared — not gated"
+        if over_target > 0:
+            note += f"; {over_target} over the {TARGET_CORE_LINES}-line target"
+        print(note + ")")
+        return
+    if lines > ceiling:
         fails.append(
-            f"core SKILL.md {lines} lines > ceiling {MAX_CORE_LINES}. "
-            f"Move content to a reference file — do not raise the ceiling.")
+            f"core SKILL.md {lines} lines > this skill's declared ceiling "
+            f"{ceiling}. Move content to a reference file — do not raise the "
+            f"ceiling.")
     else:
-        headroom = MAX_CORE_LINES - lines
-        note = f"core SKILL.md {lines} lines (ceiling {MAX_CORE_LINES}, {headroom} to spare"
+        headroom = ceiling - lines
+        note = f"core SKILL.md {lines} lines (ceiling {ceiling}, {headroom} to spare"
         if over_target > 0:
             note += f"; {over_target} over the {TARGET_CORE_LINES}-line target"
         print(note + ")")

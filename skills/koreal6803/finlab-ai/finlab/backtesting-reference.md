@@ -359,7 +359,7 @@ Create factors or indicators that will be used in your strategy.
 **Important Notes:**
 - Do not use `==` for floating point comparisons. Use `np.isclose()` instead
 - Be cautious with `&` and `|` operators; ensure proper parentheses to avoid precedence issues
-- Prevent using reindex to align FinlabDataFrame as it already has aligned indices and columns
+- Never use `reindex()` or `reindex_like()`, including on final positions; use `sim(position, resample=...)` for schedules. FinlabDataFrame arithmetic, comparisons and boolean indexing automatically align dates and stock columns, including quarterly financial statements versus daily prices. For example, use `sales_to_price = eps_sales / close` directly.
 - Do not use for loops to iterate over rows or columns. Use vectorized operations instead
 
 **Example:**

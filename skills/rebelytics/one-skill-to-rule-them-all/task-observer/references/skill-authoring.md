@@ -143,6 +143,23 @@ per-session rules in the skill body and episodic material in reference
 files loaded on demand (progressive disclosure) — a skill loaded every
 session is fixed overhead and should be audited like one.
 
+**Declare your own core ceiling, and let it only fall.** A skill opts into
+the size ratchet by naming its own bound — `core_max_lines: N` in SKILL.md
+frontmatter, or a `.core-ceiling` file beside it. `validate-skill-bundle.py`
+then fails when the core exceeds it, with the instruction to move content to
+a reference file rather than raise the number. Seed it at whatever the core
+measures today: the point is not that every skill reaches some ideal size,
+it is that no skill silently grows past where it already is.
+
+A skill that declares neither has not opted in. The count and the distance to
+the 500-line target are still reported; nothing is gated. That is deliberate,
+and it is the correction to a real defect: the ceiling was briefly a constant
+inside the validator, so one skill's budget failed three unrelated skills that
+had not changed. **A tool one skill ships for the whole library must not carry
+that skill's own constants.** Any threshold in a shared script is either read
+from the subject being checked or is advisory — the tell is a gate that fails
+on input its author never looked at.
+
 **Progressive disclosure is the DEFAULT, not an option.** Loading happens
 in three levels: frontmatter metadata is always in context, the SKILL.md
 body loads whenever the skill triggers, and bundled resources load only
