@@ -34,17 +34,17 @@ pub(super) fn verify_existing(
 ) -> Result<(Header, Completion)> {
     // Verify all input, including EOF and the completion digest, before even
     // opening the existing database. A matching header or prefix is no proof.
-    let mut validator = Validator::new(header)?;
+    let mut validator = Validator::new(header).map_err(super::integrity_unless_io)?;
     let mut line = 2u64;
     while let Some(record) = codec::read_record(input, line)? {
         validator
             .push(&record)
-            .map_err(|error| anyhow!("record {line}: {error}"))?;
+            .map_err(|error| super::integrity(format!("record {line}: {error}")))?;
         line = line
             .checked_add(1)
             .ok_or_else(|| anyhow!("logical record position overflow"))?;
     }
-    let expected = validator.finish()?;
+    let expected = validator.finish().map_err(super::integrity_unless_io)?;
     let admitted = identity(destination)?;
     let reader = export::open_source(destination)?;
     ensure!(
@@ -106,8 +106,8 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let (input, destination) = fixture(root.path());
         let before = database_files(&destination);
-        let receipt = import::import_file_with_policy(&input, &destination, "reimport-test", true)
-            .unwrap();
+        let receipt =
+            import::import_file_with_policy(&input, &destination, "reimport-test", true).unwrap();
         assert!(!receipt.2);
         assert_eq!(receipt.1, export::verify_file(&input).unwrap().1);
         assert_eq!(before, database_files(&destination));
@@ -121,7 +121,8 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let (input, destination) = fixture(root.path());
         let writer = Connection::open(export::path_text(&destination).unwrap()).unwrap();
-        writer.execute("INSERT INTO meta (key, value) VALUES ('operator_note', 'keep me')")
+        writer
+            .execute("INSERT INTO meta (key, value) VALUES ('operator_note', 'keep me')")
             .unwrap();
         writer.close().unwrap();
         let before = database_files(&destination);
@@ -130,8 +131,14 @@ mod tests {
         assert!(error.to_string().contains("restore conflict"));
         assert_eq!(before, database_files(&destination));
         let reader = export::open_source(&destination).unwrap();
-        assert_eq!(reader.query_row("SELECT value FROM meta WHERE key = 'operator_note'")
-            .unwrap().get_typed::<String>(0).unwrap(), "keep me");
+        assert_eq!(
+            reader
+                .query_row("SELECT value FROM meta WHERE key = 'operator_note'")
+                .unwrap()
+                .get_typed::<String>(0)
+                .unwrap(),
+            "keep me"
+        );
         reader.execute("ROLLBACK").unwrap();
         reader.close_without_checkpoint().unwrap();
     }
@@ -144,8 +151,9 @@ mod tests {
         bytes.pop(); // Completion JSON is present but the mandatory newline is not.
         fs::write(&input, bytes).unwrap();
         let before = database_files(&destination);
-        assert!(import::import_file_with_policy(&input, &destination, "reimport-test", true)
-            .is_err());
+        assert!(
+            import::import_file_with_policy(&input, &destination, "reimport-test", true).is_err()
+        );
         assert_eq!(before, database_files(&destination));
     }
 
@@ -154,8 +162,8 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let (input, _) = fixture(root.path());
         let destination = root.path().join("second.db");
-        let receipt = import::import_file_with_policy(&input, &destination, "reimport-test", true)
-            .unwrap();
+        let receipt =
+            import::import_file_with_policy(&input, &destination, "reimport-test", true).unwrap();
         assert!(receipt.2);
         assert!(destination.is_file());
         assert_eq!(receipt.1, export::verify_file(&input).unwrap().1);
@@ -166,8 +174,9 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let (input, destination) = fixture(root.path());
         let before = database_files(&destination);
-        assert!(import::import_file_with_policy(&input, &destination, "other-archive", true)
-            .is_err());
+        assert!(
+            import::import_file_with_policy(&input, &destination, "other-archive", true).is_err()
+        );
         assert_eq!(before, database_files(&destination));
     }
 

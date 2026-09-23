@@ -32,8 +32,46 @@ pub(super) struct Filters {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct ViewSelection {
+    pub source_path: String,
+    pub source_id: String,
+    pub conversation_id: i64,
+    pub message_index: u64,
+    #[serde(default)]
+    pub context: usize,
+}
+
+impl ViewSelection {
+    pub(super) fn view(&self) -> super::canonical::View<'_> {
+        super::canonical::View {
+            source_path: &self.source_path,
+            source_id: &self.source_id,
+            conversation_id: self.conversation_id,
+            message_index: self.message_index,
+            context: self.context,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub(super) enum Request {
+    ViewBatch {
+        id: u64,
+        views: Vec<ViewSelection>,
+    },
+    Refine {
+        id: u64,
+        query: String,
+        lexical_query: String,
+        #[serde(default)]
+        filters: Filters,
+        #[serde(default = "super::refinement::default_candidates")]
+        candidate_limit: usize,
+        #[serde(default = "super::refinement::default_limit")]
+        limit: usize,
+    },
     View {
         id: u64,
         source_path: String,
@@ -57,6 +95,9 @@ pub(super) enum Request {
         id: u64,
     },
     Reload {
+        id: u64,
+    },
+    Unload {
         id: u64,
     },
     Shutdown {
@@ -187,7 +228,9 @@ impl Write for LimitedBuffer {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
         // Reserve one byte for the line terminator, including escaped JSON bytes.
         if bytes.len() > (MAX_RESPONSE_BYTES - 1) - self.0.len() {
-            return Err(io::Error::other("search service response exceeds its byte limit"));
+            return Err(io::Error::other(
+                "search service response exceeds its byte limit",
+            ));
         }
         self.0.extend_from_slice(bytes);
         Ok(bytes.len())

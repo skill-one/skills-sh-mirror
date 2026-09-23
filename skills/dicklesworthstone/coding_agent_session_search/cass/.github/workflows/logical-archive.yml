@@ -4,12 +4,18 @@ on:
     branches: [main]
     paths:
       - 'src/logical_archive/**'
+      - 'src/search/archive_rebuild.rs'
+      - 'src/search/mod.rs'
+      - 'src/indexer/**'
       - 'src/bookmarks.rs'
       - 'tests/bookmarks_cli.rs'
       - 'src/main.rs'
       - 'src/franken_sync.rs'
+      - 'src/search_service.rs'
+      - 'src/search_service/**'
       - 'src/storage/**'
       - 'tests/cli_logical_archive.rs'
+      - 'tests/cli_logical_migration.rs'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'rust-toolchain.toml'
@@ -36,12 +42,15 @@ jobs:
           evidence="$RUNNER_TEMP/reviewed-format"
           mkdir -p "$evidence"
           git rev-parse HEAD > "$evidence/source.txt"
+          # Preserve the exact recovery dependencies and tracker contract for
+          # source review, including modules too large for the Contents API.
+          git archive --format=tar.gz HEAD AGENTS.md .beads/issues.jsonl docs/planning/RUST_CLI_TOOLS_BEST_PRACTICES_GUIDE.md docs/planning/REALITY_CHECK_AND_BRIDGE_PLAN_2026-09-01.md src/storage/sqlite.rs src/indexer/mod.rs src/search/archive_rebuild.rs src/search/mod.rs src/logical_archive/mod.rs src/logical_archive/migrate.rs tests/cli_logical_archive.rs tests/cli_logical_migration.rs > "$evidence/canonical-rebuild-source.tar.gz"
           rustfmt --version > "$evidence/toolchain.txt"
           status=0
-          for file in src/bookmarks.rs src/logical_archive/export.rs src/logical_archive/export_tests.rs src/logical_archive/import.rs tests/cli_logical_archive.rs; do
+          for file in src/bookmarks.rs src/logical_archive/mod.rs src/logical_archive/query.rs src/logical_archive/export.rs src/logical_archive/export_tests.rs src/logical_archive/import.rs src/logical_archive/migrate.rs src/search/archive_rebuild.rs tests/cli_logical_archive.rs tests/cli_logical_migration.rs; do
             mkdir -p "$evidence/$(dirname "$file")"
             sha256sum "$file" >> "$evidence/input-sha256.txt"
-            rustfmt --edition 2024 --config skip_children=true --emit stdout "$file" > "$evidence/$file"
+            rustfmt --edition 2024 --config skip_children=true --emit stdout < "$file" > "$evidence/$file"
             rustfmt --edition 2024 --config skip_children=true --check "$file" || status=$?
           done
           exit "$status"
@@ -76,7 +85,7 @@ jobs:
           rustc --version | tee "$RUNNER_TEMP/archive-evidence/toolchain.txt"
           sha256sum Cargo.lock | tee "$RUNNER_TEMP/archive-evidence/lockfile.txt"
           # Parse without changing source or presenting formatting as runtime proof.
-          rustfmt --edition 2024 --emit stdout src/logical_archive/mod.rs src/bookmarks.rs tests/cli_logical_archive.rs > "$RUNNER_TEMP/archive-evidence/formatted-source.txt"
+          rustfmt --edition 2024 --emit stdout src/logical_archive/mod.rs src/logical_archive/migrate.rs src/bookmarks.rs tests/cli_logical_archive.rs tests/cli_logical_migration.rs > "$RUNNER_TEMP/archive-evidence/formatted-source.txt"
       - name: Run locked production archive tests
         shell: bash
         run: |
@@ -87,8 +96,8 @@ jobs:
           from pathlib import Path
           text = (Path(os.environ['RUNNER_TEMP']) / 'archive-evidence/unit.log').read_text()
           counts = re.findall(r'test result: ok\. (\d+) passed; 0 failed;', text)
-          if not counts or max(map(int, counts)) < 47:
-              raise SystemExit('Expected all 47 production archive regressions, including killed-import recovery')
+          if not counts or max(map(int, counts)) < 70:
+              raise SystemExit('Expected at least 70 archive regressions, including reviewed v20-to-v21 migration and identical retry')
           PY
       - name: Run the real binary round trip and failure contracts
         shell: bash
@@ -100,10 +109,48 @@ jobs:
           from pathlib import Path
           text = (Path(os.environ['RUNNER_TEMP']) / 'archive-evidence/cli.log').read_text()
           counts = re.findall(r'test result: ok\. (\d+) passed; 0 failed;', text)
-          if not counts or max(map(int, counts)) < 6:
-              raise SystemExit('Expected all six real-binary archive regressions, including restored source-less follow-ups')
+          if not counts or max(map(int, counts)) < 17:
+              raise SystemExit('Expected all seventeen real-binary archive regressions, including backup paging and search-to-view')
+          PY
+          cargo test --locked --test cli_logical_migration -- --nocapture --test-threads=1 2>&1 | tee "$RUNNER_TEMP/archive-evidence/migration-cli.log"
+          python3 - <<'PY'
+          import os, re
+          from pathlib import Path
+          text = (Path(os.environ['RUNNER_TEMP']) / 'archive-evidence/migration-cli.log').read_text()
+          counts = re.findall(r'test result: ok\. (\d+) passed; 0 failed;', text)
+          if not counts or max(map(int, counts)) < 1:
+              raise SystemExit('Expected the real-binary reviewed v20-to-v21 migration journey')
           PY
           sha256sum target/debug/cass | tee "$RUNNER_TEMP/archive-evidence/binary.txt"
+      - name: Exercise canonical-only indexed restore admission
+        if: ${{ always() && !cancelled() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked --lib search::archive_rebuild:: -- --nocapture --test-threads=2 2>&1 | tee "$RUNNER_TEMP/archive-evidence/indexed-admission.log"
+          python3 - <<'PY'
+          import os, re
+          from pathlib import Path
+          text = (Path(os.environ['RUNNER_TEMP']) / 'archive-evidence/indexed-admission.log').read_text()
+          counts = re.findall(r'test result: ok\. (\d+) passed; 0 failed;', text)
+          if not counts or max(map(int, counts)) < 5:
+              raise SystemExit('Expected all five indexed restore admission tests')
+          PY
+      - name: Exercise canonical service reads through the public read-only engine
+        if: ${{ always() && !cancelled() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/archive-evidence"
+          cargo test --locked --bin cass search_service::canonical:: -- --nocapture --test-threads=2 2>&1 | tee "$RUNNER_TEMP/archive-evidence/canonical-service.log"
+          python3 - <<'PY'
+          import os, re
+          from pathlib import Path
+          text = (Path(os.environ['RUNNER_TEMP']) / 'archive-evidence/canonical-service.log').read_text()
+          counts = re.findall(r'test result: ok\. (\d+) passed; 0 failed;', text)
+          if not counts or max(map(int, counts)) < 15:
+              raise SystemExit('Expected all 15 canonical service tests, including engine read-only enforcement')
+          PY
       - name: Run bookmark storage and no-clobber export regressions
         if: ${{ always() && !cancelled() }}
         shell: bash

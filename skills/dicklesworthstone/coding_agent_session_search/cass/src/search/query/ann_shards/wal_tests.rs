@@ -39,7 +39,7 @@ fn shard(
         writer.write_record(id, vector).unwrap();
     }
     writer.finish().unwrap();
-    {
+    let original_rows = {
         let source = FsVectorIndex::open_read_only(&path).unwrap();
         FsHnswIndex::build_from_vector_index(
             &source,
@@ -51,8 +51,17 @@ fn shard(
         .unwrap()
         .save(&ann)
         .unwrap();
-    }
+        (0..source.record_count())
+            .map(|row| {
+                (
+                    source.doc_id_at(row).unwrap().to_owned(),
+                    source.vector_at_f32(row).unwrap(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
     let original_main = std::fs::read(&path).unwrap();
+    let original_graph = std::fs::read(&ann).unwrap();
     if !updates.is_empty() {
         let mut source = FsVectorIndex::open_writer(&path).unwrap();
         for (id, vector) in updates {
@@ -62,9 +71,25 @@ fn shard(
         }
         assert!(source.wal_record_count() > 0);
     }
-    assert_eq!(std::fs::read(&path).unwrap(), original_main);
+    // Replacements durably tombstone old main rows; appending a new ID does
+    // not. Neither operation rebuilds the graph or rewrites main vectors.
+    if !updates
+        .iter()
+        .any(|(id, _)| base.iter().any(|(old, _)| old == id))
+    {
+        assert_eq!(std::fs::read(&path).unwrap(), original_main);
+    }
+    assert_eq!(std::fs::read(&ann).unwrap(), original_graph);
     let artifact = SemanticIndexArtifact::open(path, Some(ann)).unwrap();
     assert_eq!(artifact.index().record_count(), base.len());
+    for (row, (id, vector)) in original_rows.iter().enumerate() {
+        assert_eq!(artifact.index().doc_id_at(row).unwrap(), id);
+        assert_eq!(artifact.index().vector_at_f32(row).unwrap(), *vector);
+        assert_eq!(
+            artifact.index().is_deleted(row),
+            updates.iter().any(|(updated, _)| updated == id)
+        );
+    }
     if !updates.is_empty() {
         assert!(
             artifact.index().wal_record_count() > 0,
@@ -484,7 +509,10 @@ fn oversized_cohort_wal_recovers_exactly_before_any_native_graph_call() {
     assert_eq!(stats.k_returned, 0);
     assert!(!stats.is_approximate);
     let receipt = stats.exact_fallback.unwrap();
-    assert_eq!(receipt.reason, AnnExactFallbackReason::WalDeltaRequiresExact);
+    assert_eq!(
+        receipt.reason,
+        AnnExactFallbackReason::WalDeltaRequiresExact
+    );
     assert_eq!(receipt.shard_count, 2);
     assert_eq!(receipt.returned_messages, hits.len());
     assert_eq!(files(temp.path()), before);
@@ -511,10 +539,8 @@ fn later_native_failure_discards_earlier_graph_and_delta_winners() {
         &[(doc(30, 3), [1.0, 0.0]), (doc(31, 3), [0.0, 1.0])],
         &[],
     );
-    let first_graph =
-        open_fs_semantic_ann_index(first.index(), first.ann_path().unwrap()).unwrap();
-    let wrong_graph =
-        open_fs_semantic_ann_index(wrong.index(), wrong.ann_path().unwrap()).unwrap();
+    let first_graph = open_fs_semantic_ann_index(first.index(), first.ann_path().unwrap()).unwrap();
+    let wrong_graph = open_fs_semantic_ann_index(wrong.index(), wrong.ann_path().unwrap()).unwrap();
     let ctx = context(vec![first, second]);
     // Exercise a failed private pairing using a real incompatible graph.
     // Production admission remains all-or-nothing; no backend is mocked.
@@ -530,8 +556,7 @@ fn later_native_failure_discards_earlier_graph_and_delta_winners() {
         .unwrap();
     assert_eq!(signature(&hits), signature(&expected));
     assert_eq!(
-        hits[0].message_id,
-        2,
+        hits[0].message_id, 2,
         "the failed later shard must survive recovery"
     );
     assert!(hits.iter().all(|hit| ![30, 31].contains(&hit.message_id)));

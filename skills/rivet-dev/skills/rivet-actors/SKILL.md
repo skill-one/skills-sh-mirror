@@ -5,7 +5,7 @@ description: "Actors: The primitive for agent orchestration."
 
 ## Documentation
 
-- [Introduction](https://rivet.dev/actors/docs.md)
+- [Actors](https://rivet.dev/actors/docs.md)
 - [Access Control](https://rivet.dev/actors/docs/access-control.md)
 - [Actions](https://rivet.dev/actors/docs/actions.md)
 - [Actor Runtime Socket](https://rivet.dev/actors/docs/actor-runtime-socket.md)
@@ -40,6 +40,7 @@ description: "Actors: The primitive for agent orchestration."
 - [Registry Configuration](https://rivet.dev/actors/docs/general/registry-configuration.md)
 - [Runtime Modes](https://rivet.dev/actors/docs/general/runtime-modes.md)
 - [Skills](https://rivet.dev/actors/docs/general/skill.md)
+- [OpenTelemetry](https://rivet.dev/actors/docs/general/tracing.md)
 - [WASM vs Native SDK](https://rivet.dev/actors/docs/general/wasm-vs-native-sdk.md)
 - [Vanilla HTTP API](https://rivet.dev/actors/docs/http-api.md)
 - [Input Parameters](https://rivet.dev/actors/docs/input.md)
@@ -74,16 +75,19 @@ description: "Actors: The primitive for agent orchestration."
 - [Flue](https://rivet.dev/actors/integrations/flue.md)
 - [Vercel Eve](https://rivet.dev/actors/integrations/vercel-eve.md)
 - [Workflow SDK (Beta)](https://rivet.dev/actors/integrations/workflow-sdk.md)
-- [Learn](https://rivet.dev/actors/learn.md)
-- [A Radically Simpler Architecture](https://rivet.dev/actors/learn/a-radically-simpler-architecture.md)
-- [AI Agent](https://rivet.dev/actors/learn/ai-agent.md)
-- [Chat Room](https://rivet.dev/actors/learn/chat-room.md)
-- [Collaborative Text Editor](https://rivet.dev/actors/learn/collaborative-text-editor.md)
-- [Cron Jobs and Scheduled Tasks](https://rivet.dev/actors/learn/cron-jobs.md)
-- [Live Cursors and Presence](https://rivet.dev/actors/learn/live-cursors.md)
-- [Multiplayer Game](https://rivet.dev/actors/learn/multiplayer-game.md)
-- [Database per Tenant](https://rivet.dev/actors/learn/per-tenant-database.md)
 - [Use Cases](https://rivet.dev/actors/use-cases.md)
+- [Learn](https://rivet.dev/guides.md)
+- [A Radically Simpler Architecture](https://rivet.dev/guides/a-radically-simpler-architecture.md)
+- [Agent App Builders](https://rivet.dev/guides/agent-app-builders.md)
+- [AI Agent](https://rivet.dev/guides/ai-agent.md)
+- [Chat Room](https://rivet.dev/guides/chat-room.md)
+- [Coding Agents](https://rivet.dev/guides/coding-agents.md)
+- [Collaborative Text Editor](https://rivet.dev/guides/collaborative-text-editor.md)
+- [Company-Specific Agents](https://rivet.dev/guides/company-agents.md)
+- [Cron Jobs and Scheduled Tasks](https://rivet.dev/guides/cron-jobs.md)
+- [Live Cursors and Presence](https://rivet.dev/guides/live-cursors.md)
+- [Multiplayer Game](https://rivet.dev/guides/multiplayer-game.md)
+- [Database per Tenant](https://rivet.dev/guides/per-tenant-database.md)
 
 ## Examples
 
@@ -132,6 +136,7 @@ Runnable code the documentation above embeds, mirrored under `examples/` in this
 - [examples/docs/general-logging](https://github.com/rivet-dev/rivet/tree/main/examples/docs/general-logging)
 - [examples/docs/general-registry-configuration](https://github.com/rivet-dev/rivet/tree/main/examples/docs/general-registry-configuration)
 - [examples/docs/general-runtime-modes](https://github.com/rivet-dev/rivet/tree/main/examples/docs/general-runtime-modes)
+- [examples/docs/general-tracing](https://github.com/rivet-dev/rivet/tree/main/examples/docs/general-tracing)
 - [examples/docs/general-wasm-vs-native-sdk](https://github.com/rivet-dev/rivet/tree/main/examples/docs/general-wasm-vs-native-sdk)
 - [examples/workflow-sdk](https://github.com/rivet-dev/rivet/tree/main/examples/workflow-sdk)
 

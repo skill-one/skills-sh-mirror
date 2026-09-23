@@ -159,7 +159,7 @@ rev = data.get('monthly_revenue:當月營收')
 sim(position, resample=rev.index)
 ```
 
-**DON'T:** Omit `resample` (defaults to daily, causes excessive trading).
+**DON'T:** Omit `resample` for ranking/factor strategies. With the default `resample=None`, `sim()` rebalances on every date the position changes, so a daily-updated signal (e.g. daily rank) trades daily and overtrades.
 
 ---
 

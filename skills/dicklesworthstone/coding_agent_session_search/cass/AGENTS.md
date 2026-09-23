@@ -10,6 +10,28 @@ If I tell you to do something, even if it goes against what follows below, YOU M
 
 ---
 
+## RULE 0.5 - SUITE-WIDE RULES LIVE IN /data/projects/AGENTS.md
+
+The suite-wide rules in **`/data/projects/AGENTS.md`** bind you here too. Read it. Two sections
+are load-bearing for perf work and are NOT duplicated below, so they cannot drift out of sync:
+
+- **`## Named Reward-Hacking Patterns (ALL FORBIDDEN)`** — 12 named patterns, several already
+  observed in this suite: gate self-weakening (and the exact price of a legitimate gate fix),
+  proof-class inflation, golden regeneration reflex, commit-stream pumping, tautological tests,
+  easy-lever cherry-picking, close-pump abuse, scope-splitting, spec-editing as progress,
+  conformance metastasis, dependency smuggling, bench-path hardcoding.
+- **`### Work-Graph Discipline`** — JSONL is truth and `beads.db` is disposable, `br sync
+  --import-only` after every pull, single-writer on graph structure, closure on cited evidence
+  with blocker beads gated on their named probe, `br dep cycles` stays empty.
+
+The three that most often decide whether a number here is real: a **self-speedup is
+MAINTENANCE, not a win** — a win needs the incumbent live in the SAME invocation; **never
+weaken a gate to land a change**, and if a gate is genuinely defective, meet the evidence
+standard and publish the win/lose split of what the fix admits; and **reporting a loss is a
+success** — one line, revert, next lever, no retraction narrative.
+
+---
+
 ## RULE NUMBER 1: NO FILE DELETION
 
 **YOU ARE NEVER ALLOWED TO DELETE A FILE WITHOUT EXPRESS PERMISSION.** Even a new file that you yourself created, such as a test code file. You have a horrible track record of deleting critically important files or otherwise throwing away tons of expensive work. As a result, you have permanently lost any and all rights to determine that a file or folder should be deleted.
@@ -293,7 +315,7 @@ If you see errors, **carefully understand and resolve each issue**. Read suffici
 
 ### UBS Pre-Merge Gate
 
-Per `coding_agent_session_search-dpfvr`, every PR is meant to run `ubs --ci --fail-on-warning` against the changed files in CI (`.github/workflows/ci.yml::ubs-changed-files`). The gate is **blocking** — warnings stop merges. **Current state:** every workflow defined in `.github/workflows/` is disabled (`gh workflow list --all` shows `disabled_manually` for all of them, including `CI`; only GitHub's own Copilot workflows are active), so until CI is re-enabled this gate — like fmt/clippy/tests — is agent-run through `rch` before pushing. Run it as ONE fleet admission with `scripts/gate.sh` (fmt, clippy `-D warnings`, lib tests, targeted integration tests, goldens; `--lib-filter`, `--integration name:filter,...`, `--regen-goldens`; `GATE_RETRIES=40` retries fleet refusals) and cite its `STAGE=<name> EXIT=<code>` receipt lines in the bead closure and the commit message — never spend an admission on a bare `cargo check`.
+Per `coding_agent_session_search-dpfvr`, every PR is meant to run `ubs --ci --fail-on-warning` against the changed files in CI (`.github/workflows/ci.yml::ubs-changed-files`). The gate is **blocking** — warnings stop merges. **Current state:** the general workflows (`CI`, Release, Coverage, Benchmarks, Browser Tests, Fuzzing, Install Test, Fresh Clone Build) are `disabled_manually`; only narrow issue-specific regression workflows run on push, and none of them is a merge gate. Until CI is re-enabled this gate — like fmt/clippy/tests — is agent-run through `rch` before pushing. Run it as ONE fleet admission with `scripts/gate.sh` (fmt, clippy `-D warnings`, lib tests, targeted integration tests, goldens; `--lib-filter`, `--integration name:filter,...`, `--regen-goldens`; `GATE_RETRIES=40` retries fleet refusals) and cite its `STAGE=<name> EXIT=<code>` receipt lines in the bead closure and the commit message — never spend an admission on a bare `cargo check`.
 
 **Local pre-flight before pushing:**
 
@@ -493,6 +515,7 @@ Provides unified full-text and semantic search across all local coding agent ses
 - **Daemon timer:** `CASS_DAEMON_INDEX_INTERVAL_SECS=900` makes the resident semantic daemon spawn the same detached incremental index while it lives (`src/daemon/core.rs::spawn_periodic_index`).
 - **Idle gates:** scheduled jobs skip under severe load (Linux loadavg/PSI, macOS `sysctl vm.loadavg` — `responsiveness::machine_pressure_now`); `CASS_RESPONSIVENESS_MIN_USER_IDLE_SECS` adds a macOS console-idle requirement for nightly/backfill work (`responsiveness::user_idle_gate`; fails open elsewhere). Foreground `cass index` is never gated.
 - Every step is a child `cass` process, so exit 7 `index-busy` remains the only concurrency contract; do not add in-process schedulers that bypass the lock.
+- **Background runs never start the one-time storage migration repair on a large archive** (GH #450). When the archive bundle exceeds `CASS_INDEX_INTEGRITY_PREFLIGHT_MAX_BYTES` (default 2 GiB) and its `.fsqlite-migration-state` marker is absent or incomplete, `cass index --background` (stale-on-read refresh, scheduled jobs) exits 7 with kind `migration-repair-pending` and leaves the archive untouched; the scheduler records it as a skip naming the cause. A foreground `cass index --full` performs the repair once (it keeps a `.pre-migration-bak` copy, so plan for that much free space).
 
 ### Lexical Publish Durability (Atomic-Swap)
 
@@ -759,7 +782,7 @@ Returns in <50ms on a healthy archive (the archive probe is the same strict, mut
 | 23 | Download failure | Yes — retry or use `--from-file` |
 | 24 | I/O during model verify/install | Maybe |
 
-Search/pack timeouts are not exit 8: on expiry `search` and `pack` exit 0 with `{"hits": [], "budget": {"timed_out": true, "skipped_sections": [...], "retry": "<command>", ...}}`; `--robot-format sessions` instead fails with exit 10, kind `timeout`.
+Search/pack timeouts are not exit 8: on expiry `search` and `pack` exit 0 with `{"hits": [], "budget": {"timed_out": true, "skipped_sections": [...], "retry": "<command>", ...}}`; `--robot-format sessions` instead fails with exit 10, kind `timeout`. Explicit `--mode semantic` also fails with exit 10, kind `timeout`, retryable, when the budget cannot admit semantic setup or dispatch (ds7uy.4.1); hybrid falls back to lexical with `semantic_budget_limited`.
 
 **Codes ≥ 10 are domain-specific.** The numeric code alone is ambiguous (e.g. code 10 covers both `config` and `timeout` kinds). Agents should branch on `err.kind` from the JSON error envelope, not on the numeric code, when handling codes ≥ 10. Kind names are kebab-case (examples: `missing-index`, `missing-db`, `semantic-unavailable`, `embedder-unavailable`, `ambiguous-source`, `timeout`, `config`, `lock-busy`, `network`, `model`, `download`, `io`). The full set (~50 kinds) lives in `src/lib.rs`.
 

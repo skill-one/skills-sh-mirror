@@ -55,6 +55,8 @@ a hit against the canonical archive, retain its `source_id`,
 line number**. Identity fields are never shortened to fit an output budget.
 For complete bounded bodies in the same service, opt in to `view` using the
 fixed `--db` configuration described below. No archive is inferred from `--data-dir`.
+Candidate-only neural reranking is separately enabled by `--reranker-model`;
+ordinary `search` remains lexical and does not load or invoke the model.
 
 ## Wire protocol, version 1
 
@@ -64,13 +66,14 @@ processed sequentially, so backpressure does not create an in-process request
 queue. Without `--mcp`, this is a CASS JSON-lines protocol, not JSON-RPC.
 The MCP adapter described below uses the same reader and bounds.
 
-Every request requires an unsigned 64-bit `id`. Four operations are always available:
+Every request requires an unsigned 64-bit `id`. Five operations are always available:
 
 ```json
 {"op":"status","id":1}
 {"op":"search","id":2,"query":"performance","limit":10,"offset":0,"filters":{"agents":["codex"],"workspaces":["/my/project"],"source_id":"work-laptop"}}
 {"op":"reload","id":3}
-{"op":"shutdown","id":4}
+{"op":"unload","id":4}
+{"op":"shutdown","id":5}
 ```
 
 Search defaults to `limit: 10`, `offset: 0`, and no filters. `filters` may contain
@@ -89,7 +92,8 @@ exposed as bounded service filters.
 
 A response has `schema_version`, `id`, `ok`, and either `result` or `error`.
 Malformed requests use `id: null`. A failed request does not terminate the
-session except when its frame exceeds the byte limit. Errors retain their
+session except on transport failure, an oversized frame, or a process deadline.
+Ordinary request errors retain their
 cause in `error.message`; callers should branch on the stable `error.kind`.
 
 Search results contain `hits`, `count`, `limit`, `offset`, `reader_reused`,
@@ -123,14 +127,44 @@ and `offset + limit + 1` must not exceed 1,024. Each agent/workspace filter has
 at most 32 values. Individual filter and returned identity strings are limited
 to 4,096 UTF-8 bytes. Invalid budgets are refused before the reader is loaded.
 
-These are transport and candidate-window bounds, **not a total-RSS bound or a
-wall-clock deadline**. The first index admission can still be expensive, and
-an individual native query is not forcibly preempted by the service. The
-caller owns process lifetime and may terminate this read-only worker when its
-external deadline is exceeded. Each independently started worker still owns
+These are transport and candidate-window bounds, not kernel allocation limits.
+Resident-memory supervision below adds a sampled termination threshold.
+The first index admission can still be expensive. Each independently started worker still owns
 its own reader: reuse one process rather than spawning one for each query.
-Semantic/HNSW serving and cross-process admission are not implemented by this
-lexical endpoint.
+Global vector/HNSW serving is not implemented by this endpoint. Opt-in
+`refine` scores only a bounded lexical shortlist. Optional shared reader
+admission below bounds owners, not total RSS.
+
+### Enforced request deadlines
+
+Both transports default to a **30,000-ms whole-request deadline**. Set
+`--request-timeout-ms 5000` for a five-second budget, or explicitly allow a
+longer cold open. Accepted values are 1–300,000 ms; zero cannot disable the
+guard. Status reports the configured deadline and termination exit code.
+
+The deadline starts when the worker first observes any byte of a new frame and
+covers the rest of input framing, decoding, native index admission/query or
+canonical lookup or opt-in model loading/inference, result encoding, and output flushing. A partial line and a
+client that stops reading responses are therefore bounded too. Waiting for
+the first byte of the next request is idle time and is deliberately excluded.
+Completing a request joins its watchdog before another request can be admitted;
+an old timer cannot terminate an unrelated later query. Reader teardown on EOF
+or transport failure is guarded separately with the same configured duration.
+
+**Expiry terminates the entire read-only worker with exit code 124**, rather
+than returning a soft timeout while native work continues in a detached thread.
+There is no timeout JSON/tool-error response: producing one could itself block
+on the stalled output pipe. Discard an incomplete final line, observe process
+exit, and restart/reinitialize before retrying. Earlier complete responses stay
+valid. The new process starts a new session-local reader epoch; do not equate
+epochs across processes. Failure of the watchdog itself exits with code 125.
+
+Termination does not wait for Rust destructors or flush evidence buffers.
+Use this mechanism only on the service's read-only paths, never for indexing
+or archive publication. The deadline itself does not impose a memory limit,
+alter the native engine's cancellation API, or guarantee real-time OS scheduling under system
+suspension/starvation. Hosts should still supervise the worker process and
+enforce their own end-to-end deadlines, including startup and idle lifetime.
 
 ## Reusing one process from Python
 
@@ -173,9 +207,10 @@ with subprocess.Popen(
             worker.wait()
 ```
 
-The example waits synchronously for replies; applications requiring a hard
-query deadline must additionally supervise the exchange itself. It does not
-turn the native engine into a cancellable operation.
+The example waits synchronously for replies and will observe EOF if the worker
+times out. Applications should additionally supervise startup and the exchange
+against their own deadline; the worker timeout is a process-termination policy,
+not resumable per-query cancellation.
 
 Native regressions are in `tests/search_service.rs`, including the complete
 production module's tests: real Quill reader reuse, source-scoped identities,
@@ -208,10 +243,11 @@ clients to fall back to the supported handshake. A modern-only client cannot
 use this adapter. Protocol behavior follows the versioned MCP lifecycle and
 stdio specifications, not an assumption that every version uses initialization.
 
-The stable catalog exposes `cass_search`, `cass_status`, and `cass_reload`.
+The catalog exposes `cass_search`, `cass_status`, `cass_unload`, and `cass_reload`.
 With an explicit startup `--db`, it also exposes the read-only `cass_view` tool.
+With `--reranker-model`, it additionally exposes `cass_refine`, described below.
 `cass_search` arguments are the JSON-lines search fields **without** `op` or
-`id`; status and reload accept an empty object. The JSON-RPC ID is preserved
+`id`; status, unload and reload accept an empty object. The JSON-RPC ID is preserved
 exactly, including string and signed-integer IDs. There is no arbitrary file
 reader, SQL tool, shell command, indexing tool, or semantic-mode substitution.
 Tool results include both `structuredContent` and its JSON representation in
@@ -230,7 +266,7 @@ Notifications receive no response and cannot run a tool without a request ID.
 There is no MCP shutdown RPC: close stdin, then terminate the process if its
 external deadline expires. Requests are serial, so cancellation notifications
 received after native work completes are ignored. This adapter does **not**
-provide in-flight native cancellation, a global memory governor, HTTP, or
+provide resumable per-call native cancellation, a global memory governor, HTTP, or
 authentication over a network. Configure the host to approve access to the
 selected history archive and treat returned session text as untrusted data.
 
@@ -311,3 +347,173 @@ operations, with no partial result on expiry. It does **not** interrupt an
 individual engine call, bound engine-internal allocation, or replace the
 host's process-level deadline. No maintenance, recovery write, model loading,
 raw transcript read, arbitrary SQL or new filesystem authority is provided.
+The enclosing service request deadline also covers this lookup, including an
+individual native SQL call, by terminating the worker if necessary.
+
+## Shared reader admission (explicit opt-in)
+
+Use `--admission-dir /trusted/local/cass-reader-pool --admission-slots 1`
+on `cass serve --stdio` or `cass serve --stdio --mcp`. Every cooperating
+worker must use the same local directory and slot count, including workers
+serving different indexes. Counts are 1–64, default one. Without the directory
+option, shared admission is disabled. This is not a query relay: reuse an
+admitted worker for repeated queries.
+
+A worker acquires one kernel-backed lease before opening its lexical reader
+and retains it through reader destruction. A canonical view uses the existing
+lease or a temporary one through archive close. Busy admission returns
+`admission_busy` before index-open or canonical-read counters advance. Failed
+opens release their temporary lease. Status and invalid requests do not
+initialize or inspect the pool.
+
+`unload` / MCP `cass_unload` releases the reader and then its lease without
+closing the connection. The next query reacquires and reopens. Reload also
+releases first; another process can win the slot, leaving a failed reloader
+unloaded. Kernel locks release on process termination; PIDs and timestamps
+are not ownership certificates. Existing deadlines and source checks remain.
+
+This explicit option writes only a versioned policy and fixed slot lock files.
+Choose a private trusted local directory outside indexes and source trees.
+Never delete, replace or move pool files or the directory while workers may
+be alive: this splits the lock namespace. Different slot counts and partial
+policies fail closed with `admission_policy_mismatch`; there is no automatic
+repair or stale-file deletion. Symlink preflight is not an atomic sandbox
+against a hostile directory owner; network-filesystem locking is unqualified.
+
+The limit covers participating reader owners, not total machine memory. Other
+programs, workers without the option, and allocator-retained pages after
+unload are outside the count. Status reports the scope, slots and held lease.
+
+## Resident-memory supervision
+
+Every `cass serve` worker now samples its own resident memory, including idle
+retained readers and reader teardown. The default termination threshold is
+**4,096 MiB**; set `--max-resident-mib 2048` for 2 GiB. Accepted values are
+1–1,048,576 MiB; zero and overflow cannot disable monitoring. These are
+operator-selected budgets, not measured corpus requirements or throughput claims.
+
+The first fresh sample is obtained before any storage request. Subsequent
+samples are requested every 100 ms using only the worker PID, without
+enumerating Linux tasks or reading other processes' command lines/environments.
+Missing or zero samples are failures, never permission to reuse a stale low
+value. An unsupported measurement prevents startup. A later reported probe
+failure terminates with exit **125**. Status reads the last observations
+without starting an additional probe.
+
+When a sample exceeds the threshold, the entire worker exits **126**, without
+waiting for the query, acquiring output locks, flushing partial frames, or
+running reader destructors. Kernel reader-pool leases release on process death.
+Discard an incomplete response line and restart/reinitialize before retrying.
+A normal EOF closes readers and joins the monitor within the teardown deadline.
+
+`memory_supervision` reports the byte threshold, latest sampled resident bytes,
+peak among observed samples, sample age/count, interval and exit codes. This is
+**not a kernel-enforced allocation limit or a peak-RSS guarantee**: allocations
+can overshoot between samples, OS probes and scheduling take time, and swapped
+out memory is not resident memory. Process-tree memory and other applications
+are outside the measurement. A stuck OS probe is not preempted by this sampler;
+active request deadlines and external host supervision remain important.
+
+Shared reader admission and memory monitoring address different risks: the
+pool limits cooperating reader owners, while this guard limits continued
+execution after an observed per-worker overage. An unloaded allocator can
+still retain pages, so the pool count times this threshold is not a machine-wide
+memory certificate. For strict allocation containment use an OS-managed
+process/container budget as well. Neither feature adds semantic serving.
+
+## Candidate-only neural refinement (explicit opt-in)
+
+Use `refine` when a cheap lexical query finds plausible messages but their
+order does not answer the actual question. It does **not** open a global
+embedding/vector/HNSW generation. Instead it retrieves one finite lexical
+shortlist, then runs the existing native cross-encoder only over each hit's
+title and index snippet. A separate question can guide relevance without
+making the lexical candidate query unnecessarily restrictive.
+
+Enable it with an already-installed, compatible native MS MARCO MiniLM
+reranker directory containing safetensors weights and `tokenizer.json`:
+
+```sh
+cass serve --stdio --mcp --data-dir /path/to/cass-data \
+  --reranker-model /path/to/models/ms-marco-MiniLM-L-6-v2
+```
+
+This path is fixed at startup. There is no default inferred model directory,
+network download, daemon fallback, or per-request model path. Initialization,
+discovery, status, ordinary `search`, and empty refinement results do not load
+the model. The first nonempty refinement loads it locally; later refinements
+reuse it. A previously loaded model remains resident during ordinary searches,
+but those searches never invoke it. `reload` releases the model and old lexical
+reader before opening a new lexical reader; it does not eagerly reload the
+model. The next nonempty refinement may load that same configured path again.
+Shutdown and the existing request/teardown deadlines cover both retained owners.
+
+Without `--mcp`, send:
+
+```json
+{"op":"refine","id":10,"lexical_query":"performance","query":"Which changes reduced search latency?","filters":{"workspaces":["/my/project"],"source_id":"work-laptop"},"candidate_limit":20,"limit":5}
+```
+
+With MCP, call `cass_refine` with the same arguments except `op` and `id`.
+The tool is advertised only with `--reranker-model`; guessing its name cannot
+enable model access. Canonical `--db` permission is neither required nor used.
+The existing MCP quota and whole-request watchdog include refinement, including
+model loading and native inference. No queued background work continues after
+the worker exits on its deadline.
+
+Both query strings must be nonempty and at most 4,096 UTF-8 bytes. The existing
+lexical filters retain their exact semantics. `candidate_limit` defaults to 20
+and accepts 1–32; `limit` defaults to 5 and must be 1–`candidate_limit`. A lexical
+probe can retrieve one additional hit to detect further candidates, but at most
+`candidate_limit` previews enter inference. Each input preview is at most
+8,192 bytes, and the complete input is capped at 256 KiB, counting the relevance
+query again for each candidate pair. Admission happens before model loading.
+These are input bounds, not a guarantee about model/engine resident memory.
+
+Each returned hit retains its original lexical `score`, all source/conversation/
+message coordinates, and preview fields. `rerank_score` is separate, and
+`lexical_rank` records its one-based position before refinement. Scores must be
+finite and map one-to-one to inputs; malformed outputs fail rather than invent
+scores or discard identities. Equal scores keep lexical order.
+
+`candidates_considered` and `ranking_scope: "bounded_lexical_candidate_pool"`
+make the boundary explicit. `more_lexical_candidates` is true only when an
+additional lexical hit was observed, otherwise null (unknown). There is no
+refinement pagination: `next_offset` is null, and an `offset` request is rejected.
+Changing the candidate pool can change every winner's rank. Increase or narrow
+the explicit pool rather than treating a lexical offset as ranked continuation.
+
+The result remains **preview-only**: the model receives title + newline + index
+snippet, not full canonical message bodies. The native tokenizer may further
+truncate query/passage pairs; `model_input_may_be_token_truncated` reports that
+possibility rather than claiming complete-message scoring. Use `cass_view`
+separately to verify the winners against the canonical archive. Refinement adds
+no freshness proof and cannot find semantically related messages outside the
+lexical candidate pool. Global semantic/HNSW retrieval remains a separate lane.
+
+An empty pool returns `refinement.status: "no_candidates"` without loading a
+model. Nonempty success returns `"applied"`, model reuse/setup/inference details,
+and the observed model counters. `model_epoch` is session-local, not a model
+file digest or version certificate. Missing or incompatible files and inference
+failures produce `refinement_failed`, never relabeled lexical scores. Ordinary
+search remains usable after such an error. Without startup permission,
+JSON-lines returns `refinement_disabled` and MCP treats `cass_refine` as unknown.
+
+The normal service regression target covers admission, ranking projection,
+empty and missing-model behavior, MCP permission/quota rules, and binary dispatch.
+A separate opt-in test exercises the real model and retained reader together:
+
+```sh
+CASS_TEST_RERANKER_MODEL=/path/to/models/ms-marco-MiniLM-L-6-v2 \
+  cargo test --locked --test search_service \
+  search_service::refinement::tests::native_refinement_reuses_real_model_and_reader_without_global_semantic_assets \
+  -- --ignored --exact --test-threads=1
+```
+
+Run native tests through the repository's normal verification environment.
+The opt-in test is not a passing test until the model-backed command executes.
+
+Refinement uses the same admission lease as its lexical shortlist. A busy pool
+returns `admission_busy` before index or model loading; `unload`, `reload`,
+shutdown and EOF release the model before the lease. Resident-memory sampling
+and the whole-request deadline remain active during model loading and inference.
