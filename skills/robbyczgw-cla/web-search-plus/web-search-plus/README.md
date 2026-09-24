@@ -6,7 +6,56 @@
 
 Unified multi-provider web search and URL extraction for OpenClaw-style agent workflows.
 
-Current version: **3.1.0**
+Current version: **4.3.1**
+
+> **Status: stable OpenClaw skill — compatibility path, not the main engine-development path.**
+> This OpenClaw skill is kept usable and periodically synced for OpenClaw users, but active engine development happens on **[hermes-web-search-plus](https://github.com/robbyczgw-cla/hermes-web-search-plus)** and the **[web-search-plus-mcp](https://github.com/robbyczgw-cla/web-search-plus-mcp)** server. Version 4.3.1 syncs applicable runtime fixes while keeping this CLI **source-only**. The native OpenClaw plugin remains `web-search-plus-plugin-v2` (currently 4.3.1).
+
+## ⚠️ Data handling & privacy
+
+- **Search queries and extraction URLs are sent to the configured third-party providers** (Serper, Brave, Tavily, Linkup, Querit, Exa, Firecrawl, SerpBase, Keenable, You.com, or your SearXNG instance). Each provider's privacy policy and retention rules apply to what you send.
+- **For sensitive queries, pick the provider explicitly** with `--provider <name>` so you control which third party receives them; self-hosted SearXNG keeps queries on your own infrastructure.
+- **Avoid submitting internal/private URLs for extraction** — extraction URLs are forwarded to external services. Private/loopback/link-local targets and cloud metadata endpoints are blocked by default (opt out with `--allow-private-urls` / `WSP_ALLOW_PRIVATE_URLS=1` for trusted private networks).
+- **Local caching is on by default**: queries, results, provider failure history (`provider_health.json`), and provider performance samples for adaptive routing (`provider_stats.json`) are persisted under `.cache` (or `WSP_CACHE_DIR`) with owner-only permissions (dir `0700`, files `0600`). Use `--no-cache` per call, `WSP_DISABLE_CACHE=1` globally, `--clear-cache` to wipe, `--cache-stats` to inspect.
+- **API keys are never logged or cached.**
+
+## What changed in 4.3.1
+
+- Queries starting with a dash reach providers unchanged: use `--query=-foo` or `-q -- "-foo"`.
+- Exa snippets prefer highlights. Tavily receives native date filters, and Exa receipts reuse the publication bounds sent with each request, including research mode. `--time-range` wins over `--freshness`.
+- `--cache-ttl SECONDS` now respects recency caps: live/hour 60 seconds, latest/day 300 seconds, week filters 1800 seconds. Cache hits include their age.
+- Adaptive routing records every search-provider attempt, including retries and research members. POSIX file locking prevents concurrent writers from losing samples.
+- Omitted counts use `defaults.max_results`; explicit `-n` wins. Both are clamped to 1–20.
+- Search and extraction reuse HTTP connections per host within a process. Proxies and `WSP_HTTP_KEEPALIVE=0` use the standard transport. A stale pooled socket gets one retry on a fresh connection.
+- The provider list stays unchanged. Jev, Parallel, DonSeTch, Hermes native backends and desktop settings remain outside this skill.
+
+## What changed in 4.0.0
+
+- **Source-only.** Perplexity via Kilo (`PERPLEXITY_API_KEY` / `KILOCODE_API_KEY`) is removed from routing, CLI, config, and docs. Leftover keys and `provider_priority` entries are ignored.
+- This is **not** a copy of plugin 4.0.3: no DonSeTch, Parallel, Octen, or TinyFish in this skill runtime.
+- Ranked source URLs and extracted page text only — no model-written answers.
+
+## What changed in 3.3.0
+
+Feature sync with `web-search-plus-plugin` v3.2.0 (hermes-web-search-plus v2.5.0–v2.9.0), adapted for the skill's CLI runtime:
+
+- **Keenable** search + extraction provider — independent web index, keyed (`KEENABLE_API_KEY`) or keyless via the **opt-in** shared public tier (`WSP_KEENABLE_ALLOW_PUBLIC=1`, ~1000 req/hour, no SLA). Lowest priority everywhere: it never displaces a configured keyed provider.
+- **Unified `--freshness`** (`day`/`week`/`month`/`year`): native date filters where supported, `freshness.applied=false` in metadata otherwise.
+- **News vertical** (`--type news`): Serper serves Google News natively with correct parsing (date, source, thumbnail, position); other providers report `search_type.applied=false`.
+- **Serper extraction** via the `scrape.serper.dev` webpage scraper — last position in the fallback chain, which is now **Tavily-first**: tavily → exa → linkup → firecrawl → you → keenable → serper.
+- **Locale-aware defaults** with lightweight query language detection (`locale.country`/`locale.language` in config, `WSP_LOCALE_COUNTRY`/`WSP_LOCALE_LANGUAGE`, `"auto"` language inference, curated location hints — "mejores restaurantes Madrid" → `es`).
+- **Spam/mirror result filtering** (strict domain matching, `quality.blocked_domains`/`quality.allowed_domains`), **domain-diversity reranking** (max 2 head slots per domain), `site:`/`--include-domains` bypass, reported via `metadata.result_filter`.
+- **Adaptive provider performance memory**: rolling latency/result/error window (persisted as `provider_stats.json`) feeding bounded ±1.0 routing-score adjustments (`routing.adaptive_adjustments`).
+- **Robustness**: `Retry-After` parsing with a single bounded inline retry for 429s, cooldown ladder decay after 30 minutes, configuration errors no longer trigger cooldowns, JSON decode failures surface as provider errors; transient HTTP codes now include 408/425/500/502/504.
+- **Security**: extraction SSRF guard extended (CGNAT `100.64/10`, IPv4-mapped IPv6); look-alike domains no longer inherit authority boosts; inline base64 images replaced with `[IMAGE: alt]` placeholders; oversized extractions truncate to a head/tail window (`WSP_EXTRACT_CHAR_LIMIT`, default 15000).
+
+## What changed in 3.2.0
+
+- **Research mode** (`--mode research`): up to three providers queried **concurrently** with deterministic result ordering, cross-provider dedup, and top-source extraction for grounding; `--research-time-budget` gates provider launches and extraction (port of hermes-web-search-plus v2.4.0).
+- **Canonical-source intent reranking** + `--quality-report` authority signals (`canonical_domain_hits`, `demoted_domain_hits`, `canonical_top_result`) for official-release/docs/policy/finance/security queries (port of hermes v2.3.0).
+- **ProviderSpec registry** (`scripts/provider_registry.py`) as the single source of truth for provider metadata.
+- **Reliability**: retry backoff jitter (`RETRY_JITTER_FRACTION`), locked + atomic provider-health writes (port of hermes v2.4.0).
+- **Security hardening** (SkillSpector findings): narrowly scoped skill triggers, SSRF guard for user-supplied URLs, owner-only cache permissions, `WSP_DISABLE_CACHE`, declared skill permissions, and the privacy disclosures above.
 
 ## What changed in 3.1.0
 
@@ -28,24 +77,26 @@ Current version: **3.1.0**
 - **Tavily** — research and explanation queries
 - **Querit** — multilingual and international AI search
 - **Linkup** — citation/source-grounded search
-- **Exa** — semantic discovery and deep synthesis
+- **Exa** — semantic discovery with source URLs
 - **Firecrawl** — search with scrape-ready metadata
-- **Perplexity via Kilo** — answer-first web results
 - **You.com** — current-web / RAG-ish queries
 - **SearXNG** — privacy-first self-hosted metasearch
 - **SerpBase** — low-cost Google SERP, prepaid credits, **explicit/fallback-only**
+- **Keenable** — independent web index, keyed or opt-in keyless public tier, lowest priority
 
 ## Extraction providers
 
-`scripts/extract.py` supports:
+`scripts/extract.py` supports (auto order, Tavily-first):
 
-- Firecrawl
-- Linkup
 - Tavily
 - Exa
+- Linkup
+- Firecrawl
 - You.com
+- Keenable
+- Serper (webpage scraper)
 
-Auto extraction tries them in that order and falls back when a provider is unconfigured or fails.
+Auto extraction tries them in that order and falls back when a provider is unconfigured or fails. Oversized pages are truncated to a head/tail window (default 15,000 chars, `WSP_EXTRACT_CHAR_LIMIT`); inline base64 images become `[IMAGE: alt]` placeholders.
 
 ## Quick start
 
@@ -89,12 +140,39 @@ python3 scripts/extract.py --url https://docs.linkup.so --provider linkup
 python3 scripts/extract.py --url https://example.com --url https://example.org --include-images
 ```
 
+## Research mode & quality reports
+
+```bash
+# Concurrent multi-provider search + dedup + top-source extraction
+python3 scripts/search.py --mode research -q "EU AI Act obligations for foundation models"
+python3 scripts/search.py --mode research -q "..." --research-providers tavily linkup exa --research-time-budget 30
+
+# Transparent routing/result diagnostics with authority signals
+python3 scripts/search.py -q "official anthropic claude release notes" --quality-report
+```
+
+Research providers run concurrently (wall-clock ≈ slowest provider); result ordering stays deterministic by submission order. For canonical-source query classes (vendor releases, official docs, policy PDFs, finance/IR, security advisories) results are reranked so primary sources beat mirrors — see `metadata.intent_rerank` and `quality_report.authority_signals`.
+
+## Caching
+
+Results are cached under `.cache` (override with `WSP_CACHE_DIR`) for up to 1 hour by default; provider failure history lives in `.cache/provider_health.json` and adaptive-routing performance samples in `.cache/provider_stats.json`. The directory is created `0700` and files `0600`.
+
+```bash
+python3 scripts/search.py -q "..." --cache-ttl 120  # shorter result-cache lifetime
+python3 scripts/search.py -q "..." --no-cache    # bypass for one call
+WSP_DISABLE_CACHE=1 python3 scripts/search.py -q "..."   # disable globally
+python3 scripts/search.py --clear-cache          # wipe cached results
+python3 scripts/search.py --cache-stats          # inspect
+```
+
+Query recency and the effective date filter cap the TTL even when `--cache-ttl` requests a longer lifetime. `--time-range` takes precedence over `--freshness`; a shorter explicit TTL still wins. Nonpositive TTL values use the default before applying caps. Cache hits report `cache_age_seconds`. Research mode queries providers directly and does not use the search-result cache.
+
 ## Routing notes
 
 Provider priority now defaults to:
 
 ```text
-tavily -> linkup -> querit -> exa -> firecrawl -> perplexity -> brave -> serper -> you -> searxng
+tavily -> linkup -> querit -> exa -> firecrawl -> brave -> serper -> you -> searxng
 ```
 
 Notable behavior:

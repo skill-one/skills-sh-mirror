@@ -2840,6 +2840,444 @@ fn fts_repair_liveness_index_cmd(home: &std::path::Path, data_dir: &std::path::P
     cmd
 }
 
+/// GH #495 (bead 2l1b0.45): archives whose SQL-fallback FTS shadow is residue
+/// must converge through both reported journeys, `cass doctor
+/// --rebuild-canonical-fts --yes` (exit 13 on the reporter's archives) and
+/// `cass index --full`, without changing canonical history. The shapes are the
+/// reported ones: orphan shadow tables with no virtual table (a surviving
+/// `_data` collided with the repair's CREATE), the legacy 7-column
+/// internal-content DDL, and that DDL with a row missing from `_docsize`
+/// (PRIMARY KEY failure). An already canonical contentless shadow is the control.
+#[test]
+fn gh495_residue_fts_shadows_converge_through_doctor_and_full_index() {
+    use coding_agent_search::franken_sync::compat::ConnectionExt;
+    use frankensqlite::compat::RowExt;
+
+    const LEGACY_DDL: &str = "CREATE VIRTUAL TABLE fts_messages USING fts5(
+        content, title, agent, workspace, source_path,
+        created_at UNINDEXED, message_id UNINDEXED, tokenize='porter')";
+    let reshape = |db_path: &std::path::Path, shape: &str| {
+        let storage = SqliteStorage::open(db_path).unwrap();
+        let raw = storage.raw();
+        let mut statements: Vec<&str> = Vec::new();
+        match shape {
+            "orphan-shadow-tables" => statements.extend([
+                "DROP TABLE fts_messages",
+                "CREATE TABLE fts_messages_config(k PRIMARY KEY, v) WITHOUT ROWID",
+                "CREATE TABLE fts_messages_content(id INTEGER PRIMARY KEY, c0, c1, c2, c3, c4, c5, c6)",
+                "CREATE TABLE fts_messages_data(id INTEGER PRIMARY KEY, block BLOB)",
+                "CREATE TABLE fts_messages_docsize(id INTEGER PRIMARY KEY, sz BLOB)",
+                "CREATE TABLE fts_messages_idx(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID",
+                "INSERT INTO fts_messages_data(id, block) VALUES (10, X'00')",
+            ]),
+            "legacy-ddl" | "legacy-ddl-missing-docsize" => {
+                statements.extend(["DROP TABLE fts_messages", LEGACY_DDL]);
+            }
+            "canonical-control" => {}
+            other => panic!("unknown shape {other}"),
+        }
+        for statement in statements {
+            raw.execute(statement)
+                .unwrap_or_else(|err| panic!("{shape}: {statement}: {err}"));
+        }
+        if shape.starts_with("legacy-ddl") {
+            // Populate the legacy internal-content shadow one row per message,
+            // as the pre-V14 writer did.
+            let messages: Vec<(i64, String)> = raw
+                .query("SELECT id, content FROM messages ORDER BY id")
+                .unwrap()
+                .into_iter()
+                .map(|row| (row.get_typed(0).unwrap(), row.get_typed(1).unwrap()))
+                .collect();
+            for (id, content) in &messages {
+                raw.execute_compat(
+                    "INSERT INTO fts_messages(
+                        rowid, content, title, agent, workspace, source_path, created_at, message_id
+                     ) VALUES (?1, ?2, '', '', '', '', 0, ?1)",
+                    coding_agent_search::franken_sync::params![*id, content.as_str()],
+                )
+                .unwrap_or_else(|err| panic!("{shape}: legacy shadow row {id}: {err}"));
+            }
+            if shape == "legacy-ddl-missing-docsize" {
+                raw.execute_compat(
+                    "DELETE FROM fts_messages_docsize WHERE id = ?1",
+                    coding_agent_search::franken_sync::params![messages[0].0],
+                )
+                .unwrap();
+            }
+        }
+        storage.close().unwrap();
+    };
+    let inspect = |db_path: &std::path::Path| {
+        let storage = SqliteStorage::open_readonly(db_path).unwrap();
+        let raw = storage.raw();
+        let count = |sql: &str| raw.query(sql).unwrap()[0].get_typed::<i64>(0).unwrap();
+        let ddl = raw
+            .query("SELECT sql FROM sqlite_master WHERE name = 'fts_messages'")
+            .unwrap()
+            .first()
+            .map(|row| row.get_typed::<String>(0).unwrap())
+            .unwrap_or_default();
+        let canonical = ["conversations", "messages"].map(|table| {
+            raw.query(&format!("SELECT * FROM {table} ORDER BY id"))
+                .unwrap()
+                .into_iter()
+                .map(|row| row.values().to_vec())
+                .collect::<Vec<_>>()
+        });
+        let messages = count("SELECT COUNT(*) FROM messages");
+        let docsize = if ddl.is_empty() {
+            -1
+        } else {
+            count("SELECT COUNT(*) FROM fts_messages_docsize")
+        };
+        storage.close_without_checkpoint().unwrap();
+        (
+            // Whitespace-free, so `content = ''` and `content=''` compare alike.
+            ddl.split_whitespace().collect::<String>(),
+            docsize,
+            messages,
+            canonical,
+        )
+    };
+
+    for shape in [
+        "orphan-shadow-tables",
+        "legacy-ddl",
+        "legacy-ddl-missing-docsize",
+        "canonical-control",
+    ] {
+        let tmp = TempDir::new().unwrap();
+        let home = tmp.path();
+        let data_dir = home.join("cass_data");
+        fs::create_dir_all(&data_dir).unwrap();
+        seed_fts_liveness_sessions(home);
+        let cass = |args: &[&str]| {
+            base_cmd(home)
+                .current_dir(home)
+                .args(args)
+                .arg("--data-dir")
+                .arg(&data_dir)
+                .env("CASS_AUTO_REFRESH", "0")
+                .env("CASS_FTS_SHADOW_MAX_MESSAGES", "0")
+                .output()
+                .unwrap()
+        };
+        let seeded = cass(&["index", "--full", "--json", "--no-progress-events"]);
+        assert!(
+            seeded.status.success(),
+            "{shape}: seed failed: {}",
+            String::from_utf8_lossy(&seeded.stderr)
+        );
+        let db_path = data_dir.join("agent_search.db");
+        let (_, _, messages, canonical_before) = inspect(&db_path);
+        assert!(messages > 1, "{shape}: the fixture must have messages");
+
+        for journey in [
+            &["doctor", "--rebuild-canonical-fts", "--yes", "--json"][..],
+            &["index", "--full", "--json", "--no-progress-events"][..],
+        ] {
+            reshape(&db_path, shape);
+            let output = cass(journey);
+            assert!(
+                output.status.success(),
+                "{shape} {journey:?}: exit {:?}\nstdout: {}\nstderr: {}",
+                output.status.code(),
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let (ddl, docsize, messages_after, canonical_after) = inspect(&db_path);
+            assert!(
+                ddl.contains("content=''") && ddl.contains("contentless_delete=1"),
+                "{shape} {journey:?}: the shadow must be the canonical contentless one: {ddl}"
+            );
+            assert_eq!(
+                docsize, messages_after,
+                "{shape} {journey:?}: every message must be in the shadow exactly once"
+            );
+            assert_eq!(
+                canonical_after, canonical_before,
+                "{shape} {journey:?}: canonical rows must not change"
+            );
+        }
+    }
+}
+
+/// GH #497 follow-up (reporter validation on 2026-09-23): an archive whose
+/// corpus is over `CASS_FTS_SHADOW_MAX_MESSAGES` and that still carries the
+/// `content=''`-only `fts_messages` registration must settle through
+/// `cass doctor --rebuild-canonical-fts`:
+///
+/// - the apply that retires the residue exits 0 and says so
+///   (`repair_kind = retired_not_viable`), instead of the exit 13 storage
+///   error that is indistinguishable from a failed repair;
+/// - once retired, the dry-run plans nothing and does not claim a mutation,
+///   and a repeat apply changes nothing;
+/// - the durable marker describes a settled state, not a pending action;
+/// - raising the bound recreates the canonical shadow from canonical rows.
+#[test]
+fn gh497_oversized_residue_retires_successfully_and_settles() {
+    use coding_agent_search::franken_sync::compat::ConnectionExt;
+    use frankensqlite::compat::RowExt;
+
+    // The registration the reporter's archive carried (cass before 2026-08-04).
+    const CONTENT_ONLY_DDL: &str = "CREATE VIRTUAL TABLE IF NOT EXISTS fts_messages USING fts5(\
+        content, title, agent, workspace, source_path, created_at UNINDEXED, \
+        content = '', tokenize = 'porter')";
+
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path();
+    let data_dir = home.join("cass_data");
+    fs::create_dir_all(&data_dir).unwrap();
+    seed_fts_liveness_sessions(home);
+    let cass = |args: &[&str], bound: &str| {
+        base_cmd(home)
+            .current_dir(home)
+            .args(args)
+            .arg("--data-dir")
+            .arg(&data_dir)
+            .env("CASS_AUTO_REFRESH", "0")
+            .env("CASS_FTS_SHADOW_MAX_MESSAGES", bound)
+            .output()
+            .unwrap()
+    };
+    let describe = |output: &std::process::Output| {
+        format!(
+            "exit {:?}\nstdout: {}\nstderr: {}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )
+    };
+    let json = |output: &std::process::Output| -> serde_json::Value {
+        serde_json::from_slice(&output.stdout).unwrap_or_else(|err| {
+            panic!(
+                "stdout is not one JSON document ({err}): {}",
+                describe(output)
+            )
+        })
+    };
+
+    let seeded = cass(&["index", "--full", "--json", "--no-progress-events"], "0");
+    assert!(seeded.status.success(), "seed: {}", describe(&seeded));
+    let db_path = data_dir.join("agent_search.db");
+
+    // Replace the canonical shadow with the legacy content=''-only one and
+    // populate it through the virtual table, one row per message.
+    {
+        let storage = SqliteStorage::open(&db_path).unwrap();
+        let raw = storage.raw();
+        raw.execute("DROP TABLE fts_messages").unwrap();
+        raw.execute(CONTENT_ONLY_DDL).unwrap();
+        let messages: Vec<(i64, String)> = raw
+            .query("SELECT id, content FROM messages ORDER BY id")
+            .unwrap()
+            .into_iter()
+            .map(|row| (row.get_typed(0).unwrap(), row.get_typed(1).unwrap()))
+            .collect();
+        for (id, content) in &messages {
+            raw.execute_compat(
+                "INSERT INTO fts_messages(
+                    rowid, content, title, agent, workspace, source_path, created_at
+                 ) VALUES (?1, ?2, '', '', '', '', 0)",
+                coding_agent_search::franken_sync::params![*id, content.as_str()],
+            )
+            .unwrap_or_else(|err| panic!("legacy shadow row {id}: {err}"));
+        }
+        storage.close().unwrap();
+    }
+
+    // Everything a retirement or a repeat apply could touch.
+    let snapshot = || {
+        let storage = SqliteStorage::open_readonly(&db_path).unwrap();
+        let raw = storage.raw();
+        let fts_objects: Vec<String> = raw
+            .query("SELECT name FROM sqlite_master WHERE name LIKE 'fts_messages%' ORDER BY name")
+            .unwrap()
+            .into_iter()
+            .map(|row| row.get_typed(0).unwrap())
+            .collect();
+        let markers: Vec<(String, String)> = raw
+            .query(
+                "SELECT key, value FROM meta
+                 WHERE key IN ('fts_shadow_not_viable', 'fts_fallback_repair_pending')
+                 ORDER BY key",
+            )
+            .unwrap()
+            .into_iter()
+            .map(|row| (row.get_typed(0).unwrap(), row.get_typed(1).unwrap()))
+            .collect();
+        let canonical = ["conversations", "messages"].map(|table| {
+            raw.query(&format!("SELECT * FROM {table} ORDER BY id"))
+                .unwrap()
+                .into_iter()
+                .map(|row| row.values().to_vec())
+                .collect::<Vec<_>>()
+        });
+        storage.close_without_checkpoint().unwrap();
+        (fts_objects, markers, canonical)
+    };
+    let (objects_before, _, canonical_before) = snapshot();
+    assert!(
+        objects_before.iter().any(|name| name == "fts_messages"),
+        "fixture must carry the legacy registration: {objects_before:?}"
+    );
+    let message_count = canonical_before[1].len();
+    assert!(message_count > 1, "the fixture must have messages");
+    // The corpus is over this bound, so the shadow is not viable.
+    let bound = "1";
+
+    let dry_run = cass(
+        &["doctor", "--rebuild-canonical-fts", "--dry-run", "--json"],
+        bound,
+    );
+    assert!(
+        dry_run.status.success(),
+        "first dry-run: {}",
+        describe(&dry_run)
+    );
+    let dry_run = json(&dry_run);
+    assert_eq!(dry_run["parity"]["status"], "residue", "{dry_run}");
+    assert_eq!(
+        dry_run["planned_action"], "drop_residue_and_mark_not_viable",
+        "{dry_run}"
+    );
+    assert_eq!(dry_run["would_mutate"], true, "{dry_run}");
+
+    let applied = cass(
+        &["doctor", "--rebuild-canonical-fts", "--yes", "--json"],
+        bound,
+    );
+    assert!(
+        applied.status.success(),
+        "retiring an oversized residue shadow is a completed repair: {}",
+        describe(&applied)
+    );
+    let applied = json(&applied);
+    assert_eq!(applied["repair_kind"], "retired_not_viable", "{applied}");
+    assert_eq!(applied["shadow_retired"], true, "{applied}");
+    assert_eq!(applied["shadow_mutated"], true, "{applied}");
+    assert_eq!(applied["canonical_rows_modified"], false, "{applied}");
+    assert_eq!(applied["parity_before"]["status"], "residue", "{applied}");
+    assert_eq!(applied["parity_after"]["status"], "absent", "{applied}");
+    let detail = applied["detail"].as_str().unwrap_or_default();
+    assert!(
+        detail.contains("fallback FTS shadow not viable on this engine")
+            && detail.contains("settled state")
+            && !detail.contains("once the corpus fits the bound"),
+        "the retirement detail must read as terminal: {detail}"
+    );
+
+    let (objects_retired, markers_retired, canonical_retired) = snapshot();
+    assert!(
+        objects_retired.is_empty(),
+        "every derived FTS object must be gone: {objects_retired:?}"
+    );
+    assert_eq!(
+        markers_retired.len(),
+        2,
+        "both durable markers must be recorded: {markers_retired:?}"
+    );
+    assert_eq!(
+        canonical_retired, canonical_before,
+        "canonical rows must not change"
+    );
+
+    let settled_dry_run = cass(
+        &["doctor", "--rebuild-canonical-fts", "--dry-run", "--json"],
+        bound,
+    );
+    assert!(
+        settled_dry_run.status.success(),
+        "settled dry-run: {}",
+        describe(&settled_dry_run)
+    );
+    let settled_dry_run = json(&settled_dry_run);
+    assert_eq!(
+        settled_dry_run["parity"]["status"], "absent",
+        "{settled_dry_run}"
+    );
+    assert_eq!(
+        settled_dry_run["planned_action"], "none_shadow_retired_not_viable",
+        "{settled_dry_run}"
+    );
+    assert_eq!(settled_dry_run["would_mutate"], false, "{settled_dry_run}");
+    assert_eq!(
+        settled_dry_run["apply_command"],
+        serde_json::Value::Null,
+        "{settled_dry_run}"
+    );
+
+    let repeated = cass(
+        &["doctor", "--rebuild-canonical-fts", "--yes", "--json"],
+        bound,
+    );
+    assert!(
+        repeated.status.success(),
+        "repeat apply: {}",
+        describe(&repeated)
+    );
+    let repeated = json(&repeated);
+    assert_eq!(repeated["repair_kind"], "retired_not_viable", "{repeated}");
+    assert_eq!(repeated["shadow_mutated"], false, "{repeated}");
+    let (objects_repeated, markers_repeated, canonical_repeated) = snapshot();
+    assert!(objects_repeated.is_empty(), "{objects_repeated:?}");
+    assert_eq!(
+        markers_repeated, markers_retired,
+        "a repeat apply on a settled retirement must not rewrite its markers"
+    );
+    assert_eq!(canonical_repeated, canonical_before);
+
+    // Retirement is not a dead end: once the bound admits the corpus, the
+    // same command recreates the canonical contentless shadow.
+    let unbounded = cass(
+        &["doctor", "--rebuild-canonical-fts", "--yes", "--json"],
+        "0",
+    );
+    assert!(
+        unbounded.status.success(),
+        "unbounded apply: {}",
+        describe(&unbounded)
+    );
+    let unbounded = json(&unbounded);
+    assert_eq!(
+        unbounded["repair_kind"], "failure_atomic_recreate",
+        "{unbounded}"
+    );
+    assert_eq!(
+        unbounded["parity_after"]["status"], "healthy",
+        "{unbounded}"
+    );
+    let storage = SqliteStorage::open_readonly(&db_path).unwrap();
+    let raw = storage.raw();
+    let ddl: String = raw
+        .query("SELECT sql FROM sqlite_master WHERE name = 'fts_messages'")
+        .unwrap()[0]
+        .get_typed(0)
+        .unwrap();
+    let ddl: String = ddl.split_whitespace().collect();
+    assert!(
+        ddl.contains("content=''") && ddl.contains("contentless_delete=1"),
+        "the recreated shadow must be the canonical one: {ddl}"
+    );
+    let docsize: i64 = raw
+        .query("SELECT COUNT(*) FROM fts_messages_docsize")
+        .unwrap()[0]
+        .get_typed(0)
+        .unwrap();
+    assert_eq!(usize::try_from(docsize).unwrap(), message_count);
+    let not_viable_markers: i64 = raw
+        .query("SELECT COUNT(*) FROM meta WHERE key = 'fts_shadow_not_viable'")
+        .unwrap()[0]
+        .get_typed(0)
+        .unwrap();
+    assert_eq!(
+        not_viable_markers, 0,
+        "a viable rebuild clears the retirement marker"
+    );
+    storage.close_without_checkpoint().unwrap();
+}
+
 fn seed_fts_liveness_sessions(home: &std::path::Path) {
     let codex_root = home.join(".codex");
     make_codex_session(
@@ -3710,6 +4148,14 @@ fn gh440_plain_index_resumes_a_force_rebuild_killed_between_commit_and_checkpoin
     assert!(
         committed_docs > checkpoint_docs,
         "the kill window must have the authority ahead of the checkpoint: {payload}"
+    );
+    // 7qirz: mid-rebuild, the lock names the rebuild, not the last preflight
+    // step (which is what #483/#497 operators saw for a whole 42-minute pass).
+    let lock = fs::read_to_string(data_dir.join("index-run.lock"))
+        .expect("index-run.lock while the rebuild is parked");
+    assert!(
+        lock.lines().any(|line| line == "phase=lexical:rebuild"),
+        "the lock must name the active rebuild: {lock}"
     );
     child.kill().expect("kill parked force-rebuild");
     let _ = child.wait();

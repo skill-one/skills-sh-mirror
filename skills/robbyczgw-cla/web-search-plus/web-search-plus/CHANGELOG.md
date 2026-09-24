@@ -1,5 +1,99 @@
 # Changelog - Web Search Plus
 
+## [4.3.1] - 2026-09-24
+
+Ported applicable Hermes runtime changes into the source-only CLI:
+
+- Preserve leading dashes and literal `--` in query arguments (`4400fc9`).
+- Prefer Exa highlights, send Tavily native date filters, and reuse Exa request dates in normal, cached, and research receipts (`55d4d08`). Explicit date bounds have separate cache keys.
+- Cap search-cache TTL by recency and effective date filter; retain `--cache-ttl`, `--no-cache`, and cache-age output (`33f415e`, `90e9c3a`).
+- Record each search-provider attempt, including retries and research members. Exclude cache hits and configuration errors. Lock statistics updates across POSIX processes, with thread-only fallback when `fcntl` is unavailable (`9bd7d36`).
+- Keep configured default counts and explicit-count precedence; clamp counts to 1–20 (`0345748` release line).
+- Share keep-alive connections across search and extraction calls. Bypass pooling for proxies or `WSP_HTTP_KEEPALIVE=0`; retry stale pooled sockets once (`c6da1e3`).
+
+Skipped: semantic spans and `spans_query`, plugin request adapters, budget guards, provider SDK cleanup, research span ranking, Jev, Parallel, DonSeTch, Hermes native backend and desktop settings. These have no matching runtime here. No providers or dependencies were added.
+
+## [4.0.0] - 2026-08-31
+
+Source-only skill release. Not a port of OpenClaw plugin 4.0.3.
+
+### Breaking
+- **Removed Perplexity / Kilo Gateway.** The skill no longer calls `api.kilo.ai`, no longer reads `PERPLEXITY_API_KEY` / `KILOCODE_API_KEY`, and no longer routes or auto-completes `-p perplexity`. Leftover config keys are ignored.
+- Public output stays ranked source URLs and extracted page text. Model-written answers are out of scope.
+
+### Not in this release
+- DonSeTch, Parallel, Octen, and TinyFish stay on the native plugin (`web-search-plus-plugin-v2`), not this CLI skill.
+
+## [3.3.0] - 2026-07-05
+
+Feature sync with `web-search-plus-plugin` v3.2.0 (hermes-web-search-plus v2.5.0–v2.9.0), adapted for this skill's CLI/filesystem runtime.
+
+### Added
+- **Keenable provider** (search + extraction) using Keenable's independent web index: keyed via `KEENABLE_API_KEY` (`X-API-Key`), or keyless against the **opt-in** public tier (`WSP_KEENABLE_ALLOW_PUBLIC=1` or `"keenable": {"allow_public": true}` in config.json; ~1000 req/hour shared, no SLA, warning in result metadata). Lowest priority in auto routing (score 0, excluded from ties) and extraction fallback so it never displaces a configured keyed provider. (Plugin/hermes v2.6.0)
+- **Unified `--freshness`** (`day`/`week`/`month`/`year`): providers with native date filters (Serper, Brave, Querit, Firecrawl, Keenable, SerpBase, You.com, Perplexity, SearXNG) receive the mapped value; providers without support run the normal search and report `freshness.applied=false` in `metadata.freshness`. Research mode reports per-provider application. (Hermes v2.8.0)
+- **News vertical**: `--type news` on Serper now parses the `news` response field correctly (date, source, thumbnail, position) instead of silently returning zero results; other providers report `search_type.applied=false` in `metadata.search_type`. (Hermes v2.9.0)
+- **Serper extraction**: `scripts/extract.py --provider serper` scrapes pages via Serper's webpage scraper (`https://scrape.serper.dev`, markdown preferred, per-URL error items). It joins the auto-extraction fallback chain in last position. (Hermes v2.9.0)
+- **Tavily-first extraction fallback** (plugin v2.6/v3 parity): auto order is now tavily → exa → linkup → firecrawl → you → keenable → serper (was firecrawl-first).
+- **Configurable search locale defaults** with lightweight query language detection (new `scripts/search_locale.py`): `locale.country` (ISO 3166-1 alpha-2) and `locale.language` (ISO 639-1 or `"auto"`) in config.json — or `WSP_LOCALE_COUNTRY`/`WSP_LOCALE_LANGUAGE` — replace the hardcoded us/en defaults for Serper, Brave, Querit, Firecrawl, You.com, and SearXNG. Explicit `--country`/`--language` CLI flags always win; explicit location hints from a curated city/country table win over config ("mejores restaurantes Madrid" → `es`); `locale.language: "auto"` enables a conservative stopword/character heuristic for de/es/fr/it/pt/nl/en (at least two distinct signals with a single unambiguous winner). Query language never implies the country. `metadata.locale` reports the resolved values and per-value source. Without configuration behavior stays exactly us/en. (Hermes v2.9.0)
+- **Spam/mirror result filtering** (new helpers in `scripts/quality.py`): results from known Stack Overflow/GitHub/documentation mirror domains are removed (strict exact-domain/true-subdomain matching, no look-alike false positives). Operators can extend via `quality.blocked_domains` or rescue via `quality.allowed_domains` in config.json. Domain-diversity reranking caps a single domain at 2 head slots (overflow demoted, not dropped). Explicit domain intent (`site:` queries, `--include-domains`) bypasses both. Removals and demotions are reported in `metadata.result_filter`. (Hermes v2.5.0)
+- **Adaptive provider performance memory** (new `scripts/provider_stats.py`): every provider call records latency/result-count/error into a rolling window (50 samples, 7-day freshness) that feeds bounded (±1.0) routing-score adjustments after 5 fresh samples — enough to break ties and nudge close calls, never enough to override a clear query-class winner. Reported as `routing.adaptive_adjustments`. Skill adaptation: the window is persisted to `provider_stats.json` in the cache directory (0700/0600, atomic writes) because each CLI call is a fresh process; `WSP_DISABLE_CACHE=1` keeps samples process-local. (Hermes v2.5.0)
+
+### Security
+- Extraction SSRF guard extended: CGNAT/shared address space (`100.64.0.0/10`) and IPv4-mapped IPv6 addresses (`::ffff:10.0.0.1`) are now blocked like the other private ranges. (Hermes v2.7.0 parity)
+- Domain boost matching no longer grants authority boosts (or spam-block matches) to look-alike domains that merely contain a trusted domain string (for example `openai.com.evil.example`); label-prefix rules such as `docs.` now match only a leading host label. (Hermes v2.8.0)
+- Inline base64 image data in extracted content is replaced with `[IMAGE: alt]` placeholders before measuring content, preventing data-URI token bombs while preserving normal `http(s)` image links. (Hermes v2.8.0)
+
+### Improved
+- Rate-limit handling: 429 responses parse `Retry-After` (delta-seconds or HTTP-date), retry at most once (short waits ≤30s honored inline), and feed the provider's requested wait into the cooldown ladder (capped at the 1h ladder max) instead of hanging the request. (Hermes v2.5.0)
+- Provider cooldown escalation now decays stale failure history (older than 30 minutes) instead of punishing isolated old failures forever. (Hermes v2.5.0)
+- Provider configuration errors such as missing API keys no longer mark providers unhealthy, trigger cooldowns, or skew the adaptive performance memory; cooldown stays reserved for real provider/network failures. (Hermes v2.7.0)
+- Oversized extracted pages return a head/tail window plus an explanatory footer; the inline budget is configurable via `WSP_EXTRACT_CHAR_LIMIT` or `--extract-char-limit` (default 15000). (Hermes v2.8.0)
+- Provider JSON decode failures now surface as clear transient provider errors, improving retry/fallback behavior. (Hermes v2.8.0)
+- Transient HTTP codes extended from {429, 503} to {408, 425, 429, 500, 502, 503, 504}, matching the plugin's retry classification.
+
+### Not ported
+- The Parallel provider (plugin v3.0.0) remains out of scope for the skill, matching the 3.1.0 parity decision.
+- Plugin-only surfaces (`web_routing_config_plus`, in-memory-only cache/health, onboarding CLI) are host-runtime specific; the skill keeps its CLI flags, config.json, and disk cache equivalents.
+
+### Tests
+- New `tests/test_v33_plugin_sync.py`: freshness/search-type metadata, Serper news parsing, Keenable endpoint/public-tier/tie-exclusion, spam filter + allowlist + look-alike immunity, domain diversity, domain constraints, adaptive stats bounds/staleness, Retry-After parsing, cooldown decay + Retry-After cap, base64 sanitization, head/tail truncation, extraction order, keenable extraction fallback, CGNAT + IPv4-mapped IPv6 SSRF blocks.
+
+## [3.2.0] - 2026-06-10
+
+Feature sync with `hermes-web-search-plus` v2.3.0/v2.4.0 plus security fixes for the SkillSpector scan findings.
+
+### Added
+- **Research mode** (`--mode research`, port of hermes v2.4.0): queries up to three providers **concurrently** (wall-clock cost ≈ slowest provider instead of the sum), deduplicates across providers with deterministic ordering (preserved by submission order regardless of completion order), then extracts the top sources for grounding via `scripts/extract.py`. New flags: `--research-providers`, `--research-extract-count` (default 3), `--research-time-budget` (default 55s — gates which providers launch and whether extraction runs; exhausted steps surface as diagnostics instead of failures).
+- **Canonical-source intent reranking** (port of hermes v2.3.0): `rerank_results_for_intent()` + `CANONICAL_DOMAIN_RULES` boost primary sources and demote mirror/aggregator domains for the routing classes `official_vendor_release`, `official_docs`, `policy_pdf`, `finance_earnings_official`, and `security_advisory` (detected via a new compact `QueryAnalyzer._detect_routing_class()`). Reordered results are flagged in `metadata.intent_rerank`.
+- **Quality reports** (`--quality-report`): transparent routing/result diagnostics including `authority_signals` (`canonical_domain_hits`, `demoted_domain_hits`, `canonical_top_result`). Research mode always attaches a quality report.
+- **ProviderSpec registry** (`scripts/provider_registry.py`, port of hermes v2.3.0): single source of truth for provider metadata (env vars, API hosts, capabilities, signup URLs). `search.py` key resolution/validation, `extract.py` credentials, and CLI provider choices now read from it.
+- New modules `scripts/quality.py` and `scripts/research.py`; `scripts/search.py` re-exports the shared helpers (`normalize_result_url`, `deduplicate_results_across_providers`, `_choose_tie_winner`, …) so existing imports keep working.
+
+### Security (SkillSpector findings)
+- **Vague triggers (HIGH)**: replaced the generic manifest triggers (`search`, `find`, `look up`, `research`) with narrowly scoped phrases (`web search plus`, `wsp search`, `search the web for`, `multi-provider web search`, `extract url content`, `extract content from url`). Remaining triggers documented in SKILL.md.
+- **Undisclosed third-party transmission (MEDIUM)**: added prominent "Data handling & privacy" sections to SKILL.md, README, and FAQ stating that search queries and extraction URLs are sent to the configured third-party providers, with guidance to use explicit provider selection for sensitive work and avoid submitting internal/private URLs.
+- **Silent local caching (MEDIUM)**: caching of queries/results/provider failure history under `WSP_CACHE_DIR` (`.cache` default, including `provider_health.json`) is now disclosed in all docs; cache directory is created mode `0700` and cache/health files are written mode `0600` via atomic temp-file replace; added `WSP_DISABLE_CACHE=1` global toggle (the existing `--no-cache` / `--clear-cache` / `--cache-stats` flags are now documented prominently).
+- **SSRF / tainted URL flow (MEDIUM)**: new `scripts/url_security.py` guard (mirrors the SearXNG SSRF guard) validates all user-supplied URLs before extraction or forwarding (`scripts/extract.py` URLs and `--similar-url`): http/https only, hostname resolution with private/loopback/link-local/reserved ranges blocked (10/8, 127/8, 169.254/16, 172.16/12, 192.168/16, ::1, fc00::/7, fe80::/10, 0.0.0.0), and cloud metadata endpoints (169.254.169.254, metadata.google.internal) always blocked. Explicit opt-out for trusted private networks via `--allow-private-urls` or `WSP_ALLOW_PRIVATE_URLS=1` (off by default).
+- **Missing permission declarations (MEDIUM)**: `package.json → clawhub.permissions` and the SKILL.md metadata now declare outbound network access (listed provider API hosts only), environment reads (`*_API_KEY`, `SEARXNG_*`, `WSP_*`), and filesystem writes (cache directory only).
+- **Description-behavior mismatch (LOW)**: skill descriptions in `package.json` and SKILL.md now mention local caching and provider-health persistence.
+- **Credential redaction (defense in depth)**: provider error messages are scrubbed of any configured credential values (env- and config.json-sourced) before they reach stderr, fallback error lists, extraction error fields, or the persisted `provider_health.json` — even if a provider echoes a key back in an error body, it never leaves memory.
+
+### Improved
+- Retry backoff now adds bounded random jitter (`RETRY_JITTER_FRACTION = 0.5`) so concurrent or repeated retries against a recovering provider do not synchronize into bursts (port of hermes v2.4.0).
+- Provider-health read-modify-write is guarded by a lock and written atomically, so concurrent in-process provider calls (research mode) cannot lose cooldown updates or tear the file (port of hermes v2.4.0).
+
+### Fixed
+- Auto-routing's suggested Exa depth (`deep`/`deep-reasoning`) is now actually propagated into the provider call: `routing_info` previously never carried `exa_depth` (or `analysis_summary`), so the auto-upgrade path was dead code.
+- In Docker environments without a configured SearXNG instance, the auto-detected local URL no longer raises an unhandled `ValueError` out of `get_api_key()` when it fails SSRF validation — SearXNG is treated as unconfigured instead.
+
+### Tests
+- New `tests/test_security.py`: trigger-scope checks, manifest permission declarations, SSRF validation (scheme rejection, private IP literals, metadata endpoints with opt-in still blocked, mocked private/public DNS resolution, extract-level blocking), cache dir/file permissions (0700/0600), cache roundtrip, and `--no-cache` / `WSP_DISABLE_CACHE` behavior through `main()`.
+- New `tests/test_research_and_quality.py`: research-mode merge/dedup/extraction, out-of-order completion ordering, time-budget gating, extraction-failure resilience, provider selection, quality reports, authority signals, canonical reranking, routing-class detection, retry-jitter bounds, registry consistency, and an end-to-end rerank + quality-report pipeline regression test.
+
+### Compatibility
+- Fully backward compatible CLI: all existing flags, defaults, output fields, and the `scripts.search` import surface are unchanged; new behavior is opt-in (`--mode research`, `--quality-report`) except for (a) intent reranking, which can reorder results for the five canonical-source query classes, (b) the SSRF guard, which now rejects private/metadata extraction targets unless explicitly allowed, and (c) stricter cache file permissions.
+- Skill manifest triggers are intentionally narrower; invoke the skill with the scoped phrases documented in SKILL.md.
+
 ## [3.1.0] - 2026-05-25
 
 ### Added

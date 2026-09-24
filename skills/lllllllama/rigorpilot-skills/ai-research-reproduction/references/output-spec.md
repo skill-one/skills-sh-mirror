@@ -76,9 +76,14 @@ Suggested top-level keys:
 - `status`
 - `documented_command_status`
 - `documented_command`
+- `documented_command_id`
 - `documented_command_kind`
 - `documented_command_source`
 - `documented_command_section`
+- `selection_source`
+- `selection_fingerprint`
+- `command_candidates`
+- `error`
 - `execution_mode`
 - `runtime`
 - `stage_results`
@@ -98,6 +103,9 @@ Suggested top-level keys:
 - `command_reporting`
 - `next_safe_action`
 - `artifact_provenance`
+- `source_integrity`
+- `invocation_path`
+- `evidence_manifest_path`
 - `verified_commit_count`
 - `outputs`
 - `notes`
@@ -117,6 +125,17 @@ Recommended evidence level enums:
 
 Field intent:
 
+- `documented_command_id`, `selection_fingerprint`, `command_candidates`
+  - identify the exact README-backed candidate set shown during planning
+  - explicit `--command-id` execution should carry the plan fingerprint so a changed README/command set fails closed instead of silently running a different command
+  - setup and asset commands are not reproduction target candidates and cannot be selected through this mechanism
+- `error`
+  - optional machine-readable failure object with stable `code`, human summary,
+    review requirement and safe next actions
+  - examples include `missing_dependency`, `missing_asset`, `placeholder_required`,
+    `shell_review_required`, `command_not_found`, `command_failed`, `timeout`,
+    `metric_mismatch`, `source_modified`, `runtime_incomplete_without_status`,
+    and evidence-verification errors
 - `assumptions`
   - important assumptions that still shape execution or interpretation
 - `unverified_inferences`
@@ -154,6 +173,13 @@ Field intent:
   - summary fields may contain only a bounded log tail; the referenced log files remain complete
 
 ## Runtime evidence
+
+For a short-call supervisor, see [agent-job.md](agent-job.md). Job lifecycle and
+completion-time `result.accepted` are distinct from both runtime status and
+`evidence_valid`. A timeout can have complete, valid evidence without acceptance.
+New manifest schema `1.1` also binds runtime `spec.json`, source-adjacent delivery
+and ownership receipts. Legacy schema `1.0` remains inspectable with explicitly
+reduced `legacy_core_only` coverage; it does not acquire new hashes retroactively.
 
 Every executed command should persist under the active evidence output directory:
 

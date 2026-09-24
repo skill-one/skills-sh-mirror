@@ -1,6 +1,62 @@
-# Reality Check and Bridge Plan — refreshed 2026-09-22 (evening execution pass)
+# Reality Check and Bridge Plan — refreshed 2026-09-23
 
-## Current assessment: 2026-09-22 evening (execution pass, SageSnow)
+## Update: 2026-09-23 (SageSnow)
+
+**The first complete lib-suite run in weeks** (`0e77ef78`, 12,600 s cap,
+receipt `/data/tmp/cass-gate.jkf85b`): 7,758 passed, **82 failed**, 44
+ignored. Earlier gates never finished the suite inside the 2,400 s cap, so
+nothing showed how red `main` actually was. The failures break down as:
+
+| Cause | Tests | Resolution |
+|---|---|---|
+| `cf0fdb85` prettier-formatted six pinned third-party Pages vendor assets; their SHA-256/size pins failed | ~60 (`pages::*`) | Reverted in `aa47c7f4`; all six match their pins again, pins unchanged (`ggq7g`) |
+| `36c5d4d5` (#450, mine) added an error kind without bumping the audited count | 1 | `8325ddfd` |
+| TUI cached-detail/find-bar/footer, probably since `d499554f` (#493 anchors) | 7 | New bead `2gy3y` |
+| Semantic FSVI v2 / native-ANN WAL fixtures | 5 | Existing owners `962e8`, `ds7uy.3.3`; exact-search case `nohx1` |
+| Indexer: watch backlog overflow (new test), rebuild skip-when-complete metadata, gh473 budget | 3 | New bead `fqt9s` |
+| Watch lexical OOM retry | 1 | Existing `dh3vd` |
+| `gh477` read-only opener | 1 | Passed on re-run; load-sensitive (`vpsls`) |
+
+At `da06837c` the same filter set is down to the 16 tracked residuals, with
+all pages and error-kind tests green (receipt `/data/tmp/cass-gate.eqOyiv`).
+
+**GH #498 fixed (`da06837c`, `o5d74`).** A full rebuild of a >4.2M-message
+archive could never commit:
+- Quill's in-commit tier merge folds any eight same-tier segments, and its top tier has no bound.
+- After cass's byte-capped end-of-rebuild fold left eight or more large segments, the next commit folded them past the per-term posting limit (2^22).
+
+cass now disables the engine tier merge (`tier_fanout = usize::MAX`) and bounds
+every planned fold at `MAX_FOLD_OUTPUT_DOCS`. A real-engine reproduction covers
+the reporter's path: 4.24M documents in eight large segments.
+- The engine default fails with the reporter's exact error.
+- The cass config commits and folds into 3.71M + 0.53M segments.
+
+The upstream planner needs the same bound (noted on the bead).
+
+**Gate defect fixed (`01854fa3`).** The pinned UBS runner scans every
+explicitly named file even when `.ubsignore` covers it. So the config-level
+suppression AGENTS.md prescribes never applied in the gate's changed-file
+mode. The gate now filters by `.ubsignore` and prints each skipped path.
+On this change set that skips exactly the five scanner-visible vendor
+files; the three owned files stay scanned.
+
+**Other outcomes:**
+- #467: closed, verified by its reporter on darwin-arm64.
+- #369 bead `cb0gl`: closed on its probe.
+- #483: the conv-192 stall no longer reproduces on `main` (reporter's retest); what blocked them was #498.
+
+**Later on 2026-09-23:**
+- **TUI residuals fixed** (`7aa102c8`, `2gy3y`). Seven `ui::app` tests had relied on the same-path fallback that #493 removed. Their fixtures now build a canonical cached detail for the selected hit; `ui::app::tests` passes 1024/1024 and no assertion changed.
+- **Rebuild fast-path test fixed** (`6f86acc8`, `fqt9s` item 2). It now proves the completed-checkpoint fast path over a real generation instead of planting a checkpoint that #494 correctly refuses.
+- **Lock breadcrumb fixed** (`24366433`, `7qirz`). `index-run.lock` now names `index:scan` and `lexical:rebuild`. The #483/#497 reporter had seen a finished preflight step named for a whole 42-minute pass.
+- **#496 headroom fixed** (`149ee210`, `ztlqc`). The full-rebuild headroom preflight doubled a failed rebuild's leftover `.rebuild-staging` generation, locking a 13.4 GB archive out of its retry. The requirement is now documented, and it can be queried through `cass doctor --json` (`storage_pressure.full_rebuild_readiness`).
+- **Diagnosed, not fixed:**
+  - `nohx1`: frankensearch-index 0.3.1 `append_batch` tombstones superseded main rows, so the fixture's byte-equality check is stale.
+  - `2l1b0.46`: a `--full` run's own ingest invalidates its checkpoint fingerprint; this needs a prefix-based resume proof.
+  - `kfem7`: the gh439 slow-repair test stalls before its first breadcrumb on a pressured worker. It fails 3/3 after `89e053f3` and passed once before, but that commit's code cannot reach the path. The lock snapshot points to acquisition blocked in `sync_all()`.
+- **Duplicate avoided late.** My #497 retirement fix lost a race with `89e053f3`. I dropped my unpushed commit and closed its bead as superseded.
+
+## Assessment: 2026-09-22 evening (execution pass, SageSnow)
 
 This section supersedes current-state statements below. The midday assessment
 that follows remains the record of the audit; this pass executed against it and
@@ -18,8 +74,9 @@ features but **shipping**: 626 commits sit on `main` after v0.8.0 (a
 the open GitHub issues are fixed on `main` but unreleased. The remaining red is
 concentrated in a few places: large-archive memory (GH #320), incremental ANN
 (GH #460), the native-ANN WAL admission tests owned by `ds7uy.3.3`, the strict
-UBS gate, and a search-timeout contract conflict that today's branch merges
-brought onto `main` (`vy4ic`, needs an owner decision).
+UBS gate, and e2e tests the #493 identity work left behind
+(`2l1b0.43`). The search-timeout contract conflict that the day's branch merges
+brought onto `main` is resolved (`vy4ic`: exit 10 for explicit semantic).
 
 ### What was verified directly (not inferred)
 
@@ -85,12 +142,13 @@ disagreeing with code that had since changed.
 
 | Class | Issues |
 |---|---|
-| Closed with evidence | #459, #449 (released-binary acceptance), #413, #390, #329, #395 (fixed in shipped releases, reporters invited to reopen), #489 (validated by the reporter on `main`), #422 (fixed in v0.8.0; `692998f1` adds the timeout stderr note) |
+| Closed with evidence | #459, #449 (released-binary acceptance), #413, #390, #329, #395 (fixed in shipped releases, reporters invited to reopen), #489 (validated by the reporter on `main`), #422 (fixed in v0.8.0; `692998f1` adds the timeout stderr note), #475 (audit delivered) |
 | Fixed on `main`, unreleased (close at release) | #462, #477, #476, #379, #494, #473, #474, #426, #466, #463, #480, #469, #471, #472, #478, #468, #465, #464, #447, #415, #388, #423 |
 | Partial: this pass closed the named gap, other acceptance remains | #495 (direct-caller regression), #497 (legacy `content=''` residue, `032464af`), #374 (rowid shadow residue loop), #438 (explicit repair now rewrites old segments), #381 (Windows self-updater), #461 (per-run full content scan), #496/#483 (cgroup-blind budgets) |
 | Still open on cass | #320 (indexing peak memory; profile first), #460 (incremental HNSW append, L), #470 (passage gaps above 4,080 chars), #452 (semantic serving in `cass serve`), #349 (in-place v14 migration), #382 (ARM64 MiniLM needs a native run on the adopted pin) |
 | Upstream | #391 (frankensqlite#397) |
-| Owner judgment / reporter info | #481 (GPU/external embeddings under the attested-producer model), #450 (repair opt-in/throttle policy), #475 (downstream skill recipes live outside this repo), #443 (retest on v0.8.0), #467 (needs one darwin-arm64 run) |
+| Decided (owner delegated), then acted on | #481 (no in-process GPU; an opt-in external-endpoint embedding space with a known-answer probe is the direction, `gl29d`), #450 (policy implemented in `36c5d4d5`; open until release), #475 (skill-recipe audit done and filed in the skills repo, issue closed) |
+| Reporter info | #443 (retest on v0.8.0; follow-up posted), #467 (needs one darwin-arm64 run) |
 
 ### Work landed in this pass
 
@@ -119,6 +177,10 @@ disagreeing with code that had since changed.
 | `4bc2d40e` | rustfmt of a merge-introduced blank line (fmt was red on `main`) | — |
 | `0a1be788` | two lib tests whose premises other changes made stale (legacy-DDL "healthy" fixture; Codex budget message) | `2l1b0.45`, `2l1b0.40` |
 | `00a7403a` | a spec test's failure message shows the observed budget object | `u3vho` |
+| `c3ac835a` | decision: explicit semantic budget exhaustion is a typed exit-10 timeout (ds7uy.4.1); spec test and README/AGENTS aligned | `vy4ic` |
+| `36c5d4d5` | decision for #450: `--background` runs never start the one-time storage migration repair on a large unmigrated archive (exit 7 `migration-repair-pending`); foreground `index` still performs it | `2l1b0.6` |
+| `d34142f5`, `ec7fd8b1`, `557cf59b` | real-binary #495 acceptance: orphan shadow tables, legacy DDL and legacy DDL missing a `_docsize` row converge through both `doctor --rebuild-canonical-fts --yes` and `index --full`; canonical rows unchanged | `2l1b0.45` |
+| `5ab5f7d9`, `640d2c6f` | #486: no byte of the data dir contains an excluded sentinel (with a positive control) | `2l1b0.37` |
 
 Beads closed on cited evidence: `sxhgy`, `2l1b0.14`, `eayhf`, `ukg62`,
 `gdwzy`, `dndyv`, `ljf90`, `0dbkt`, `ubq10`, `test-env-api-isolation-qu81y.1`.
@@ -150,6 +212,23 @@ proof its analysis requires), `kz23l` (requires strict-UBS receipts),
 `hh4jf` (its view/expand probe now fails against the #493 output), `962e8`,
 `cooow`, `jfkqh`, `fyepq` (real gaps), `lgpqg`, `uc7nz`, `kupq4` (no
 implementing commit).
+
+The follow-up triage (recorded on `5v57k`) measured where the findings are.
+Over `src/` (368 files) the pinned-family scanner reports 306 critical,
+57,545 warning and 21,374 info. Excluding test code removes about 94% of the
+warnings (the direct Rust scanner without the ast-grep pack: 30,622 warnings
+drop to 1,782 and 93 criticals to 55). The 55 production criticals reviewed
+here are all false positives: redaction regex constants and table or env-var
+names read as "secrets", enum comparisons read as "timing-unsafe", and cass
+re-launching its own binary. Two tooling facts decide the path. The pinned
+UBS v5.4.4 already supports fingerprinted `--save-baseline` / `--baseline
+--new-only`: replaying `612bd808` against its parent reports exactly the two
+`Command::new(shell)` criticals that commit introduced. But the same replay
+shows 14 new *test* warnings, and the Rust module's `--exclude-tests` is not
+exposed by the `ubs` runner. The proposed gate is therefore delta +
+exclude-tests + fail-on-warning: new production warnings still block, and it
+needs a UBS runner change and release first. Dropping `--fail-on-warning`
+without it would be a gate weakening, so the gate is unchanged.
 
 ### Answers to the five reality-check questions
 

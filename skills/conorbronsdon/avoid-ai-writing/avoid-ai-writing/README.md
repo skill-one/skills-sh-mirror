@@ -19,6 +19,8 @@ Audit & rewrite content to remove AI writing patterns. A practical skill for any
 
 A portable writing skill for [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [OpenClaw](https://github.com/openclaw/openclaw), [Hermes](https://github.com/NousResearch/hermes-agent), and any other [agentskills.io](https://agentskills.io)-compatible agent. Audits and rewrites content to remove AI writing patterns ("AI-isms").
 
+The rules and bundled detector are calibrated for English. See [community language adaptations](#community--multilingual) for independently maintained versions in other languages.
+
 **Three modes:**
 - **Rewrite** (default) — flags AI patterns, applies up to two editing passes, verifies the result when possible, and returns one final version.
 - **Detect** — flags AI patterns without rewriting. Shows which flags are real problems vs. judgment calls. Useful when patterns might be intentional, when auditing content you don't want altered, or when you just want a quick scan.
@@ -449,7 +451,7 @@ or add it directly to a workflow:
 steps:
   - uses: actions/checkout@v7
   - id: gate
-    uses: conorbronsdon/avoid-ai-writing@v3.35.0
+    uses: conorbronsdon/avoid-ai-writing@v3.36.0
     with:
       glob: "**/*.md"
       threshold: "6"
@@ -459,10 +461,8 @@ steps:
 The example pins the release tag. For stricter supply-chain controls, pin
 `uses:` to the full commit SHA for that release.
 
-Step outputs and the gate CLI's `--json` flag were added after `v3.35.0`. The
-tag pinned above has neither, so `steps.gate.outputs.*` resolves to empty
-strings there. To use them, pin `uses:` to a later release or to a commit SHA
-from `main`.
+Step outputs and the gate CLI's `--json` flag require `v3.36.0` or later. On
+`v3.35.0` and earlier, `steps.gate.outputs.*` resolves to empty strings.
 
 The Action exposes step outputs via `$GITHUB_OUTPUT`:
 
@@ -663,11 +663,12 @@ Authored by [Conor Bronsdon](https://github.com/conorbronsdon) · [LinkedIn](htt
 
 ## Community / Multilingual
 
-Things the community has built around this skill:
+Community-maintained adaptations are linked here for discovery. Their authors own their rules, evidence, releases, and support; a link does not mean this repository maintains or validates their results.
 
 - **[avoid-ai-writing-multilingual](https://github.com/jurigis/avoid-ai-writing-multilingual)** by [Jürgen Kraus](https://github.com/jurigis) — German (`SKILL-DE.md`), French (`SKILL-FR.md`), Italian (`SKILL-IT.md`), Romanian (`SKILL-RO.md`), and Swedish (`SKILL-SV.md`) adaptations, grounded in native-language research rather than translated from English.
+- **[evitar-escrita-ia](https://github.com/mariorabeloneto/evitar-escrita-ia)** by [Mário Rabelo Neto](https://github.com/mariorabeloneto) — European Portuguese adaptation with dialect and formal-register guidance. Its vocabulary tables are editorial hypotheses, not corpus measurements.
 
-Built something on top of this skill? Open an issue — happy to link it here.
+Built an adaptation? See the [language adaptation guidance](CONTRIBUTING.md#language-adaptations), then open an issue with the language, dialect, maintainer, evidence, limitations, and link. We can link independent versions without taking over their maintenance.
 
 ---
 
