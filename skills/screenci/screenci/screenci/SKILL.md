@@ -52,7 +52,7 @@ npx screenci export
 - The person who sent you the prompt is often a teammate who does not code and may not use a terminal. Do not ask them to run commands, open files, or read the script.
 - Report in plain language: what the video shows, what you changed, and what needs their attention. No selectors, file paths, or command output unless they ask.
 - If you need them, say exactly what to click (the sign-in card in the browser you opened, a new prompt in the ScreenCI app) and wait for them.
-- When the video records against the live production site, some steps act on the real world: placing an order, paying, sending an email or invite, deleting or publishing something, changing account or billing settings. Before running such a step, stop and ask the person in plain language whether it is OK to do it on the production site, and wait for the answer. Do not guess, and do not rewrite the flow to avoid the step; if they say no, report which step needs a test account or a safe environment. Reading and navigating are fine without asking, and so is everything on a dev, staging, or test deployment (a `dev.`, `staging.`, `test.` or preview address): act freely there.
+- When the video records against the live production site, some steps act on the real world: placing an order, paying, sending an email or invite, deleting or publishing something, changing account or billing settings. Do not submit such a form there: fill it in and end the step on the completed form (see [Required Conventions](#required-conventions)). Submit it on production only when the person explicitly asks to show what happens after submitting, and then confirm with them first. Reading and navigating are fine, and so is everything on a dev, staging, or test deployment (a `dev.`, `staging.`, `test.` or preview address): act freely there, submitting included.
 - Never ask for a password, a one-time code, or an API key; `screenci login` is the only sign-in path.
 - Finish your final message with the video link that `preview` printed (or the pipeline run link) on its own last line.
 - Deliver the result the way the brief printed by `setup` says: a live preview you record yourself, a pipeline run you trigger, or a pull request you open. Do not switch to another path because the repository happens to have CI; only the codes that ask for a pipeline run complete on one.
@@ -75,13 +75,11 @@ import { video, voices } from 'screenci'
 // Voice is a render option (how narration is spoken), not part of the narration spec.
 video.renderOptions({ narration: { voice: { name: voices.Ava } } }).narration({
   en: {
-    intro:
-      'This video shows how to update your billing details and save the changes.',
+    intro: "Let's update your billing details and save the changes.",
     explainForm:
-      'We start on the billing page and update the company name, email, and tax ID.',
-    saving: 'Now we save the changes and wait for the confirmation message.',
-    nextPage:
-      'Next, we open the invoices section to confirm the new billing details are in use.',
+      'On your billing page, you can change the company name, email, and tax ID at any time.',
+    saving: 'Save the changes, and we confirm them right away.',
+    nextPage: 'Your invoices now use the new billing details.',
   },
 })('Update billing details', async ({ page, narration }) => {
   await narration.intro()
@@ -99,6 +97,8 @@ video.renderOptions({ narration: { voice: { name: voices.Ava } } }).narration({
 - Declare `video.narration({ ... })` on every video and speak throughout the demo. Pass a flat `cue -> text` object (shared across languages) or one keyed by language (`en`, `es`, ...).
 - The opening line must state the video's purpose, then continue with the walkthrough.
 - **Narrate the flow, not the clicks.** Each cue describes what the user is achieving ("Invite your teammates and set their roles"), never the mechanics ("Now click the blue button"). A handful of broad cues covering the whole flow beats one cue per action.
+- **Speak as the company that makes the product.** The video is the company talking to its own users: "we" and "our" for the company and its product, "you" for the viewer ("Our reports update every hour", "We email you a receipt"). Never describe the company or its product in the third person ("Acme lets you...", "their dashboard", "the company sends..."). Naming the product is fine ("In Acme Reports, you can..."); talking about the company from the outside is not.
+- **Present the demo as real.** Never mention in narration, overlays, or titles that the data is mock, sample, test, demo, or fictitious, or that a form is not actually submitted. Refer to the data as it appears on screen ("Emma's order", "your new project").
 - **Use the product's own vocabulary.** Pull nouns and verbs from the recorded app's source code and on-screen copy (page titles, button labels, domain terms) so the narration sounds native to the product.
 - Trigger cues from the `narration` fixture: `await narration.key()` runs the full line before moving on. Use `await narration.key.start()` when narration should overlap the next action, and `await narration.key.end()` to close that cue later, especially before visible navigation or route changes.
 - Pause tags (`[short pause]`, `[medium pause]`, `[long pause]`) are fine when a line needs a beat. **Do not add `[pronounce: ...]` tags on your own.** The voices say brand names, product terms, and domains correctly almost always. Add a pronounce tag only when the person says a word is spoken wrong or asks for a specific pronunciation, and then only on that word.
@@ -109,7 +109,9 @@ Every video MUST follow these:
 
 - **Narration on every video, no exceptions.** Videos without narration are not acceptable.
 - **Open with the video's purpose**, then narrate the flow at a high level.
-- **Example data only in forms.** Fill forms with plausible fictitious names, emails, and addresses (e.g. `Emma Carter`, `emma@aperturebio.com`), never real people or real contact details.
+- **Mock data only, presented as real.** Fill forms and create records with plausible fictitious names, emails, addresses, and amounts (e.g. `Emma Carter`, `emma@aperturebio.com`), never real people or real contact details. The video never says the data is mock, sample, or fictitious.
+- **Do not submit real-world forms on production.** When submitting a form on the live production site would place an order, pay, send an email or invite, delete or publish something, or change account or billing settings, fill it in completely and stop there: end the step on the completed form, with the cursor resting on the submit button (`hover()`). The narration never mentions that the form is not submitted: narrate the completed form as the natural end of the step ("Add your card details, and your order is ready to go"). On a dev, staging, or test deployment, submit normally.
+- **Company perspective.** Narrate as the company that makes the product ("we", "our"), speaking to its users ("you"), never about the company in the third person.
 - **Start on the requested page.** The visible video begins on the page the user asked for.
 - **Hide initial setup.** Wrap page load, navigation to the start page, loading spinners, and cookie-banner dismissal in `hide()`. After the initial navigation, find and click any cookie consent accept button inside that hidden block. Signing in is not part of this: the recording already starts signed in, see [references/login.md](references/login.md).
 - **Navigate visibly with clicks** after hidden setup, not `page.goto()`.
@@ -189,7 +191,7 @@ await autoZoom(async () => {
 - **Drawing over the video** (highlights, callouts, badges, title cards) [references/overlays.md](references/overlays.md). In short: HTML/CSS or React, colours from the app's own theme, one shared set of overlay files per project, never hand-drawn SVG.
 - **Recording an app behind a sign-in** [references/login.md](references/login.md). In short: never script a sign-in and never ask the person for a password or a code. Run `npx screenci login`, have them sign in in the browser it opens and click the card's button, then run `npx screenci login --wait` (which blocks until they do; never just end your turn instead). The recording starts from that session, so the video itself contains no sign-in at all.
 - **Recording from CI**: never add a CI pipeline on your own initiative, and never hand-write one when asked. The person clicks **Add to CI** on the project page in the web app and pastes you its prompt; that brief (`/add-to-ci.md`) mints a CI key, stores it in the provider's secret store, and adds the pipeline (`npx screenci ci-workflow` for GitHub Actions, the templates at `/docs/ci-setup.md#other-providers` for GitLab CI, CircleCI, Buildkite, and the rest). `screenci init` writes no workflow unless `--github-workflow` is passed.
-- **Learning about the product**: `screenci context` prints the organisation's AI context (repository, site URL, whether you may start the app, notes from the team). Set `SCREENCI_APP_LAUNCHED_BY=agent` when you started the app yourself before `preview`.
+- **Learning about the product**: `screenci context` prints what the project knows (site URL, whether the site needs a sign-in, notes from the team). Set `SCREENCI_APP_LAUNCHED_BY=agent` when you started the app yourself before `preview`.
 - **Exploring the app before you write selectors**: use the `playwright-cli` skill, never a Playwright script of your own. A hand-rolled script starts signed out, launches a different browser than the recorder, and sends you chasing selectors the recording will never see. Load the saved session first when the app needs one: `playwright-cli state-load screenci/.screenci/auth/default.json`.
 - **The recording lands on a bot check** ("Just a moment...", "Performing security verification", a challenge page) while a normal browser loads the site fine: the recorder runs Chromium's headless shell, and its user agent is what some bot protection rejects. Set a normal desktop user agent in `use` in `screenci.config.ts` and re-run:
 

@@ -56,7 +56,8 @@
 
 ### パラメータ
 
-- id* (path): integer(int64) - 経費科目ID
+- id* (path): integer(int64) - 経費科目ID、または経費科目のsource_line_template_id。
+  経費科目は設定内容を変更すると経費科目IDが変わることがあります。変更前に取得した経費科目IDと、設定を変更しても変わらないsource_line_template_idのどちらを指定しても、最新の経費科目を操作できます。
 - company_id*: integer(int64) - 事業所ID
 
 ### レスポンス
@@ -72,7 +73,8 @@ POST /api/1/expense_application_line_templates と同じ
 
 ### パラメータ
 
-- id* (path): integer(int64) - 経費科目ID
+- id* (path): integer(int64) - 経費科目ID、または経費科目のsource_line_template_id。
+  経費科目は設定内容を変更すると経費科目IDが変わることがあります。変更前に取得した経費科目IDと、設定を変更しても変わらないsource_line_template_idのどちらを指定しても、最新の経費科目を操作できます。
 
 ### リクエストボディ*
 

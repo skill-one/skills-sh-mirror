@@ -4,6 +4,19 @@ Emotional design goes beyond usability to create meaningful, trustworthy, and de
 
 ---
 
+## Contents
+
+- Don Norman's Three Levels of Design
+- Building Trust
+- Delight Through Microinteractions
+- Error Empathy
+- Brand Personality in UI
+- Key Metrics
+- Anti-Patterns
+- Sources
+
+---
+
 ## Don Norman's Three Levels of Design
 
 ### 1. Visceral Level — "I want it"

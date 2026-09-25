@@ -7,6 +7,9 @@ freeeIT管理APIを使った SaaSアカウント・備品・メンバー管理�
 - メンバー: `/hub/it_management/members` — 従業員（IT管理上の利用者）
 - SaaSアカウント: `/hub/it_management/application_accounts` — 各 SaaS 上のアカウント。メンバーに紐付く
 - 備品: `/hub/it_management/assets` — PC・周辺機器など物理資産。メンバーに利用者として割当
+- 備品ステータス: `/hub/it_management/asset_statuses` — 備品の状態ラベル（例: 使用中 / 保管中）。備品の `asset_status_id` から参照される
+- 備品種別: `/hub/it_management/asset_categories` — 備品の種類ラベル（例: ノートPC）。備品の `asset_category_id` から参照される
+- 部署: `/hub/it_management/departments` — 組織階層上の部署。メンバーの `department_ids` から参照される
 
 ## 認証と事業所スコープ
 
@@ -48,6 +51,8 @@ API ごとに削除の意味が違うので注意。
 
 - メンバー削除・SaaSアカウント削除: ソフトデリート
 - 備品削除: ハードデリート（復元不可）。誤削除すると戻せないため、削除前にユーザー確認を行うこと
+- 備品ステータス・備品種別: 該当マスタを参照している備品が1件でも残っていると削除できない（`system-managed` な備品種別も削除不可）。移行が必要なら先に対象備品の `asset_status_id` / `asset_category_id` を別のマスタに付け替える
+- 部署: 子部署が存在する、またはメンバーの `department_ids` に含まれている場合は削除できない
 
 ## SaaSアカウント (application_accounts) の特殊仕様
 
@@ -94,7 +99,7 @@ PATCH /hub/it_management/application_accounts/{id}
 1. メンバーを作成（POST `/hub/it_management/members`）
 2. レスポンスの `id` を `application_account` の `member_id` 系フィールドに利用してアカウント作成（POST `/hub/it_management/application_accounts`、カスタムアプリのみ）
 
-メンバーの `position_id` / `employment_type_id` / `department_ids` 等の参照 ID には、対応する一覧取得エンドポイントが提供されていない。事前に値を持っている前提で扱う。不正な ID は `ITM-05-03-0001` の 422 で返り、`fields` 配列で具体的なフィールド名が判別できる。
+メンバーの `department_ids` は `GET /hub/it_management/departments` で参照可能。同様に、備品の `asset_status_id` は `/asset_statuses`、`asset_category_id` は `/asset_categories` で一覧を取得してから割り当てられる。`position_id` / `employment_type_id` には対応する一覧取得エンドポイントが提供されていないため、事前に値を持っている前提で扱う。不正な ID は `ITM-05-03-0001` の 422 で返り、`fields` 配列で具体的なフィールド名が判別できる。
 
 メンバーの primary email（`PATCH /members/{id}` の `email`）は API での更新に対応していない。
 
@@ -142,3 +147,6 @@ PATCH /hub/it_management/application_accounts/{id}
 - `references/it-management-members.md` - メンバー
 - `references/it-management-application-account.md` - SaaSアカウント
 - `references/it-management-assets.md` - 備品
+- `references/it-management-asset-statuses.md` - 備品ステータス
+- `references/it-management-asset-categories.md` - 備品種別
+- `references/it-management-departments.md` - 部署

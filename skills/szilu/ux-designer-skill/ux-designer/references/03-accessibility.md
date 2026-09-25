@@ -4,9 +4,27 @@ Accessibility ensures digital products are usable by people with disabilities. B
 
 ---
 
+## Contents
+
+- WCAG 2.2 Overview
+- New Success Criteria in WCAG 2.2
+- Color and Contrast
+- Keyboard Navigation
+- Screen Reader Compatibility
+- Forms Accessibility
+- Motion and Animation
+- Touch Accessibility
+- Legal Requirements
+- Testing Checklist
+- Sources
+
+---
+
 ## WCAG 2.2 Overview
 
 **Web Content Accessibility Guidelines 2.2** is the latest W3C recommendation (October 2023, updated December 2024), now also an ISO standard (ISO/IEC 40500:2025).
+
+**WCAG 3.0** is still a W3C Working Draft (latest: September 2026; Candidate Recommendation expected no earlier than late 2027). It replaces A/AA/AAA with outcome-based Bronze/Silver/Gold scoring. Do not target it for compliance — laws (EAA via EN 301 549, ADA case law, Section 508) reference WCAG 2.x. APCA contrast is likewise not normative; use WCAG 2.x contrast ratios for pass/fail and APCA only as an additional readability check.
 
 ### Conformance Levels
 

@@ -4,6 +4,22 @@ Search is a critical navigation pattern that goes beyond basic text matching. Th
 
 ---
 
+## Contents
+
+- Search Box Design
+- Autocomplete
+- Faceted Search & Filters
+- Search Results
+- Zero Results
+- Advanced Search
+- Voice Search
+- AI-Powered Search
+- Key Metrics
+- Anti-Patterns
+- Sources
+
+---
+
 ## Search Box Design
 
 ### Placement & Sizing

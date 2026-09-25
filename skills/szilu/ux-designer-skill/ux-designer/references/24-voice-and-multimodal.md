@@ -14,6 +14,20 @@ across the range of contexts a product runs in (phone, desktop, watch, TV, car).
 
 ---
 
+## Contents
+
+- Voice as a First-Class Input
+- Voice Copy & Timing
+- Multimodal Interaction
+- Cross-Device Continuity
+- Accessibility Intersection
+- Spatial & AR (Emerging — Low Priority)
+- Quick Checklist
+- Common Mistakes
+- Sources
+
+---
+
 ## Voice as a First-Class Input
 
 Voice fails most often not because recognition is bad, but because the UX around it

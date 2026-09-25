@@ -4,13 +4,27 @@ Forms are often where users complete their goals—signing up, checking out, sub
 
 ---
 
+## Contents
+
+- Form Design Principles
+- Labels and Placeholders
+- Input Types
+- Validation
+- Required Fields
+- Multi-Step Forms
+- Specific Field Patterns
+- Form Layout
+- Submit Buttons
+- Accessibility Checklist
+- Sources
+
+---
+
 ## Form Design Principles
 
-### Key Statistics
+### Evidence
 
-- **81%** of users abandon forms after starting
-- Reducing form fields by **20-60%** often loses no necessary data
-- Multi-step forms can increase completion by **86%**
+Baymard's checkout research repeatedly finds that the average checkout shows roughly twice as many fields as needed, and that "too long / complicated checkout" is a top-cited abandonment reason. Treat widely quoted single figures (e.g. "81% abandon forms", "multi-step raises completion 86%") as unsourced marketing numbers — measure your own funnel instead.
 
 ### Fundamental Principles
 

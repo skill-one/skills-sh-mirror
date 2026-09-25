@@ -4,6 +4,19 @@ Visual design encompasses color theory, typography, layout, and the principles t
 
 ---
 
+## Contents
+
+- Color Theory
+- Typography
+- Visual Hierarchy
+- Whitespace and Spacing
+- Layout Principles
+- 2026 Trends
+- Tools and Resources
+- Sources
+
+---
+
 ## Color Theory
 
 ### Color Psychology

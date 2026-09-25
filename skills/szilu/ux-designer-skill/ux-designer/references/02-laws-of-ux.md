@@ -4,6 +4,20 @@ Psychological principles that inform user experience design, collected and popul
 
 ---
 
+## Contents
+
+- Fitts's Law
+- Hick's Law (Hick-Hyman Law)
+- Miller's Law
+- Jakob's Law
+- Peak-End Rule
+- Tesler's Law (Law of Conservation of Complexity)
+- Gestalt Principles
+- Additional Important Laws
+- Sources
+
+---
+
 ## Fitts's Law
 
 > The time to acquire a target is a function of the distance to and size of the target.
@@ -68,7 +82,7 @@ Avoid:
 ```
 
 ### The Magic Number
-Navigation menus should typically have **7±2 items** at the top level, though research suggests **4-5 items** may be optimal for quick scanning.
+There is no magic number. Menus are *scanned*, not memorized, so Miller's 7±2 does not apply to them (a common misreading). Keep top-level navigation small enough to scan at a glance — typically 5-7 items on desktop, 3-5 in a mobile bottom bar — and let card sorting and analytics decide the rest.
 
 ---
 
@@ -77,6 +91,8 @@ Navigation menus should typically have **7±2 items** at the top level, though r
 > The average person can only keep about 7 (±2) items in their working memory.
 
 **Formulated by:** George A. Miller (1956)
+
+**Modern correction:** Later research (Cowan, 2001) puts working-memory capacity closer to **4±1 chunks**. Use this law to justify *chunking* and *not forcing recall*; do not use it to cap menu or list lengths — anything visible on screen is recognition, not recall.
 
 ### Key Implications
 

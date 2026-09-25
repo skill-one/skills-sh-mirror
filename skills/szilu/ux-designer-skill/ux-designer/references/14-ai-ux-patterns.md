@@ -4,6 +4,24 @@ AI-powered interfaces are now mainstream but have unique UX challenges. This ref
 
 ---
 
+## Contents
+
+- AI as a Respectful Copilot, Not an Autopilot
+- Conversational / Chat UI
+- Prompt UX
+- AI Transparency & Trust
+- Hallucination Handling
+- Human-in-the-Loop
+- Generative UI
+- AI Copilot Patterns
+- Agent UX
+- Ethical AI UX
+- Key Metrics
+- Anti-Patterns
+- Sources
+
+---
+
 ## AI as a Respectful Copilot, Not an Autopilot
 
 The defining 2026 framing (NN/g *State of UX 2026* and broad trend consensus): the

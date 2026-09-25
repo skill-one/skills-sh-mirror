@@ -4,6 +4,18 @@ This reference covers the technical and UX aspects of concurrent editing, confli
 
 ---
 
+## Contents
+
+- Concurrent Editing
+- Version Control & History
+- Sharing & Permissions
+- Offline & Sync
+- Key Metrics
+- Anti-Patterns
+- Sources
+
+---
+
 ## Concurrent Editing
 
 ### Conflict Resolution Approaches

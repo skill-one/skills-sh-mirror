@@ -1,322 +1,179 @@
 ---
 name: ux-designer
-description: UX/UI design principles for building and critiquing interfaces. Use for accessibility audits (WCAG, EAA), microcopy, forms, navigation, onboarding, internationalization and RTL, voice and AI interfaces, and design systems.
+description: UX/UI design guidance for building, reviewing, and critiquing interfaces and frontend code. Use when designing screens or components, auditing usability or accessibility (WCAG 2.2, EAA), writing microcopy, or designing forms, navigation, search, tables, dashboards, onboarding, notifications, real-time collaboration, canvas/whiteboard apps, AI/chat interfaces, i18n/RTL, voice, or design systems.
 ---
 
-# UX Designer Skill
+# UX Designer
 
-Apply the following UX/UI principles when designing or reviewing interfaces.
+Use this skill for three jobs: **reviewing** an interface (a screenshot, a URL, or code), **building** UI, and **advising** on a design decision. You know the general UX canon already. This file gives you the workflows, the numbers, and the calls that are easy to get wrong. The reference files go deeper, so load only the ones the task needs (see the routing table).
 
-## When to Apply This Skill
+## Philosophy
 
-Use this skill when:
-- Designing or reviewing user interfaces, components, and mobile-first layouts
-- Implementing accessibility features or auditing against WCAG 2.2 AA
-- Creating forms, navigation, search, and other interactive elements
-- Writing UI copy and microcopy
-- Planning user research, or building and maintaining design systems
-- Designing collaborative/multiplayer features (presence, real-time editing, sharing, permissions, version history)
-- Building canvas-based or whiteboard applications
-- Designing AI-powered interfaces (chat, copilots, agents, generative UI)
-- Evaluating designs for dark patterns, ethical compliance, and user trust
-- Creating onboarding flows, activation funnels, and first-run experiences
-- Designing notification systems and attention management
-- Building dashboards and data visualizations
-- Internationalizing/localizing UI or adding right-to-left (RTL) language support
-- Designing voice, multimodal, or cross-device input experiences
+- **Calm over clever.** Motion, color, and density have to help the user understand something. Decoration that only impresses is noise.
+- **Judgment over polish.** Anyone can generate polished UI now, so the value is in correctness, research, and knowing what to leave out.
+- **AI as copilot, not autopilot.** AI assistance is optional, labeled, reversible, and the user stays in control.
+- **Adapt to real needs.** Avoid opaque or manipulative personalization.
 
-## Core Design Philosophy
+## Workflow: Reviewing or auditing a UI
 
-### User-Centered Design
-1. **Understand users first** - Research before designing
-2. **Reduce cognitive load** - Keep interfaces simple and intuitive
-3. **Provide feedback** - Every action should have a visible response
-4. **Maintain consistency** - Follow established patterns users expect
-5. **Design for accessibility** - Include all users from the start
+1. **Establish context.** Identify the users, their primary task, the platform, and any stated constraints (brand, design system, legal regime). If there's no context, assume a general audience and say so.
+2. **Look at the real thing.** Render it if you can: take a screenshot or open it in the browser. Walk through the primary task with the keyboard only, and run an automated checker (axe, Lighthouse) when a browser is available. Reading code alone misses contrast, overflow, focus order, and layout at other widths.
+3. **Check at the extremes.** Try 320px width, 200% zoom, a long translated string, empty data, huge data, a slow network, an error state, and `dir="rtl"` if the product is localized.
+4. **Report findings ranked by user impact**, not in checklist order:
 
-### Calm & Clarity Over Complexity
-- **Cognitive clarity over sensory richness** - Calm, legible interfaces beat busy,
-  flashy ones. Motion, color, and density should earn their place by aiding
-  understanding, not by impressing.
-- **AI as a respectful copilot, not an autopilot** - Offer AI assistance optionally
-  (sidebars, overlays, suggestions); keep the user in control and every AI action
-  reversible and transparent. See [references/14-ai-ux-patterns.md](references/14-ai-ux-patterns.md).
-- **Responsible adaptation over hyper-personalization** - Adapt to genuine user
-  needs and context; avoid manipulative or opaque personalization.
-- **Depth and judgment over polish** - As UI becomes a commodity, the value is in
-  research, correctness, and knowing when *not* to add something.
+   ```
+   [Blocker|Major|Minor] <what is wrong> — <who it hurts and how>
+     Where: <screen/component or file:line>
+     Fix: <concrete change>   Ref: <heuristic / WCAG SC / reference file>
+   ```
 
-### The UX Hierarchy of Needs
-1. **Functional** - Does it work?
-2. **Reliable** - Is it dependable?
-3. **Usable** - Is it easy to use?
-4. **Convenient** - Is it frictionless?
-5. **Pleasurable** - Is it delightful?
+   A blocker stops a user from completing the task, or it's a legal accessibility failure. Cite WCAG success criteria by number (for example, 2.4.11 Focus Not Obscured). Skip praise padding. If a pass finds nothing serious, say that plainly.
 
-## Core Guidelines
+## Workflow: Building UI
 
-### Before Designing
-- Understand user goals and pain points
-- Review existing patterns in the codebase
-- Consider accessibility requirements (WCAG 2.2 AA)
-- Define success metrics
+1. **Reuse before inventing.** Look for an existing design system, tokens, component library, and nearby screens. Match them, even where your own taste differs.
+2. **Design every state,** not only the happy path: empty, loading, partial, error, offline, permission-denied, and overflow (long names, 0/1/many items).
+3. **Semantics first.** Start from native elements (`<button>`, `<label>`, `<dialog>`, `<details>`, `<input type=…>`). Add ARIA only when no native element fits.
+4. **Verify by looking.** Render the result. Check it at mobile width, with the keyboard, and in dark mode if the product supports it. Fix what you see and check again.
 
-### Visual Design
-- One dominant element per screen — the primary action outranks all others in size and contrast
-- Consistent typography (16px+ body, 1.3-1.6x heading scale)
-- Sufficient color contrast (4.5:1 for text)
-- Spacing drawn from a single scale (4px or 8px base unit)
+### Generated-UI defaults to avoid
 
-### Interaction Design
-- Touch targets minimum 44×44px (iOS) / 48×48dp (Android)
-- Important actions in thumb-friendly zones (bottom/center on mobile)
-- Every interaction produces a visible response
-- Response appears within 100ms of input
-- Smooth animations (300-500ms duration)
-- Support `prefers-reduced-motion`
+These are telltale marks of model-generated interfaces. Don't use them unless the brand calls for them:
+- Purple/indigo gradients, glassmorphism, and glow shadows used as default styling
+- Emoji standing in for icons, and decorative icons on every heading or list item
+- A card around everything, nested cards, and every section centered with the same padding
+- Hero sections, testimonials, and marketing filler inside app UI that doesn't need them
+- Lorem-ipsum-perfect sample data: use realistic lengths, names from several locales, and edge cases
+- Buttons that all carry equal visual weight, with no single primary action
+- Gray-on-gray low-contrast "minimal" text
+- Hover-only affordances with no touch or keyboard equivalent
 
-### Forms
-- Inline validation (on blur, not during typing)
-- Clear error messages near the field
-- Required fields marked with asterisk (*)
-- Logical field order and grouping
+## Core rules
 
-### Navigation
-- Limited top-level items (7±2 rule)
-- Current location always visible
-- Mobile: bottom navigation preferred
-- Consistent navigation across pages
+**Visual.** Give each screen one dominant element. Body text is 16px or larger, with 1.4–1.6 line height and 50–75 characters per line. Text contrast is at least 4.5:1, or 3:1 for large text and UI component boundaries. Take all spacing from one 4px or 8px scale.
 
-### Accessibility
-- All interactive elements reachable and operable by keyboard
-- Every control has an accessible name and role exposed to screen readers
-- Color not sole conveyor of information
-- Focus states visible
-- Alt text for images
+**Interaction.** Show visible feedback within 100ms. Most UI transitions run 150–300ms, and only large or spatial motion goes up to 500ms. Honor `prefers-reduced-motion`. On mobile, put primary actions in the thumb zone. Never disable a button without saying why.
 
-### Collaborative Features
-- Presence indicators (cursors, avatars, typing)
-- Clear conflict prevention/resolution
-- Offline state communication
-- Client-specific undo/redo
-- Permission levels clearly communicated
+**Forms.** Put labels above fields and never use placeholder-only labels. Validate on blur and re-validate on input once a field has shown an error. Show errors next to the field and summarize them at submit. Ask only for what you need. Mark whichever set of fields is the minority, required or optional.
 
-### Canvas/Spatial Apps
-- Cursor-centered zoom (not screen center)
-- Smart guides and snapping with toggle
-- Minimap for large canvases
-- Full keyboard navigation support
-- Viewport culling for performance
+**Navigation.** The current location is always visible. Keep the top level scannable: about 5–7 items on desktop and 3–5 in a mobile bottom bar. Miller's 7±2 is a working-memory figure, not a menu rule. On desktop, don't hide primary navigation behind a hamburger.
 
-### AI Interfaces
-- AI-generated content clearly labeled
-- Source attribution for AI claims
-- User feedback mechanism (thumbs up/down)
-- Stop/cancel generation control
-- Human override always available
+**Accessibility.** Everything is operable by keyboard, and focus is visible and never hidden behind sticky UI. Every control has an accessible name and role. Color is never the only signal. Images have meaningful alt text, or `alt=""` if they're decorative. Targets are at least 24×24 CSS px (WCAG 2.5.8 AA), with 44pt (iOS) or 48dp (Android) recommended on touch. Treat WCAG 2.2 AA as the legal target. WCAG 3 is still a draft.
 
-### Onboarding
-- First-run experience guides users to "aha moment"
-- Empty states provide clear next actions
-- Onboarding is skippable and won't re-show
-- Sign-up collects only essential fields
+**Collaboration.** Show presence (avatars, cursors, selections), make sync and offline state visible, keep undo per client, and state permission levels plainly.
 
-### Notifications
-- Notification severity matches visual treatment
-- Push permission requested in context (not on first visit)
-- Users can control notification preferences per channel
-- Toasts auto-dismiss within 4-8s
-- Toasts carrying an undoable action expose that action as a button
+**Canvas.** Zoom around the cursor, not the screen center. Snapping has a toggle. Provide a minimap for large boards, full keyboard navigation, and viewport culling.
 
-### Ethical Design
-- Accept/reject buttons have equal visual prominence
-- No pre-checked optional consent boxes
-- Cancellation is as easy as subscription
-- No confirmshaming in decline copy
+**AI.** Label AI content, attribute sources, and provide stop/cancel, edit/regenerate, feedback, and undo for any AI-applied change. Keep a human override.
 
-### Internationalization
-- RTL-ready (logical CSS properties, layout verified in `dir="rtl"`)
-- Tolerant of ~30-40% text expansion (no fixed-width labels/buttons)
-- No text baked into images; all strings externalized
-- Locale-aware date/number/currency formatting via `Intl`
-- Pluralization handled with ICU plural rules, not string concatenation
-- Language switcher uses endonyms, not flags
+**Onboarding.** Guide the user to the first real value, not a tour. Make it skippable and never show it again once finished. Empty states give the next action.
 
-## Decision Trees
+**Notifications.** Match visual severity to real severity. Ask for push permission in context, after the user has seen value. Give users per-channel control. Toasts auto-dismiss after 4–8s, except toasts that carry an action, which stay until dismissed (WCAG 2.2.1).
 
-### Modal vs. Side Panel vs. Full Page
+**Ethics.** Accept and reject get equal prominence. Optional consent boxes start unchecked. Cancelling is as easy as signing up. No confirmshaming.
+
+**i18n.** Use logical CSS properties and verify the layout in `dir="rtl"`. Allow 30–40% text expansion and no fixed-width labels. Externalize all strings and keep text out of images. Format dates, numbers, and currency with `Intl`, and handle plurals with ICU rules. Language switchers use endonyms, not flags.
+
+## Decision trees
+
+### Modal vs. side panel vs. full page
 
 ```
-What is the user doing?
-├── Quick confirmation or simple input (1-3 fields)?
-│   └── → Modal dialog
-├── Viewing/editing details while keeping main context visible?
-│   ├── Content is narrow (form, properties, chat)?
-│   │   └── → Side panel
-│   └── Content needs significant width?
-│       └── → Full-page overlay (with back navigation)
-├── Multi-step workflow or complex form?
-│   ├── Steps are short (2-3 fields each)?
-│   │   └── → Modal with stepper
-│   └── Steps are long or need reference to other content?
-│       └── → Full page with stepper
-└── Creating a new complex entity (document, project)?
-    └── → Full page (dedicated creation flow)
+Quick confirmation or 1-3 fields?                 → Modal
+Edit details while keeping context visible?
+  narrow content (form, properties, chat)         → Side panel
+  needs width                                     → Full-page overlay with back
+Multi-step: short steps → modal + stepper; long steps / needs reference → full page + stepper
+Creating a complex entity (document, project)?    → Full page
 ```
 
-### Notification Type Selection
+### Notification type
 
 ```
-What needs the user's attention?
-├── Immediate action required?
-│   ├── Blocking (must resolve before continuing)?
-│   │   └── → Modal dialog (confirmation, error recovery)
-│   └── Non-blocking but urgent?
-│       └── → Banner (top of page, persistent until dismissed)
-├── Feedback on a completed action?
-│   ├── Success or low-importance info?
-│   │   └── → Toast (auto-dismiss 4-8s)
-│   └── Warning or error?
-│       └── → Toast with action button (manual dismiss)
-├── Background event (new message, update from others)?
-│   ├── User is in the same context?
-│   │   └── → Badge + subtle inline indicator
-│   └── User is elsewhere in the app?
-│       └── → Badge on nav item + optional push notification
-└── System status (maintenance, connectivity)?
-    └── → Persistent banner (top or bottom of viewport)
+Blocking, must resolve now                        → Modal
+Urgent, non-blocking                              → Banner, persistent until dismissed
+Completed action: success/info                    → Toast, auto-dismiss 4-8s
+Completed action: warning/error or has action     → Toast, manual dismiss
+Background event, same context                    → Badge + inline indicator
+Background event, elsewhere                       → Nav badge (+ optional push)
+System status (maintenance, connectivity)         → Persistent banner
 ```
 
-## Detailed Documentation
+## Reference routing
 
-- For core UX principles and heuristics, see [references/01-core-principles.md](references/01-core-principles.md)
-- For Laws of UX quick reference, see [references/02-laws-of-ux.md](references/02-laws-of-ux.md)
-- For WCAG 2.2 accessibility compliance, see [references/03-accessibility.md](references/03-accessibility.md)
-- For visual design patterns, see [references/04-visual-design.md](references/04-visual-design.md)
-- For information architecture, see [references/05-information-architecture.md](references/05-information-architecture.md)
-- For interaction design patterns, see [references/06-interaction-design.md](references/06-interaction-design.md)
-- For form and input design, see [references/07-forms-and-inputs.md](references/07-forms-and-inputs.md)
-- For mobile UX best practices, see [references/08-mobile-ux.md](references/08-mobile-ux.md)
-- For UX writing and microcopy, see [references/09-ux-writing.md](references/09-ux-writing.md)
-- For user research methods, see [references/10-user-research.md](references/10-user-research.md)
-- For design system creation, see [references/11-design-systems.md](references/11-design-systems.md)
-- For collaborative presence, live cursors, and awareness indicators, see [references/12a-presence-awareness.md](references/12a-presence-awareness.md)
-- For conflict resolution, sync, sharing, and offline UX, see [references/12b-conflict-resolution-sync.md](references/12b-conflict-resolution-sync.md)
-- For canvas navigation, zoom, pan, and object manipulation, see [references/13a-canvas-navigation.md](references/13a-canvas-navigation.md)
-- For canvas elements, layers, performance, and whiteboard patterns, see [references/13b-canvas-objects-performance.md](references/13b-canvas-objects-performance.md)
-- For AI and LLM interface design (chat, copilots, agents), see [references/14-ai-ux-patterns.md](references/14-ai-ux-patterns.md)
-- For ethical design and dark pattern avoidance, see [references/15-ethical-design.md](references/15-ethical-design.md)
-- For onboarding flows and user activation, see [references/16-onboarding.md](references/16-onboarding.md)
-- For notification systems and attention management, see [references/17-notifications.md](references/17-notifications.md)
-- For data visualization and dashboard design, see [references/18-data-visualization.md](references/18-data-visualization.md)
-- For search interface design and autocomplete, see [references/19-search-ux.md](references/19-search-ux.md)
-- For emotional design and trust-building patterns, see [references/20-emotional-design.md](references/20-emotional-design.md)
-- For data tables, sortable lists, pagination, and bulk actions, see [references/21-data-tables.md](references/21-data-tables.md)
-- For loading states, skeleton screens, optimistic updates, and perceived performance, see [references/22-performance-ux.md](references/22-performance-ux.md)
-- For internationalization, localization, and RTL design, see [references/23-internationalization.md](references/23-internationalization.md)
-- For voice, multimodal, and cross-device input patterns, see [references/24-voice-and-multimodal.md](references/24-voice-and-multimodal.md)
+Load the file when the task touches its topic. Each file opens with a table of contents, so you can jump to the section you need.
 
-## Reference Values
+| Load when the task involves… | File |
+|---|---|
+| Heuristic evaluation, Nielsen's 10, Gestalt | [references/01-core-principles.md](references/01-core-principles.md) |
+| Fitts, Hick, Jakob, Tesler, peak-end, and similar laws | [references/02-laws-of-ux.md](references/02-laws-of-ux.md) |
+| WCAG 2.2 criteria, ARIA, EAA / legal compliance | [references/03-accessibility.md](references/03-accessibility.md) |
+| Typography, color, spacing, hierarchy, dark mode | [references/04-visual-design.md](references/04-visual-design.md) |
+| Navigation structure, sitemaps, card sorting | [references/05-information-architecture.md](references/05-information-architecture.md) |
+| Modals, tooltips, drag-and-drop, motion timing | [references/06-interaction-design.md](references/06-interaction-design.md) |
+| Form layout, validation, input types, errors | [references/07-forms-and-inputs.md](references/07-forms-and-inputs.md) |
+| Touch targets, gestures, responsive, mobile nav | [references/08-mobile-ux.md](references/08-mobile-ux.md) |
+| Microcopy, error messages, voice and tone | [references/09-ux-writing.md](references/09-ux-writing.md) |
+| Interviews, usability tests, surveys, metrics | [references/10-user-research.md](references/10-user-research.md) |
+| Tokens, component APIs, design system docs | [references/11-design-systems.md](references/11-design-systems.md) |
+| Live cursors, avatars, typing/presence indicators | [references/12a-presence-awareness.md](references/12a-presence-awareness.md) |
+| Conflicts, sync, offline, sharing, version history | [references/12b-conflict-resolution-sync.md](references/12b-conflict-resolution-sync.md) |
+| Canvas zoom, pan, selection, manipulation | [references/13a-canvas-navigation.md](references/13a-canvas-navigation.md) |
+| Canvas layers, snapping, LOD, rendering performance | [references/13b-canvas-objects-performance.md](references/13b-canvas-objects-performance.md) |
+| Chat UI, copilots, agents, generative UI | [references/14-ai-ux-patterns.md](references/14-ai-ux-patterns.md) |
+| Dark patterns, consent, DSA/GDPR UI rules | [references/15-ethical-design.md](references/15-ethical-design.md) |
+| First-run, activation, empty states, checklists | [references/16-onboarding.md](references/16-onboarding.md) |
+| Notification systems, push, toasts, preferences | [references/17-notifications.md](references/17-notifications.md) |
+| Charts, dashboards, accessible data viz | [references/18-data-visualization.md](references/18-data-visualization.md) |
+| Search, autocomplete, filters, zero results | [references/19-search-ux.md](references/19-search-ux.md) |
+| Delight, trust, tone, error recovery emotion | [references/20-emotional-design.md](references/20-emotional-design.md) |
+| Tables, sorting, pagination, bulk actions | [references/21-data-tables.md](references/21-data-tables.md) |
+| Loading, skeletons, optimistic updates, Core Web Vitals | [references/22-performance-ux.md](references/22-performance-ux.md) |
+| Localization, RTL, `Intl`, plurals, text expansion | [references/23-internationalization.md](references/23-internationalization.md) |
+| Voice, multimodal, cross-device input | [references/24-voice-and-multimodal.md](references/24-voice-and-multimodal.md) |
 
-### Layout & Typography
+## Reference values
 
-| Metric | Value | Context |
-|--------|-------|---------|
-| Touch target | 44-48px | Minimum tappable area |
-| Body text | 16px+ | Minimum readable size |
-| Line height | 1.2-1.45 | Optimal readability |
-| Line length | 50-75 chars | Ideal for reading |
-| Contrast ratio | 4.5:1 | WCAG AA for normal text |
-| Contrast ratio | 3:1 | WCAG AA for large text |
-| Working memory | 7±2 items | Miller's Law |
-| Text expansion | ~30-40% | Translation growth (DE/FI/RU) |
+| Metric | Value | Source / note |
+|---|---|---|
+| Target size | ≥ 24×24 CSS px (AA); 44pt iOS / 48dp Android | WCAG 2.5.8; Apple HIG; Material |
+| Body text | ≥ 16px, line height 1.4–1.6 | WCAG 1.4.12 tests up to 1.5 |
+| Line length | 50–75 characters | |
+| Text contrast | 4.5:1 normal, 3:1 large (≥ 24px, or ≥ 18.66px bold) | WCAG 1.4.3 |
+| Non-text contrast | 3:1 (UI boundaries, focus rings, icons) | WCAG 1.4.11 |
+| Feedback latency | < 100ms feels instant; > 1s show a spinner; > 10s show progress with cancel | Nielsen response-time limits |
+| Transitions | 150–300ms typical, ≤ 500ms for large motion | Material motion |
+| Loading indicator delay | ~300ms before showing, to avoid flashes | |
+| Toast | 4–8s auto-dismiss (no actions) | |
+| Text expansion | 30–40% (DE/FI/RU), up to 200%+ for short strings | W3C i18n |
+| Working memory | ~4±1 chunks (Cowan); 7±2 (Miller) is dated | |
+| Canvas | cursor updates 50–100ms, 60fps pan/zoom, 2–8px snap threshold, 10%–4000% zoom | Figma-class tools |
+| Avatar stack | 3–5 visible, then "+N" | |
+| AI response | first token < 1s, or show immediate progress | |
 
-### Interaction & Animation
+Numbers like conversion rates, NPS targets, and completion percentages depend on context. Don't quote benchmarks as universal facts. Recommend measuring against the product's own baseline.
 
-| Metric | Value | Context |
-|--------|-------|---------|
-| Animation | 300-500ms | Natural feeling duration |
-| Touch feedback | < 100ms | Perceived instant response |
-| Form abandonment | 81% | Users who start but don't finish |
-| Canvas zoom range | 10%-4000% | Typical design tool range |
-| Smart guide snap | 2-8px | Distance before snapping |
-| Canvas render | 60fps | Target during pan/zoom |
+## Anti-patterns
 
-### Collaboration
+Each one points to the reference file that covers the fix.
 
-| Metric | Value | Context |
-|--------|-------|---------|
-| Cursor update rate | 50-100ms | Smooth live cursor movement |
-| Cursor label max | 12 chars | Truncate longer usernames |
-| Avatar stack | 3-5 visible | Use "+N" for overflow |
-
-### AI Interfaces
-
-| Metric | Value | Context |
-|--------|-------|---------|
-| AI first token | < 1s | Perceived responsiveness |
-| AI streaming | 30-80 tok/s | Natural reading pace |
-| Copilot accept rate | 25-35% | Suggestion usefulness |
-
-### Engagement Metrics
-
-| Metric | Value | Context |
-|--------|-------|---------|
-| Onboarding completion | > 65% | Checklist finish rate |
-| Time to first value | < 5 min | Sign-up to activation |
-| Toast duration | 4-8s | Auto-dismiss timing |
-| Search success | > 70% | Users finding results |
-| NPS | > 50 | User sentiment |
-
-## Anti-Patterns to Avoid
-
-1. **Dark patterns** - Deceptive UI that tricks users → see [15-ethical-design.md](references/15-ethical-design.md)
-2. **Infinite scroll without context** - No sense of progress → see [21-data-tables.md](references/21-data-tables.md)
-3. **Hidden navigation** - Hamburger menus on desktop → see [05-information-architecture.md](references/05-information-architecture.md)
-4. **Autoplaying media** - Unexpected sound/video → see [03-accessibility.md](references/03-accessibility.md)
-5. **Disabled buttons without explanation** - Confusing blocked states → see [06-interaction-design.md](references/06-interaction-design.md)
-6. **Walls of text** - No visual hierarchy or chunking → see [04-visual-design.md](references/04-visual-design.md)
-7. **Color-only feedback** - Excludes colorblind users → see [03-accessibility.md](references/03-accessibility.md)
-8. **Tiny touch targets** - Frustrating on mobile → see [08-mobile-ux.md](references/08-mobile-ux.md)
-9. **No loading states** - Users think system is broken → see [22-performance-ux.md](references/22-performance-ux.md)
-10. **Popup/modal overuse** - Interrupts user flow → see [06-interaction-design.md](references/06-interaction-design.md)
-11. **No presence indicators** - Users don't know who else is working → see [12a-presence-awareness.md](references/12a-presence-awareness.md)
-12. **Silent sync failures** - Data loss without warning → see [12b-conflict-resolution-sync.md](references/12b-conflict-resolution-sync.md)
-13. **Cursor overload** - Too many live cursors create visual noise → see [12a-presence-awareness.md](references/12a-presence-awareness.md)
-14. **Screen-center zoom** - Disorienting; zoom at cursor instead → see [13a-canvas-navigation.md](references/13a-canvas-navigation.md)
-15. **No offline indication** - Users think they're connected when not → see [12b-conflict-resolution-sync.md](references/12b-conflict-resolution-sync.md)
-16. **Hidden AI** - Users should always know when interacting with AI → see [14-ai-ux-patterns.md](references/14-ai-ux-patterns.md)
-17. **Over-automation** - AI changes applied without user awareness or consent → see [14-ai-ux-patterns.md](references/14-ai-ux-patterns.md)
-18. **No AI undo** - AI-applied changes must be reversible → see [14-ai-ux-patterns.md](references/14-ai-ux-patterns.md)
-19. **Confirmshaming** - Guilt-laden language on decline buttons → see [15-ethical-design.md](references/15-ethical-design.md)
-20. **Asymmetric consent** - Big "Accept" button, tiny "Reject" link → see [15-ethical-design.md](references/15-ethical-design.md)
-21. **Mandatory lengthy tours** - Forcing users through 10+ onboarding steps → see [16-onboarding.md](references/16-onboarding.md)
-22. **Notification carpet bombing** - Every event as a push notification → see [17-notifications.md](references/17-notifications.md)
-23. **Permission on first visit** - Asking for push permission before user sees value → see [17-notifications.md](references/17-notifications.md)
-24. **Hardcoded/untranslatable strings** - Text baked into code/images, fixed-width containers, LTR-only layout → see [23-internationalization.md](references/23-internationalization.md)
-25. **Voice-only flows / hidden mic** - No fallback modality, no recognition feedback, buried voice entry → see [24-voice-and-multimodal.md](references/24-voice-and-multimodal.md)
+- Dark patterns, confirmshaming, asymmetric consent → [15](references/15-ethical-design.md)
+- Hidden desktop navigation, no sense of location → [05](references/05-information-architecture.md)
+- Infinite scroll without position or a footer → [21](references/21-data-tables.md)
+- Autoplaying media, color-only signals, invisible focus → [03](references/03-accessibility.md)
+- Disabled buttons with no explanation, modal overuse → [06](references/06-interaction-design.md)
+- Walls of text, no hierarchy → [04](references/04-visual-design.md)
+- Tiny touch targets → [08](references/08-mobile-ux.md)
+- Missing loading, empty, or error states → [22](references/22-performance-ux.md)
+- Silent sync failures, no offline indication → [12b](references/12b-conflict-resolution-sync.md)
+- Cursor overload, no presence → [12a](references/12a-presence-awareness.md)
+- Screen-center zoom → [13a](references/13a-canvas-navigation.md)
+- Hidden AI, AI changes applied without consent or undo → [14](references/14-ai-ux-patterns.md)
+- Mandatory long tours → [16](references/16-onboarding.md)
+- Notification carpet bombing, push permission on first visit → [17](references/17-notifications.md)
+- Hardcoded strings, fixed widths, LTR-only layout → [23](references/23-internationalization.md)
+- Voice-only flows, hidden mic, no recognition feedback → [24](references/24-voice-and-multimodal.md)
 
 ## Sources
 
-This skill synthesizes best practices from:
-- [Laws of UX](https://lawsofux.com/) - Jon Yablonski
-- [Nielsen Norman Group](https://www.nngroup.com/) - Usability research
-- [WCAG 2.2](https://www.w3.org/TR/WCAG22/) - Accessibility guidelines
-- [Material Design](https://m3.material.io/) - Google's design system
-- [Human Interface Guidelines](https://developer.apple.com/design/) - Apple
-- [Interaction Design Foundation](https://www.interaction-design.org/)
-- [Liveblocks](https://liveblocks.io/) - Real-time collaboration patterns
-- [Figma Engineering Blog](https://www.figma.com/blog/category/engineering/) - Multiplayer & canvas
-- [Ably](https://ably.com/blog/collaborative-ux-best-practices) - Collaborative UX
-- [Google PAIR Guidebook](https://pair.withgoogle.com/guidebook) - AI design patterns
-- [Microsoft HAX Toolkit](https://www.microsoft.com/en-us/haxtoolkit/) - Human-AI interaction
-- [Deceptive Design](https://www.deceptive.design/) - Dark pattern catalog
-- [EU Digital Services Act](https://digital-strategy.ec.europa.eu/en/policies/digital-services-act-package) - Platform regulation
-- [EU Accessibility Act](https://ec.europa.eu/social/main.jsp?catId=1202) - EN 301 549 / WCAG 2.1 AA mandate
-- [W3C Internationalization (i18n) Activity](https://www.w3.org/International/) - i18n/l10n standards
-- [Baymard Institute](https://baymard.com/) - E-commerce UX research
-- [Edward Tufte](https://www.edwardtufte.com/) - Data visualization
-- [ColorBrewer](https://colorbrewer2.org/) - Colorblind-safe palettes
-- [The A11y Project](https://www.a11yproject.com/) - Accessibility community resource
-- [web.dev](https://web.dev/) - Core Web Vitals and performance UX
-- [Smashing Magazine](https://www.smashingmagazine.com/) - Practical UX/UI patterns
+[Laws of UX](https://lawsofux.com/) · [Nielsen Norman Group](https://www.nngroup.com/) · [WCAG 2.2](https://www.w3.org/TR/WCAG22/) · [Material Design](https://m3.material.io/) · [Apple HIG](https://developer.apple.com/design/) · [Baymard Institute](https://baymard.com/) · [Google PAIR](https://pair.withgoogle.com/guidebook) · [Microsoft HAX](https://www.microsoft.com/en-us/haxtoolkit/) · [Deceptive Design](https://www.deceptive.design/) · [EU DSA](https://digital-strategy.ec.europa.eu/en/policies/digital-services-act-package) · [EU Accessibility Act](https://ec.europa.eu/social/main.jsp?catId=1202) · [W3C i18n](https://www.w3.org/International/) · [Liveblocks](https://liveblocks.io/) · [Figma Engineering](https://www.figma.com/blog/category/engineering/) · [Tufte](https://www.edwardtufte.com/) · [ColorBrewer](https://colorbrewer2.org/) · [web.dev](https://web.dev/)

@@ -22,6 +22,10 @@ start_registered_date : 見積登録日(絞り込み開始) end_registered_date 
 - customer_ids[]: array[integer] - 顧客の取引先ID
 - business_ids[]: array[string] - 案件ID
 - quotation_no: string - 見積No.で絞込
+- start_gross_profit_amount_excluding_tax: number(double) - 粗利額計(税抜)で絞込：下限
+- end_gross_profit_amount_excluding_tax: number(double) - 粗利額計(税抜)で絞込：上限
+- start_gross_profit_rate: number(double) - 粗利率(%)で絞込：下限
+- end_gross_profit_rate: number(double) - 粗利率(%)で絞込：上限
 - quotation_status: string - 見積ステータス (未受注: unanswered, 受注済: order_received, 失注: order_lost) (選択肢: unanswered, order_received, order_lost)
 - billing_status: string - 請求書送付ステータス (未請求: not_billed, 一部請求済: partially_billed, 請求済: billed, なし: none) (選択肢: not_billed, partially_billed, billed, none)
 - canceled: boolean - 取消状態
@@ -111,6 +115,9 @@ start_registered_date : 見積登録日(絞り込み開始) end_registered_date 
 - quotation_template_name*: string - 見積書テンプレート名称
 - recipient_address*: object - 宛先
 - lines*: array[object] - 明細リスト
+- gross_profit_summary: object - 見積全体の粗利合計
+
+  ※ 粗利情報を持つ明細が1件もない場合は null
 
 ## PATCH /quotations/{id} — 見積更新
 

@@ -4,6 +4,23 @@ Perceived performance is often more important than actual performance. Users jud
 
 ---
 
+## Contents
+
+- Perceived Performance
+- Loading Indicator Decision Tree
+- Skeleton Screens
+- Optimistic Updates
+- Progress Indicators
+- Image Loading Strategies
+- Content Layout Shift Prevention
+- Offline-First & Cached State UX
+- Prefetching & Preloading
+- Key Metrics
+- Anti-Patterns
+- Sources
+
+---
+
 ## Perceived Performance
 
 ### Response Time Thresholds

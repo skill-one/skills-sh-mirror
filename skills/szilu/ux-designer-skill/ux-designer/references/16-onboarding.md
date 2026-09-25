@@ -4,6 +4,21 @@ Onboarding is the critical bridge between sign-up and engaged usage. This refere
 
 ---
 
+## Contents
+
+- Onboarding Patterns
+- Progressive Disclosure
+- User Activation
+- Personalization
+- Sign-Up Flow
+- First-Run Experience
+- Re-Engagement
+- Measuring Success
+- Anti-Patterns
+- Sources
+
+---
+
 ## Onboarding Patterns
 
 ### Product Tours

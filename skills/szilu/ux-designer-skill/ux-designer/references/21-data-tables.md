@@ -4,6 +4,23 @@ Data tables are one of the most common UI patterns in enterprise and admin appli
 
 ---
 
+## Contents
+
+- Table Layout Patterns
+- Sorting
+- Filtering
+- Pagination vs. Infinite Scroll vs. Virtual Scrolling
+- Bulk Selection & Actions
+- Row Expansion & Detail
+- Empty States & Loading
+- Table Toolbar
+- Accessibility
+- Key Metrics
+- Anti-Patterns
+- Sources
+
+---
+
 ## Table Layout Patterns
 
 ### Basic Table Structure

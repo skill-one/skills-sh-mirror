@@ -4,6 +4,17 @@ Canvas-based interfaces provide an infinite 2D workspace where users can freely 
 
 ---
 
+## Contents
+
+- Canvas Navigation
+- Object Selection
+- Object Manipulation
+- Key Metrics
+- Anti-Patterns
+- Sources
+
+---
+
 ## Canvas Navigation
 
 ### Coordinate Systems

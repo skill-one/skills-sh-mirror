@@ -4,6 +4,17 @@ Real-time collaboration UX focuses on enabling multiple users to work together s
 
 ---
 
+## Contents
+
+- Presence & Awareness
+- Communication Features
+- Viewport Coordination
+- Key Metrics
+- Anti-Patterns
+- Sources
+
+---
+
 ## Presence & Awareness
 
 Awareness is "an understanding of the activities of others, which provides a context for your own activity" (Dourish & Bellotti, 1992).

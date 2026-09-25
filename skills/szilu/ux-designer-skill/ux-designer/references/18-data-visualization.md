@@ -4,6 +4,22 @@ Data visualization and dashboard design are specialized UX disciplines critical 
 
 ---
 
+## Contents
+
+- Chart Selection
+- Dashboard Layout
+- Color in Data Visualization
+- Interaction Patterns
+- Responsive Charts
+- Data Tables
+- Empty & Error States
+- Accessibility
+- Key Metrics
+- Anti-Patterns
+- Sources
+
+---
+
 ## Chart Selection
 
 ### When to Use Each Chart Type

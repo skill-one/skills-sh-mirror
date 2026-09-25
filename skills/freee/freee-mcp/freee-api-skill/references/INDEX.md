@@ -117,7 +117,10 @@
 ## it_management - freeeIT管理
 
 - it-management-application-account.md — application_accounts
+- it-management-asset-categories.md — asset_categories
+- it-management-asset-statuses.md — asset_statuses
 - it-management-assets.md — assets
+- it-management-departments.md — departments
 - it-management-members.md — members
 
 ## fixed_asset_management - freee固定資産
@@ -133,6 +136,7 @@
 - partner-management-partner-management-orderer-project-company-users.md — partner_management_orderer_project_company_users
 - partner-management-partner-management-orderer-project-partners.md — partner_management_orderer_project_partners
 - partner-management-partner-management-orderer-projects.md — partner_management_orderer_projects
+- partner-management-partner-management-orderer-tasks.md — partner_management_orderer_tasks
 
 ## survey - freeeサーベイ
 

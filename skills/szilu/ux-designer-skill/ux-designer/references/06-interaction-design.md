@@ -4,6 +4,22 @@ Interaction design (IxD) focuses on creating engaging interfaces with well-thoug
 
 ---
 
+## Contents
+
+- Micro-interactions
+- Feedback States
+- Animation Principles
+- Loading States
+- Gesture Design
+- Transitions
+- Reduced Motion
+- Haptic Feedback
+- 2026 Trends
+- Common Mistakes
+- Sources
+
+---
+
 ## Micro-interactions
 
 Small, contained moments that accomplish a single task while enhancing the user experience.

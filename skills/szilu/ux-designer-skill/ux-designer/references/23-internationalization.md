@@ -12,6 +12,20 @@ rewrite; get it right and adding a language is a content task, not a code task.
 
 ---
 
+## Contents
+
+- RTL & Bidirectional Layout
+- Text Expansion & Contraction
+- Pluralization & Gender
+- Locale-Aware Formatting
+- Translation-Friendly UI
+- Language Switching UX
+- Quick Checklist
+- Common Mistakes
+- Sources
+
+---
+
 ## RTL & Bidirectional Layout
 
 Arabic, Hebrew, Persian, and Urdu read right-to-left (RTL). RTL is not "flip the

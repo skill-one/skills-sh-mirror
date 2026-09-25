@@ -4,6 +4,21 @@ Deceptive design patterns face increasing regulatory enforcement with real finan
 
 ---
 
+## Contents
+
+- Dark Pattern Taxonomy
+- Regulatory Landscape
+- Consent Design
+- Cookie / Privacy UX
+- Subscription & Cancellation
+- Pricing Transparency
+- Children & Vulnerable Users
+- Ethical Design Checklist
+- Key Metrics
+- Sources
+
+---
+
 ## Dark Pattern Taxonomy
 
 ### 1. Roach Motel

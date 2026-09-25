@@ -4,6 +4,21 @@ Information Architecture (IA) is the structural design of shared information env
 
 ---
 
+## Contents
+
+- IA Fundamentals
+- Organization Structures
+- Navigation Patterns
+- Labeling Best Practices
+- Search Design
+- IA Research Methods
+- 2026 Trends
+- IA Documentation
+- Common IA Mistakes
+- Sources
+
+---
+
 ## IA Fundamentals
 
 ### What is Information Architecture?

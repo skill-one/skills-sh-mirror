@@ -4,6 +4,20 @@ This reference covers smart guides, layer management, canvas elements, performan
 
 ---
 
+## Contents
+
+- Smart Guides & Snapping
+- Layers & Hierarchy
+- Canvas Elements
+- Performance Optimization
+- Whiteboard-Specific Patterns
+- Accessibility
+- Key Metrics
+- Anti-Patterns
+- Sources
+
+---
+
 ## Smart Guides & Snapping
 
 ### Alignment Guides

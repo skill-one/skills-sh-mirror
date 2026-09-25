@@ -25,11 +25,56 @@ the evidence; [CHANGELOG_RESEARCH.md](CHANGELOG_RESEARCH.md) records coverage.
 
 | Version | Date | Publication state |
 |---------|------|-------------------|
-| [v0.9.0](https://github.com/Dicklesworthstone/coding_agent_session_search/releases/tag/v0.9.0) | 2026-09-19 | Sharded native ANN semantic search, bounded-admission daemon, responsive transcript pages |
+| v0.9.0 | not yet released | Cargo.toml is at 0.9.0; no v0.9.0 tag or GitHub Release exists yet. Planned scope: sharded native ANN semantic search, bounded-admission daemon, responsive transcript pages |
 | [v0.8.0](https://github.com/Dicklesworthstone/coding_agent_session_search/releases/tag/v0.8.0) | 2026-09-10 | Published GitHub Release: Linux x86_64/arm64, macOS arm64, Windows x86_64 |
 | [v0.7.1](https://github.com/Dicklesworthstone/coding_agent_session_search/releases/tag/v0.7.1) | 2026-08-31 | Published GitHub Release and binary baseline for the changes below |
 
-## [v0.9.0] -- 2026-09-19
+## [Unreleased]
+
+### Fixed
+
+- **Date-filtered search works on a long-lived index again (GH #499).** Every
+  `--days`/`--since`/`--until` search failed with `posting cursor invariant
+  failed: Boolean children belong to different segment domains` (exit 9) once
+  an incremental run had tombstoned a row in a sealed index segment. The lock
+  now resolves frankensearch-quill 0.3.2, a hotfix of 0.3.1 carrying the
+  engine fix, so no re-index is needed. An engine invariant failure is now also
+  reported `retryable: false`, with `cass index --full --force-rebuild` as the
+  remedy, instead of inviting endless retries.
+- **Search no longer strands a missing or unusable lexical index on a large
+  archive.** When search needs a repair it will not run inline (the archive is
+  over the inline repair budget, or a robot caller faces `checkpoint_incomplete`),
+  it starts a detached `cass index --full --background` and names the pid in the
+  error hint; a small archive still repairs inline as before. A robot search
+  during a first build returns exit 7 `index-busy` with progress at once.
+  Previously nothing built the index: an agent's own `cass index --full` died
+  with its command timeout and every retry started from zero
+  ([76306c0c](https://github.com/Dicklesworthstone/coding_agent_session_search/commit/76306c0c)).
+- **`total_matches` is exact up to 5M documents** (was 50k). On a 1M-document
+  archive the capped value read 11 for a term with 11,915 matches; exact counts
+  cost 0.00-0.11 s CPU there
+  ([1ca2503e](https://github.com/Dicklesworthstone/coding_agent_session_search/commit/1ca2503e)).
+
+### Performance
+
+- **Secret redaction ~26x faster on real text.** Unicode `\b` in the secret
+  patterns forced the regex engine off its DFA for every message containing a
+  non-ASCII byte; the patterns now use ASCII boundaries, which redact at least
+  as much. Measured 10 → 261-284 MiB/s on 593 MiB of session text, and 9.5x
+  more messages ingested per CPU-second in an A/B incremental index on a clone
+  of a 2.1M-message archive
+  ([ff6d6485](https://github.com/Dicklesworthstone/coding_agent_session_search/commit/ff6d6485)).
+- **Large incremental catch-ups no longer slow down as they run.** Every lexical
+  publish re-verifies all live segments, so it costs time in proportion to the
+  whole index. The streaming indexer committed every 5 s and folded segments
+  only after the run: a big catch-up re-hashed gigabytes of unchanged segments
+  several times a minute and grew one generation past 3,000 segments. Commits
+  are now paced by their measured cost (the next waits at least 4x as long as
+  the last took, capped at 120 s), and the run folds its small segment tail
+  with one bounded merge every few minutes. On a clone of a real archive the
+  same catch-up added 5.71M messages in 1 h 50 min instead of 1.76M in 5 h 12 min.
+
+## [v0.9.0] -- not yet released (Cargo.toml version; no tag or GitHub Release yet)
 
 ### Added
 

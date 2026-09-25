@@ -4,6 +4,22 @@ User research is the systematic study of target users to understand their behavi
 
 ---
 
+## Contents
+
+- Why User Research?
+- Research Categories
+- Core Research Methods
+- Research Planning
+- Remote vs. In-Person Research
+- Research Analysis
+- Presenting Research Findings
+- 2026 Trends
+- Ethical Considerations
+- Tools Overview
+- Sources
+
+---
+
 ## Why User Research?
 
 ### Benefits

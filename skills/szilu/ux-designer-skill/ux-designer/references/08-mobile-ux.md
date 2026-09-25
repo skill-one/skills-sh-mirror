@@ -4,6 +4,23 @@ Mobile-first design is essential in 2026, with over 60% of web traffic coming fr
 
 ---
 
+## Contents
+
+- The Thumb Zone
+- Touch Target Sizes
+- Mobile Navigation Patterns
+- Responsive Gestures
+- Mobile Forms
+- Performance on Mobile
+- Touch Feedback
+- Safe Areas
+- Orientation and Adaptation
+- Common Mobile Mistakes
+- Testing Checklist
+- Sources
+
+---
+
 ## The Thumb Zone
 
 ### Understanding Thumb Reach

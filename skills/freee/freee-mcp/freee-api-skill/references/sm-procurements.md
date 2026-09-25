@@ -166,7 +166,7 @@ start_registered_date : 仕入登録日(絞り込み開始) end_registered_date 
   ※ 登録値はfreee会計の「税区分の設定 > インボイス制度関連 > 買い手側対応機能」の設定状況により決定されます。
 
   ※ 買い手側対応機能を「使用する」場合、リクエスト指定値が優先され、未指定時は「適格チェックボックスと税区分」の設定に従います。
-- payment_status*: string - 決済ステータス (未決済: not_settled, 一部決済済: partially_settled, 決済済: settled)
+- payment_status*: string - 決済ステータス (未決済: not_settled, 一部決済済: partially_settled, 決済済: settled, 対象外: none)
 - payments_on*: string(date) - 支払期日
 - payment_method_type*: string - 支払方法 (振込: transfer, 現金: cash, 手形: bill_payable)
 - payment_partner*: object - 支払先

@@ -4,6 +4,20 @@ Notifications are a cross-cutting concern that affects every product. This refer
 
 ---
 
+## Contents
+
+- Notification Types
+- Severity & Visual Hierarchy
+- Delivery Channels
+- Notification Center
+- Attention Management
+- Permission Requests
+- Key Metrics
+- Anti-Patterns
+- Sources
+
+---
+
 ## Notification Types
 
 ### By Purpose
