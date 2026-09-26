@@ -2,9 +2,9 @@
 
 ## The meta-skill that builds and improves all your skills, including itself.
 
-This meta-skill has **logged over 1,500 observations across my 82 skills**, most of which were turned into skill improvements. The majority of my 82 skills were themselves created based on observations by the meta-skill.
+This meta-skill has **logged over 1,600 observations across my 81 skills**, most of which were turned into skill improvements. The majority of my 81 skills were themselves created based on observations by the meta-skill.
 
-The current version of task-observer also includes improvements suggested by 65 different users, across 141 issues and 33 pull requests. Without these contributions, the project wouldn't be half as good as it is today.
+The current version of task-observer also includes improvements from 69 different contributors, each credited as an author or co-author in the commit history, and its commits close 99 issues and pull requests. Without these contributions, the project wouldn't be half as good as it is today.
 
 This meta-skill is a practical application of the [Augmented Expertise](https://www.rebelytics.com/augmented-expertise/) methodology, an AI framework for knowledge workers. However, users have reported successful integrations into their Hermes and Openclaw setups, so it works equally well with autonomous agents.
 
@@ -135,6 +135,8 @@ task-observer is indexed in these community lists and skill directories:
 - [BehiSecc / awesome-claude-skills](https://github.com/BehiSecc/awesome-claude-skills)
 - [KIMI](https://www.kimi.ai/resources/claude-code-skills)
 - [CorpusIQ — Hermes skills catalog](https://www.corpusiq.io/docs/hermes/skills/catalog/task-observer-setup)
+- [SkillFoxx](https://skillfoxx.ru/en/skills/task-observer-one-skill-to-rule-them-all)
+- [Zread](https://zread.ai/rebelytics/one-skill-to-rule-them-all)
 
 It is also redistributed, unmodified and under CC BY 4.0, in [iamneilroberts/claude-skills](https://github.com/iamneilroberts/claude-skills).
 
@@ -179,6 +181,9 @@ I would like to thank the following creators, platforms, publications, companies
 - Skillselion: [https://skillselion.com/guides/task-observer-skill-claude-code-guide](https://skillselion.com/guides/task-observer-skill-claude-code-guide)
 - Adele Newenham: [https://www.aiwithadele.com/guides/claude-code-plugins](https://www.aiwithadele.com/guides/claude-code-plugins)
 - Hysen Labs: [https://hysenlabs.com/en/projects/rebelytics-one-skill-to-rule-them-all](https://hysenlabs.com/en/projects/rebelytics-one-skill-to-rule-them-all)
+- Uday Sharma: [https://medium.com/@neuraldev/5-claude-code-plugins-that-take-your-setup-to-the-next-level-d5d61c2c5828](https://medium.com/@neuraldev/5-claude-code-plugins-that-take-your-setup-to-the-next-level-d5d61c2c5828)
+- SnowTiger: [https://www.toutiao.com/article/7687548501114225192/](https://www.toutiao.com/article/7687548501114225192/)
+- Divad: [https://divadsanders.medium.com/i-fixed-everything-wrong-with-claude-code-5-best-claude-plugins-c1af8d813ee1](https://divadsanders.medium.com/i-fixed-everything-wrong-with-claude-code-5-best-claude-plugins-c1af8d813ee1)
 
 If I forgot to list your recommendation here, please let me know or submit it via a PR in the same format as the others.
 

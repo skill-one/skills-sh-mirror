@@ -421,6 +421,8 @@ is_shopify_path() {
     *agent-plugins/github.com/shopify/shopify-ai-toolkit/*/skills/*) return 0 ;;
     */shopify-ai-toolkit/skills/*) return 0 ;;
     */shopify-plugin/skills/*) return 0 ;;
+    *.agents/skills/shopify) return 0 ;;
+    *.agents/skills/shopify/*) return 0 ;;
     *.agents/skills/shopify-*) return 0 ;;
     *) return 1 ;;
   esac
@@ -470,10 +472,11 @@ case "$tool_name" in
   skill|Skill)
     candidate=$(strip_skill_prefix "$skill_arg")
     case "$candidate" in
-      shopify-*|ucp)
-        # `ucp` is the one current toolkit skill that doesn't carry the
-        # `shopify-` prefix. Keep this case-list narrow so we never
-        # report skills from other plugins that happen to share a name.
+      shopify|shopify-*|ucp)
+        # The toolkit publishes one collapsed `shopify` skill; `shopify-*` and
+        # `ucp` cover the per-topic layout and older installs. Keep this
+        # case-list narrow so we never report skills from other plugins that
+        # happen to share a name.
         skill_name="$candidate"
         trigger="skill-tool"
         ;;

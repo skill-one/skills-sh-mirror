@@ -16,6 +16,9 @@ Usage
                 after the directory checks pass, then validates it.
   --repo        additionally check the repo's manifests against the skill.
   --repo-only   check ONLY the repo's manifests, skipping the skill checks.
+                Also runs the markdown shape check over the repo-root .md
+                files (README, guides): a blank line splitting one list in
+                two is reported as a failure with file:line.
 
 Why --repo-only exists: in a repo whose root IS the skill directory
 (`SKILL.md` at the top level), the two check sets contradict each other.
@@ -176,8 +179,9 @@ def read_core_ceiling(skill_md):
     if m:
         km = re.search(r"(?m)^%s:\s*(\S+)\s*$" % CORE_CEILING_KEY, m.group(1))
         if km:
-            if km.group(1).isdigit():
-                return int(km.group(1))
+            v = km.group(1).strip("\"'")   # a quoted number is still the number
+            if v.isdigit():
+                return int(v)
             print(f"note: {CORE_CEILING_KEY} is not a whole number "
                   f"({km.group(1)!r}) — core size not gated")
             return None
@@ -373,8 +377,14 @@ def check_dir(skill_dir, fails):
             data = {}
     except ImportError:
         yaml_available = False
-        data = {"name": (re.search(r"(?m)^name:\s*(.+)$", fm) or [None, ""])[1].strip(),
-                "description": folded_description(fm)}
+        # Strip one layer of matching surrounding quotes: the template asks
+        # for `name: "x"`, a real parser never sees the quote characters as
+        # part of the value, and .strip() removes whitespace, not quotes —
+        # so the hardened fallback failed the bundle it ships inside.
+        raw = (re.search(r"(?m)^name:\s*(.+)$", fm) or [None, ""])[1].strip()
+        if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in "\"'":
+            raw = raw[1:-1]
+        data = {"name": raw, "description": folded_description(fm)}
     except Exception as e:  # yaml error
         # Name the cause the check can detect, not the first field it then
         # fails to find: an unquoted `: ` inside a description is the common
@@ -511,6 +521,52 @@ def check_repo_versions(repo_dir, fails):
                 f"copy to keep in sync for no benefit.")
 
 
+LIST_ITEM_RE = re.compile(r"^(\s*)([-*+]|\d+[.)])\s+\S")
+
+
+def check_markdown_shape(repo_dir, fails):
+    """A stray blank line inside a tight list splits it in two when rendered.
+
+    The skill checks never read repo-root prose, the confidentiality scan is
+    a term search, and a diff review reads added lines — so an entry inserted
+    into a README list by string replacement, which pushed the list's closing
+    blank into the middle of it, passed all three and was caught by a human
+    reading line numbers.
+
+    The predicate: a blank line whose previous and next non-empty lines are
+    list items at the same indent and of the same kind (bullet or numbered),
+    where the list is otherwise TIGHT — one of those two items sits directly
+    against another item with no blank between. Measured on seven repo roots
+    before the tightness clause: 9 hits, 0 defects, all one deliberately
+    loose list (every item blank-separated); with it: 0 hits, and the
+    fixture's known defect still reported. Fenced blocks become opaque
+    separator lines so code never reads as a list, and a run of blanks
+    reports once, at its first line.
+    """
+    def kind(m):
+        return (m.group(1), m.group(2)[0].isdigit()) if m else None
+
+    repo_dir = pathlib.Path(repo_dir)
+    for p in sorted(repo_dir.glob("*.md")):
+        body = p.read_text(encoding="utf-8", errors="replace")
+        prose = re.sub(r"(?ms)^```.*?^```[ \t]*$",
+                       lambda m: re.sub(r"[^\n]+", "~", m.group(0)), body)
+        lines = prose.splitlines()
+        items = [kind(LIST_ITEM_RE.match(l)) for l in lines]
+        for i, line in enumerate(lines):
+            if line.strip() or (i and not lines[i - 1].strip()):
+                continue
+            prev = next((j for j in range(i - 1, -1, -1) if lines[j].strip()), None)
+            nxt = next((j for j in range(i + 1, len(lines)) if lines[j].strip()), None)
+            if prev is None or nxt is None or not items[prev] or items[prev] != items[nxt]:
+                continue
+            tight = (prev > 0 and items[prev - 1] == items[prev]) or \
+                    (nxt + 1 < len(lines) and items[nxt + 1] == items[nxt])
+            if tight:
+                fails.append(f"{p.name}:{i + 1}: blank line splits a list in two "
+                             f"(same-kind items at the same indent on both sides)")
+
+
 def pack(src, out):
     """Always writes POSIX separators, on any platform."""
     src = pathlib.Path(src)
@@ -552,7 +608,9 @@ def main(argv):
         print(__doc__); return 2
     if "--repo-only" in argv:
         fails = []
-        check_repo_versions(argv[argv.index("--repo-only") + 1], fails)
+        repo = argv[argv.index("--repo-only") + 1]
+        check_repo_versions(repo, fails)
+        check_markdown_shape(repo, fails)
         if fails:
             print("FAIL:")
             for f in fails:

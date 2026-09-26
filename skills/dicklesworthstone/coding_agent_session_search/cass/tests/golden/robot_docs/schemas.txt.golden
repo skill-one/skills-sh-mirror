@@ -3257,10 +3257,13 @@ schemas: (auto-generated from contract)
       - effective: object
         - auto_corrections: array
         - command: string
+        - daemon: object
         - db_path: string
         - db_path_source: string
         - filters: object
         - query: string
+        - query_recoveries: array
+        - query_structure: ?
         - time_window: object
       - elapsed_ms: integer
       - explanation_cards: array
@@ -3336,6 +3339,7 @@ schemas: (auto-generated from contract)
         - search_ms: integer
       - tokens_estimated: ?
       - wildcard_fallback: boolean
+      - wildcard_fallback_skipped: ?
     - _timeout: ?
     - _warning: ?
     - aggregations: ?
@@ -3357,6 +3361,7 @@ schemas: (auto-generated from contract)
     - request_id: ?
     - suggestions: array
     - total_matches: integer
+    - zero_result_diagnosis: ?
   selftest:
     - archive_accessed: boolean
     - checks: array
@@ -4314,12 +4319,18 @@ schemas: (auto-generated from contract)
       - recommended_next_probe: ?
       - skipped_sections: array
       - timed_out: boolean
+    - content_source: string
     - context: integer
+    - conversation_id: integer
+    - coordinate_space: string
     - end_line: integer
     - highlight_line: ?
     - lines: array
     - path: string
     - source_exists: boolean
+    - source_id: string
     - start_line: integer
     - target_line: ?
+    - target_message_index: integer
     - total_lines: integer
+    - total_messages: integer

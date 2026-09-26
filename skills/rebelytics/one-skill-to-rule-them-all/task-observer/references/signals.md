@@ -19,6 +19,8 @@ session, and before writing any "later" into a recommendation.
 - Do NOT log
 - Where the observation mindset stays on
 - Deferral disguised as diligence
+- Instructions handed across a boundary
+- A command's risk is what it does, not what it was reached for
 
 ## Signals for a NEW skill
 
@@ -170,3 +172,43 @@ state stays live meanwhile, the burden of proof is on deferring, not on acting.
 A deferral is a decision and needs the same justification as acting; "more
 evidence would be better" is not one, because the question is whether more
 evidence could change the OUTCOME.
+
+## Instructions handed across a boundary
+
+A command block, a procedure or a checklist handed to a human is executed
+in an environment the author has not tested: the author's shell, flags and
+assumptions do not travel with the text. Anything optional in that text — a
+trailing comment, a line break between two steps that only make sense
+together, an implied ordering — is a place where the receiving environment
+gets to decide, and it decides differently from the author at least once.
+(Observed: a `# comment` trailing a command in a paste-able block was passed
+to the tool as arguments by an interactive shell that has comments off by
+default; the step silently failed and the next line acted on a state that
+had never arrived.) So: explanation goes in the prose around a block, never
+on a command line; steps whose order matters are chained so a failure stops
+the sequence; and the check that settles whether the step worked tests the
+PROPERTY the step exists for, not the command's exit. A handover whose
+failure was detected by the recipient reading output is an observation, and
+its second occurrence is a barrier (above), not a rewording.
+A path is the commonest such instruction: one that resolves inside the
+agent's execution context can point at nothing from the user's shell,
+packaging or synced folders (`environments.md`, "Paths handed across a
+boundary are resolved from the far side").
+
+## A command's risk is what it does, not what it was reached for
+
+Classify a command by its EFFECT before running it — does it write, and
+where? — never by the intent it was reached for. A verb chosen for its read
+half performs its write half regardless, in whatever repository, branch,
+index or account it is pointed at, and the blast radius is set by the
+target, not by the intent. (Observed: a version-control "checkout <ref> --
+<path>" run to copy files OUT of a branch wrote that branch's whole tree
+into the current branch's index; the next routine commit-and-push
+published untested content on a public default branch, and every content
+gate passed because none of them looks at what is staged in a different
+repository.) The tell is a convenience shortcut taken in a location the
+process reserves for something else — a read-only clone, a production
+branch, a shared log — "just this once". Log it when caught; the fix is a
+rule stated as a property of the LOCATION ("this repository is read-and-push
+only"), because a rule stated as a property of the task does not feel like
+it covers the task that was not the task.

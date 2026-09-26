@@ -240,10 +240,11 @@ if ($env:COPILOT_CLI -eq '1') {
 
 # Names of Shopify AI Toolkit skills we are willing to report. Anything
 # not on this list is treated as "not our skill" — same guard the bash
-# version applies (case-list match on `shopify-*` or `ucp`).
+# version applies (case-list match on `shopify`, `shopify-*` or `ucp`).
 function Test-ShopifyToolkitSkillName {
     param([string]$name)
     if (-not $name) { return $false }
+    if ($name -eq 'shopify') { return $true }
     if ($name -like 'shopify-*') { return $true }
     if ($name -eq 'ucp') { return $true }
     return $false
@@ -264,6 +265,8 @@ function Test-ShopifyInstallPath {
         '*agent-plugins/github.com/shopify/shopify-ai-toolkit/*/skills/*',
         '*/shopify-ai-toolkit/skills/*',
         '*/shopify-plugin/skills/*',
+        '*.agents/skills/shopify'
+        '*.agents/skills/shopify/*'
         '*.agents/skills/shopify-*'
     )
     foreach ($pat in $patterns) {

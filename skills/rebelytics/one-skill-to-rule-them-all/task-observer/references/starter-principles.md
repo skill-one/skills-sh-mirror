@@ -46,6 +46,21 @@ the entry arrived without local evidence, so the pruning pass can drop it
 as freely as any single-observation rule. Imported principles that never
 fire in the adopter's own work should be removed, not kept out of respect.
 
+**Extend `Origin:` with the evidence that justified the entry** — one line
+naming the local artefact, after the `imported from starter set (#N)` part:
+
+```text
+**Origin:** imported from starter set (#3). Fits: a documented commit-message
+format failed seven times in this repo's history with no gate in front of it.
+```
+
+One line, written while the reason is still in hand. It is what makes the
+later pruning pass decidable: a principle whose cited evidence no longer
+holds is a clear removal, whereas an unexplained import is
+indistinguishable from an unexamined one at review time — so without the
+line the set can only ever grow, which is the outcome entry 11 exists to
+prevent.
+
 ## Contents
 
 - 1. Open-source skills must include an open-source licence

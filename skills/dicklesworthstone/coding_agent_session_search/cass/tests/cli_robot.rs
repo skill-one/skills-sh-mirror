@@ -5607,6 +5607,89 @@ fn search_effective_meta(cmd: &mut Command) -> Result<(Value, String), Box<dyn E
     Ok((effective, stderr))
 }
 
+/// 2l1b0.68: a robot search is budgeted and never spawns the warm-model
+/// daemon, so `--daemon` was accepted and silently ignored. `_meta.effective`
+/// now reports the request next to what applied. Negative control: before
+/// this change `_meta.effective.daemon` did not exist.
+#[test]
+fn search_robot_meta_reports_the_daemon_policy() -> Result<(), Box<dyn Error>> {
+    let data_dir = shared_search_demo_data();
+    let daemon_policy = |flag: Option<&str>| -> Result<Value, Box<dyn Error>> {
+        let mut args = vec![
+            "search",
+            "hello",
+            "--json",
+            "--robot-meta",
+            "--limit",
+            "1",
+            "--data-dir",
+            data_dir,
+        ];
+        args.extend(flag);
+        let (effective, _) = search_effective_meta(base_cmd().args(args))?;
+        Ok(effective["daemon"].clone())
+    };
+    assert_eq!(
+        daemon_policy(Some("--daemon"))?,
+        serde_json::json!({"use_existing": true, "auto_spawn_requested": true, "auto_spawn": false}),
+        "--daemon is echoed as requested, and a robot search does not spawn"
+    );
+    assert_eq!(
+        daemon_policy(None)?,
+        serde_json::json!({"use_existing": true, "auto_spawn_requested": false, "auto_spawn": false})
+    );
+    assert_eq!(
+        daemon_policy(Some("--no-daemon"))?,
+        serde_json::json!({"use_existing": false, "auto_spawn_requested": false, "auto_spawn": false})
+    );
+    Ok(())
+}
+
+/// 2l1b0.68: `_meta.effective` echoes how the lexical engine groups the
+/// query and the parentheses it recovered. The expected groupings are written
+/// by hand from the documented precedence (NOT > AND > OR). Negative control:
+/// before this change neither field existed, and the legacy grammar read
+/// `hello OR world tool` as `(hello OR world) AND tool`.
+#[test]
+fn search_robot_meta_echoes_the_query_grouping() -> Result<(), Box<dyn Error>> {
+    let data_dir = shared_search_demo_data();
+    let reading = |query: &str| -> Result<(Value, Value), Box<dyn Error>> {
+        let (effective, _) = search_effective_meta(base_cmd().args([
+            "search",
+            query,
+            "--json",
+            "--robot-meta",
+            "--limit",
+            "1",
+            "--data-dir",
+            data_dir,
+        ]))?;
+        Ok((
+            effective["query_structure"].clone(),
+            effective["query_recoveries"].clone(),
+        ))
+    };
+    assert_eq!(
+        reading("hello OR world tool")?,
+        (
+            serde_json::json!("hello OR (world AND tool)"),
+            serde_json::json!([])
+        )
+    );
+    assert_eq!(
+        reading("hello AND (world OR tool")?,
+        (
+            serde_json::json!("hello AND (world OR tool)"),
+            serde_json::json!(["1 unclosed '(' closed at the end of the query"])
+        )
+    );
+    assert_eq!(
+        reading("hello")?,
+        (serde_json::json!("hello"), serde_json::json!([]))
+    );
+    Ok(())
+}
+
 /// 2l1b0.68: `_meta.effective` echoes what search actually ran. Every
 /// expected value here comes from outside cass: the fixture path, a UTC
 /// epoch computed by hand, and the flags as typed. Negative control: before
@@ -9189,5 +9272,84 @@ fn broken_stdout_pipe_terminates_via_sigpipe_not_abort() {
         status.signal(),
         Some(SIGPIPE),
         "expected quiet SIGPIPE termination on a closed stdout pipe, got {status:?}"
+    );
+}
+
+/// uojcg.7.1: a search filtered to one workspace that comes back empty used to
+/// read exactly like "nothing matches". A trailing slash, a case difference or
+/// a moved checkout now carries a `zero_result_diagnosis` naming the indexed
+/// workspace; a correct filter carries none.
+#[test]
+fn workspace_filtered_empty_search_explains_the_filter() {
+    const INDEXED: &str = "/data/projects/coding_agent_session_search";
+    let data_dir = shared_search_demo_data();
+    let search = |workspace: &str| -> Value {
+        let out = base_cmd()
+            .args([
+                "search",
+                "hello",
+                "--json",
+                "--limit",
+                "3",
+                "--workspace",
+                workspace,
+                "--data-dir",
+                data_dir,
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .clone();
+        serde_json::from_slice(&out.stdout).expect("search JSON")
+    };
+
+    let exact = search(INDEXED);
+    assert!(
+        !exact["hits"].as_array().expect("hits array").is_empty(),
+        "the indexed workspace must match: {exact}"
+    );
+    assert!(
+        exact.get("zero_result_diagnosis").is_none(),
+        "a search with hits carries no diagnosis: {exact}"
+    );
+
+    for (filter, match_kind) in [
+        (format!("{INDEXED}/"), "path_normalized"),
+        (INDEXED.to_uppercase(), "case_insensitive"),
+        (
+            "/elsewhere/coding_agent_session_search".to_string(),
+            "basename_moved",
+        ),
+    ] {
+        let near = search(&filter);
+        assert!(
+            near["hits"].as_array().expect("hits array").is_empty(),
+            "{filter} must not match the indexed workspace: {near}"
+        );
+        let diagnosis = &near["zero_result_diagnosis"];
+        assert_eq!(
+            diagnosis["diagnosis"], "workspace_filter_likely_wrong",
+            "{filter}: {near}"
+        );
+        assert_eq!(
+            diagnosis["candidate_workspaces"][0]["workspace"], INDEXED,
+            "{filter}: {near}"
+        );
+        assert_eq!(
+            diagnosis["candidate_workspaces"][0]["match_kind"], match_kind,
+            "{filter}: {near}"
+        );
+        assert!(
+            diagnosis["suggested_rerun"]
+                .as_str()
+                .is_some_and(|rerun| rerun.contains(INDEXED)),
+            "{filter}: {near}"
+        );
+    }
+
+    let unrelated = search("/nowhere/at/all");
+    assert_eq!(
+        unrelated["zero_result_diagnosis"]["diagnosis"], "workspace_not_indexed",
+        "{unrelated}"
     );
 }

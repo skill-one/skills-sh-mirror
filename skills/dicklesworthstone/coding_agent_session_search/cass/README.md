@@ -242,7 +242,8 @@ AI coding agents are transforming how we write software. Claude Code, Codex, Cur
   daemon inference fails. Pass `--daemon` to permit auto-spawning a missing
   daemon in human-mode searches (robot/JSON searches never spawn one, even
   with `--daemon`, because their bounded budget cannot wait for a daemon to
-  start; start `cass daemon` yourself first), or `--no-daemon` to force
+  start; start `cass daemon` yourself first; `_meta.effective.daemon` shows
+  the request and what applied), or `--no-daemon` to force
   direct inference. `--fast-only` stays in
   the deterministic hash-vector space. Each data directory gets a distinct
   default socket and owner-private pinned key; fresh handshake, health,
@@ -1013,13 +1014,13 @@ cass search "error" --robot --robot-meta
 # What the search actually ran (--robot-meta): check this instead of trusting the flags
 cass search "error" --robot --robot-meta --days 7 | jq '._meta.effective'
 # → { "command": "search", "query": "error",
+#     "query_structure": "error",           // how the engine groups operands: `a OR b c` -> "a OR (b AND c)"
+#     "query_recoveries": [],               // e.g. "1 unclosed '(' closed at the end of the query"
 #     "db_path": "/home/you/.local/share/coding-agent-search/agent_search.db",
 #     "db_path_source": "default",          // --db | env:CASS_DB_PATH | --data-dir | env:CASS_DATA_DIR | env:XDG_DATA_HOME | default
 #     "time_window": { "since_ms": 1758067200000, "since_from": "--days 7", "until_ms": null, "until_from": null },
 #     "filters": { "agents": [], "workspaces": [], "source": "all", "sessions_from_paths": null },
 #     "auto_corrections": [] }              // each argv correction, worded like its stderr note
-#   The parsed query tree is under --explain; it is not echoed here yet because
-#   cass's parse and the engine's can still differ for mixed AND/OR.
 
 # Per-hit trust verdict (advisory; --robot-meta only)
 cass search "error" --robot --robot-meta
@@ -1506,7 +1507,7 @@ cass index --full --json --robot-trace-ingest 2>/tmp/cass-ingest-trace.jsonl
 |------|---------|
 | `--robot` / `--json` | JSON output (pretty-printed) |
 | `--robot-format jsonl\|compact` | Streaming or single-line JSON |
-| `--robot-meta` | Include `_meta` block (elapsed_ms, cache stats, index freshness, `lexical_degrade_reason`: `"query_fuel_exhausted"` or null, and `effective`: the database, time window, filters and auto-corrections the search actually used) |
+| `--robot-meta` | Include `_meta` block (elapsed_ms, cache stats, index freshness, `lexical_degrade_reason`: `"query_fuel_exhausted"` or null, `wildcard_fallback_skipped`: why a sparse result got no automatic wildcard retry, and `effective`: the database, time window, filters, auto-corrections and query grouping the search actually used) |
 | `--fields minimal\|summary\|<list>` | Reduce payload size |
 | `--max-content-length N` | Truncate content fields to N chars |
 | `--max-tokens N` | Apply an approximate token budget to robot output |
@@ -1661,7 +1662,7 @@ Combine terms with explicit operators for complex queries:
 | `NOT` | `error NOT test` | First term, excluding second |
 | `-` | `error -test` | Shorthand for NOT |
 
-**Operator Precedence**: NOT binds tightest, then AND, then OR. Use parentheses (in robot mode) for explicit grouping.
+**Operator Precedence**: NOT binds tightest, then AND (explicit, `&&`, or implied between words), then OR (`OR`, `||`). Parentheses group, in the TUI and robot mode alike: `a OR b c` means `a OR (b AND c)`, while `(a OR b) c` needs the parentheses. A `(` groups only at the start of a word, so code such as `foo(bar)` stays one term. `NOT NOT x` is `x`. Unbalanced parentheses are recovered rather than rejected. The SQLite fallback lanes, used while no lexical index is available, apply the same grammar.
 
 ```bash
 # Complex boolean query
@@ -1765,7 +1766,7 @@ When an exact query's first page returns fewer than 3 results (or fewer than a s
 - `auth` → `*auth*`
 - It runs only on indexes with at most 10,000 documents (`CASS_AUTOMATIC_WILDCARD_FALLBACK_MAX_DOCS`; `0` disables it), so on a typical real archive it does not run.
 - It skips queries that already use wildcards, boolean operators or phrases, and zero-hit queries containing a token longer than 16 characters.
-- The wildcard results replace the exact ones only when they find more hits; robot mode then reports `_meta.wildcard_fallback: true` (a single boolean; nothing says why a fallback did not run)
+- The wildcard results replace the exact ones only when they find more hits; robot mode then reports `_meta.wildcard_fallback: true`. When a sparse result did not get the retry, `_meta.wildcard_fallback_skipped` says why: `index_over_automatic_limit` (the index is over the document cap), `automatic_retry_disabled` (the cap is `0`) or `long_query_term`; add explicit wildcards to run it anyway
 - TUI shows a "fuzzy" indicator in the status bar
 
 ---
@@ -3111,7 +3112,7 @@ Other subcommands (all present in the `Commands` enum in `src/lib.rs`):
 | `state` | Quick state/health check (alias of `status`) |
 | `onboarding` | Read-only first-run source onboarding + readiness wizard; `--json` for scripts, never launches the TUI |
 | `quarantine` | Inspect and manage the conversation-ingest quarantine (`list` / `clear`) |
-| `forget` | Prune already-indexed conversations by source-path glob; dry-run by default, `--apply` to commit, then derived search/analytics assets are rebuilt |
+| `forget` | Prune already-indexed conversations by source-path glob; dry-run by default, `--apply` to commit. Deletes the canonical rows, then rebuilds FTS, analytics and the lexical index. Semantic vectors are not rewritten, so explicit semantic search then reports `semantic-unavailable` and hybrid falls back to lexical until `cass index --semantic` re-embeds from the canonical rows; no surface returns forgotten messages. `dedup --apply` and `sources agents exclude` behave the same way. It removes indexed copies, not source files: forget records each source's size and modification time, so an unchanged source stays forgotten across `cass index`, `--full` and rescans triggered by other sessions, but if its agent appends to it the whole conversation is indexed again. A store that keeps many sessions in one file (a SQLite database) counts as changed when any of its sessions changes. Delete or move the file to keep it out for good. The raw mirror keeps its verbatim capture of the source; once the source is gone, `cass mirror prune --older-than 0s --safety-hold-down 0s --source-path '<glob>' --apply` removes that capture too (a source still on disk is captured again by the next scan). A `cass serve` session opened before the forget keeps its pinned snapshot until `reload`; the TUI drops forgotten hits on its next search. If the lexical rebuild fails, forget exits 5 (`lexical-rebuild`) and `cass index --full` finishes the purge |
 | `fleet upgrade-rehearsal` | Fleet-safe upgrade rehearsal (dry run) with bounded post-upgrade verification; `--live` opts in to SSH probes of configured remotes |
 | `lessons list\|search` | Mine and query durable, redacted lessons from local evidence (commits, closed beads, proof manifests) |
 | `import chatgpt` | Split a ChatGPT web export (`conversations.json`) into files the ChatGPT connector can index |
@@ -3561,7 +3562,7 @@ Update check state is stored in `update_state.json` in the data directory:
 | `CASS_DEBUG_CACHE_METRICS` | unset | Enable cache hit/miss logging |
 | `CASS_QUILL_QUERY_FUEL_BUDGET` | Quill default (10000000) | Escape hatch for Quill's deterministic per-query work ceiling (GH #441). Zero or unparseable values keep the engine default. When fuel runs out on a hybrid query the lexical leg is dropped, the semantic leg still answers, and `_meta.lexical_degrade_reason` reports `query_fuel_exhausted`; lexical-only queries return an actionable hint. The durable fix for fuel exhaustion is a consolidated index (an incremental `cass index` folds fragmented generations in its maintenance pass; `--full` rebuilds from scratch), and cass now publishes Quill snapshots only on its own commits (no per-second visibility seals), which is what let segment counts grow into the hundreds on append-only archives |
 | `CASS_LEXICAL_MERGE_MAX_OUTPUT_BYTES` | 1073741824 (1 GiB) | Maximum estimated output per lexical merge run, including the covered document-ID range. Oversized singleton segments remain unmerged. This is a merge-planning limit, not a total-process RSS ceiling. Positive byte values accept underscores; zero or invalid values keep the default. Independently of this cap, a merge run never holds more than 4,194,304 documents (Quill's per-term posting limit), and Quill's own tier merge is disabled, so archives with several million messages rebuild into several segments (GH #498). |
-| `CASS_INDEX_SKIP_DISK_HEADROOM_CHECK` | unset | Skips the free-space preflight that `cass index --full` / `--force-rebuild` runs before starting. The requirement is `max(512 MiB, db_bundle_bytes * 2 + lexical_index_bytes * 2)`, where the lexical figure counts only the live published index. Merge-retired segments, retained publish backups and a failed rebuild's leftover `.rebuild-staging` generation are reported but not doubled. Query it before a run with `cass doctor --json \| jq .storage_pressure.full_rebuild_readiness`, which shows `required_bytes`, `available_bytes`, `shortfall_bytes` and each input (GH #496). Set to `1` only when you know the disk can hold the rebuild. |
+| `CASS_INDEX_SKIP_DISK_HEADROOM_CHECK` | unset | Skips the free-space preflight that `cass index --full` / `--force-rebuild` runs before starting. The requirement is `max(512 MiB, db_bundle_bytes * 2 + lexical_index_bytes * 2 - rebuild_staging_bytes)`, where the lexical figure counts only the live published index. Merge-retired segments and retained publish backups are reported but not doubled, and a failed rebuild's leftover `.rebuild-staging` generation is subtracted, because the next rebuild resumes into it or clears it first. Query it before a run with `cass doctor --json \| jq .storage_pressure.full_rebuild_readiness`, which shows `required_bytes`, `available_bytes`, `shortfall_bytes` and each input (GH #496). Set to `1` only when you know the disk can hold the rebuild. |
 | `CASS_SEARCH_EXACT_TOTAL_COUNT_MAX_DOCS` | 5000000 (50000 in v0.9.0 and earlier) | Largest index (in documents) for which a full result page still reports an exact `total_matches`; above it the count is `limit + 1`, a lower bound (`_meta.cursor_manifest.count_precision` says which). `0` disables exact counting. See *Match Counts: Exact or Lower Bound* |
 | `CASS_SEARCH_BUDGET_MS` | 120000 | Default robot-mode search budget when `--timeout` is not given. A search that runs out of it exits 0 with `budget.timed_out: true`, which means "no complete answer", not "no matches" |
 | `CASS_SEARCH_ACTIVE_REBUILD_WAIT_MS` | 30000 | How long a human-mode search, or a robot search whose index is still readable, waits for an active lexical rebuild before returning exit 7 `index-busy`. With `--timeout`, the wait also stops at nine tenths of the time remaining. A robot search with no searchable generation does not wait |
@@ -3604,7 +3605,7 @@ The manifests and lockfile pin the entire SQLite family used by CASS (including
 `fsqlite-types`) at `=0.4.4`, with `asupersync =0.5.0`.
 The published SQLite repair covers the reserved-page WAL conflict in GH#462;
 upstream GH#411 is also closed. Neither proves recovery of an already damaged
-archive. `franken-agent-detection =0.3.0` is published. SQLite `0.4.2` adds
+archive. `franken-agent-detection =0.3.1` is published. SQLite `0.4.2` adds
 explicit derived WAL-index recovery for read-only opens (GH#477); its
 upstream recovery, compiler, and package gates passed. All 25 SQLite packages
 are now published at 0.4.4, which adds durable pending-freelist repairs.
@@ -3623,9 +3624,9 @@ The September 17 FrankenSearch publication blocker is resolved.
 | Dependency | Pinned source |
 |------------|-----------------|
 | `frankensqlite` / `fsqlite-types` and the whole SQLite family | crates.io `=0.4.4` (tag v0.4.4 = `9d3d98778a372aba95d76d05c5c974ac0238c96a`). Carries 0.4.1's GH#462 reserved-page WAL repair, 0.4.2's derived WAL-index recovery for read-only opens (GH#477) and 0.4.4's durable pending-freelist repairs. The whole family resolves from one exact registry version; `build.rs` rejects any fsqlite-family registry patch, duplicate package resolution, wrong version, or non-crates.io lockfile source. `src/franken_sync.rs` keeps cass's synchronous call shape through a current-thread asupersync `block_on` bridge. |
-| `franken-agent-detection` | crates.io `=0.3.0` |
+| `franken-agent-detection` | crates.io `=0.3.1` |
 | `asupersync` | crates.io `=0.5.0` (the line fsqlite 0.4.x names in its public API) |
-| `frankensearch` | crates.io `=0.6.1`, resolving `frankensearch-quill 0.3.2` (the GH #499 fix, published from the `frankensearch-quill-v0.3.2` hotfix tag), `frankenhnsw 0.3.5` and the `frankentorch-*` family (features `hash`, `cass-compat`, `quill`, `ann`, `native`). Exact pins remain required. |
+| `frankensearch` | crates.io `=0.6.1`, resolving `frankensearch-quill 0.3.4` (the GH #499 fix, the standard Boolean query grammar and the nested-union fix, published from the `frankensearch-quill-v0.3.4` hotfix tag), `frankenhnsw 0.3.5` and the `frankentorch-*` family (features `hash`, `cass-compat`, `quill`, `ann`, `native`; `cass-compat` enables `lexical-tantivy`, the Tantivy-backed `frankensearch-lexical` differential oracle). Exact pins remain required. |
 | `frankentui` (`ftui`, `ftui-runtime`, `ftui-tty`, `ftui-extras`) | crates.io `=0.5.0` (2026-08-21; previously git `5f78cfa0` / 0.3.1 — the 0.5 API compiled with zero call-site changes) |
 | `toon` (`tru`) | crates.io `=0.2.4` (2026-08-24; production sources byte-identical to the previously pinned git rev `d7185c78` — registry 0.2.3 was rejected because its tree differs from the rev in real source despite the matching version field) |
 

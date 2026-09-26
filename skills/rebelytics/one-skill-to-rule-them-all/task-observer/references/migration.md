@@ -111,8 +111,9 @@ Run from the workspace folder. Python 3.8+, no dependencies.
      --overrides overrides.json
    ```
 
-6. **Verify.** The report's file count must equal the number of
-   `### Observation` headers in `log.md`:
+6. **Verify twice: source fidelity, then target conformance.** The
+   report's file count must equal the number of `### Observation` headers
+   in `log.md`:
 
    ```bash
    grep -c '^### Observation' skill-observations/log.md
@@ -120,7 +121,26 @@ Run from the workspace folder. Python 3.8+, no dependencies.
    ```
 
    Spot-check three files against their originals, including one that was
-   resolved and one that carried a qualifier.
+   resolved and one that carried a qualifier. Then read the report's
+   `target conformance` block, and confirm it from the files: a converted
+   set is faithful to a source that never had `siblings_checked`, so every
+   file lacks it, and nothing but the next review's sibling backfill will
+   add it. Enumerate the fields from the target's own definition (SKILL.md,
+   File format), never from the mapping table above — a field absent from
+   the table is indistinguishable from one absent from the schema:
+
+   ```bash
+   o="skill-observations/observation-log"
+   n=$(find "$o" -maxdepth 1 -name '*.md' | wc -l | tr -d ' ')
+   for field in status siblings_checked; do
+     have=$(find "$o" -maxdepth 1 -name '*.md' -exec grep -l "^$field:" {} + | wc -l | tr -d ' ')
+     echo "$field: $have/$n"
+   done
+   ```
+
+   A count below `n` for `siblings_checked` is expected and is the state
+   the first review clears; a count below `n` for `status` is a converter
+   defect — report it.
 7. **Move legacy archives under the new layout** so one directory holds
    the whole history, and retire the old file so nothing scans it:
 
