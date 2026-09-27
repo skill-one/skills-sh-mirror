@@ -353,7 +353,8 @@ actions:
     data:
       title: "Reminder"
       message: "Check the laundry"
-      notification_id: "laundry_reminder"
+      data:
+        notification_id: "laundry_reminder"   # nested: a top-level key is rejected
 ```
 
 ---
@@ -381,7 +382,7 @@ actions:
     target:
       entity_id: vacuum.roborock
     data:
-      area_id:
+      cleaning_area_id:           # NOT area_id: under data: that is read as a target
         - kitchen
         - living_room
 ```

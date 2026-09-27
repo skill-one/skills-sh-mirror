@@ -451,3 +451,17 @@ Rule of thumb: native `table` for small/interactive data and tight integration
 with the Nushell command set; Polars dataframes for large-scale or columnar work.
 Convert with `polars into-df` / `polars into-lazy` (in) and `polars into-nu`
 (back out). See [Dataframes](dataframes.md) for the full guide.
+
+## Nu 0.116 data-boundary updates
+
+For 0.116 targets, `default 5 a.b` fills a nested field while `default 5 'a.b'`
+targets a literal dotted key. `flatten` renames nested fields that collide with
+top-level columns to `<parent>_<field>` in either field order. This is not a
+general lossless guarantee: on 0.116.0, an existing column with that generated
+name can still collide, silently overwriting a value depending on field order.
+Check generated names or explicitly rename conflicting fields before flattening
+when all values must be preserved.
+`update cells --recursive` transforms leaf values in nested lists/records, so
+use type guards for heterogeneous leaves. Record spreads into internal/custom
+commands forward named flags: null omits a flag unless its type accepts
+`nothing`. See [Nu 0.116 Migration](nu-0.116-migration.md) for examples and tests.

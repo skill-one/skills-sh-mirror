@@ -23,6 +23,7 @@ type Props = {
   locale: string;
   appName?: string;
   appIcon?: string;
+  fontFamily: string;
   connectedCanvas: boolean;
   selectedElement: SelectedElement | null;
   onActiveSlideChange: (id: string) => void;
@@ -44,6 +45,7 @@ export function PreviewStage({
   locale,
   appName,
   appIcon,
+  fontFamily,
   connectedCanvas,
   selectedElement,
   onActiveSlideChange,
@@ -63,6 +65,7 @@ export function PreviewStage({
   const scale = fitScale * zoom;
   const activeIndex = Math.max(0, slides.findIndex((slide) => slide.id === activeSlideId));
   const activeSlide = slides[activeIndex] || slides[0] || null;
+  const activeId = activeSlide?.id;
 
   React.useEffect(() => {
     const el = containerRef.current;
@@ -90,12 +93,12 @@ export function PreviewStage({
     }
 
     const scroller = scrollerRef.current;
-    if (!scroller || !activeSlide) return;
+    if (!scroller || !activeId) return;
     const screenLeft = activeIndex * cW * scale;
     const screenWidth = cW * scale;
     const targetLeft = Math.max(0, screenLeft - (scroller.clientWidth - screenWidth) / 2);
     scroller.scrollTo({ left: targetLeft, behavior: "smooth" });
-  }, [activeIndex, activeSlide, cW, scale]);
+  }, [activeIndex, activeId, cW, scale]);
 
   const handleCanvasActiveSlideChange = React.useCallback(
     (id: string) => {
@@ -138,6 +141,7 @@ export function PreviewStage({
               locale={locale}
               appName={appName}
               appIcon={appIcon}
+              fontFamily={fontFamily}
               connectedCanvas={connectedCanvas}
               editable
               previewScale={scale}

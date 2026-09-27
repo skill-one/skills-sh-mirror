@@ -4,6 +4,12 @@ Use this reference when upgrading to Nu 0.115, reviewing code whose behavior
 changed in 0.115, or deciding whether a new 0.115 idiom is compatible with a
 project's supported Nushell range.
 
+For newer targets see [Nu 0.116](nu-0.116-migration.md): nested `finally`,
+SemVer comparison inference and missing-file IDE checks are fixed; raw YAML
+`null` is accepted and list indentation uses a different flag. Historical
+0.115.0 reproductions below remain relevant to that version. The separate
+YAML `--non-roundtrip 'lossy'` rejection still reproduces on 0.116.0.
+
 ## Contents
 
 - [Establish the compatibility target](#establish-the-compatibility-target)
@@ -107,7 +113,7 @@ emits each item of a list as its own YAML document, mirroring
 ### Parser keywords and `$ans` are reserved
 
 Commands, aliases, module names, exports, and wildcard imports must not shadow
-parser keywords. `export main` also fails when the *module* is named to shadow
+parser keywords. `export main` also fails when the _module_ is named to shadow
 a keyword — the conflict is on the module name, not on `main` itself. Check the
 final imported namespace, not just the local `def` declarations.
 
@@ -226,13 +232,16 @@ comparison.
 includes the first item that would otherwise stop the command:
 
 ```nu
-[1 2 3 4] | take until {|n| $n == 3 } --include 1  # [1 2 3]
-[1 2 3 4] | take while {|n| $n < 3 } --include 1   # [1 2 3]
+[1 2 3 4] | take until --include 1 {|n| $n == 3 }  # [1 2 3]
+[1 2 3 4] | take while --include 1 {|n| $n < 3 }   # [1 2 3]
 ```
 
 Review off-by-one behavior explicitly. Values greater than one include more
 items after the original stopping point and may trigger additional upstream
 side effects on a lazy stream.
+
+Keep flags before the predicate for compatibility with 0.116's row-condition
+parser; the old trailing-flag form fails to parse there.
 
 ### Preserve null groups deliberately
 
@@ -305,7 +314,7 @@ column is not a whole-record reduction.
   the mismatch surfacing at runtime now fails earlier and more visibly.
 - Quotes inside `(...)` subexpressions of interpolated strings now lex
   correctly, so `$"('" "')"` prints `" "`. This does not relax the separate
-  rule that a *literal* parenthesis still requires `$"..."` with `\(`; see
+  rule that a _literal_ parenthesis still requires `$"..."` with `\(`; see
   [Anti-Patterns](anti-patterns.md).
 - `stor import --file-name` with a missing path now fails instead of creating
   an empty file and silently discarding the in-memory database.

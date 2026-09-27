@@ -4,7 +4,7 @@ use std/assert
 # Any non-zero exit or stderr output is a harness failure, not an assertion
 # failure, so it is raised here instead of inside a test.
 def run-nu-json [args: list<string>] {
-    let result = (^nu --no-config-file ...$args | complete)
+    let result = (^$nu.current-exe --no-config-file ...$args | complete)
 
     if $result.exit_code != 0 or ($result.stderr | str trim | is-not-empty) {
         error make {
@@ -18,7 +18,7 @@ def run-nu-json [args: list<string>] {
 # Run a nested Nushell program and return its trimmed stdout lines, including
 # the runs that are expected to fail.
 def run-nu-lines [program: string] {
-    ^nu --no-config-file -c $program
+    ^$nu.current-exe --no-config-file -c $program
     | complete
     | get stdout
     | lines
@@ -113,17 +113,17 @@ def test-semver-comparison [] {
 
 def test-take-include-boundary [] {
     assert equal (
-        [1 2 3 4] | take until {|value| $value == 3 } --include 0
+        [1 2 3 4] | take until --include 0 {|value| $value == 3 }
     ) [1 2]
     assert equal (
-        [1 2 3 4] | take until {|value| $value == 3 } --include 1
+        [1 2 3 4] | take until --include 1 {|value| $value == 3 }
     ) [1 2 3]
     assert equal (
-        [1 2 3 4] | take while {|value| $value < 3 } --include 1
+        [1 2 3 4] | take while --include 1 {|value| $value < 3 }
     ) [1 2 3]
     # Counts above one keep consuming past the original stopping point.
     assert equal (
-        [1 2 3 4] | take until {|value| $value == 3 } --include 2
+        [1 2 3 4] | take until --include 2 {|value| $value == 3 }
     ) [1 2 3 4]
 }
 
@@ -167,11 +167,15 @@ def test-deprecation-metadata [] {
 def test-nested-finally-cleanup [] {
     # Locks a 0.115.0 defect: a `try/finally` nested directly inside an outer
     # `try` whose handler is `catch` silently skips the inner `finally`.
-    # When a patched Nu runs the cleanup, this assertion fails and the guidance
-    # in references/nu-0.115-migration.md must be retracted.
+    # Fixed in 0.116; retain the historical expectation for older targets.
+    let expected = if (version | get version | into semver) in ('>=0.116.0' | into semver-range) {
+        ['INNER' 'OUTER']
+    } else {
+        ['OUTER']
+    }
     assert equal (run-nu-lines r#'try {
     try { error make {msg: "inner"} } finally { print "INNER" }
-} catch { print "OUTER" }'#) ['OUTER']
+} catch { print "OUTER" }'#) $expected
 
     # A `do` boundary restores the cleanup.
     assert equal (run-nu-lines r#'try {
