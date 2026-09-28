@@ -9,7 +9,7 @@
 // carrying just the avatar URL — the local copy's avatars/{owner}.png path is
 // derivable from the owner alone; downloaded from the URL the repo response
 // carries with no token; cached while the URL's ?v= parameter is unchanged;
-// legacy content-type-named copies are renamed in place; a failed download
+// a failed download
 // keeps the previous row), skills.jsonl index shape (only saved skills — duplicates and
 // no-snapshot skills are omitted; skills whose fetch failed keep their
 // previous row and content), pure content directories, path sanitization,
@@ -26,11 +26,10 @@
 // row per owner (every per-skill field the index drops is dropped there
 // too), a missing
 // GITHUB_TOKEN aborting the run, verifier rejection of tampered datasets, and
-// the dist publisher (one commit per day via same-day amend, the --window-driven
-// prune re-rooting that preserves the original commit dates, the dist-<date>
-// tag window, the one-line `latest` pointer every snapshot carries naming its
-// own tag, pruning of entries tracked on dist but no longer in the publish
-// set, and a bad --window aborting before the snapshot is touched).
+// the dist publisher (a single parentless commit per publish that is exactly
+// the publish set, a same-day rerun re-pointing the day's tag at the fresh
+// commit, the --window-bounded dist-<date> tag set, and a bad --window
+// aborting before the snapshot is touched).
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -462,25 +461,6 @@ test("scraper end-to-end against mock API", async () => {
       { dropped: 2, failed: 1, carriedOver: 0 },
     );
     assert.deepEqual(stats1.failedIds, ["owner/repo/bad-id"]);
-
-    // Seed the pre-unification layout (content-type-named copies + a per-row
-    // path field): run 2 must migrate in place — owner's legacy .jpg renamed
-    // to the derivable .png name — without any re-download.
-    await rename(path.join(out1, "avatars/owner.png"), path.join(out1, "avatars/owner.jpg"));
-    await writeFile(
-      path.join(out1, "owners.jsonl"),
-      owners1
-        .map((r) =>
-          JSON.stringify(
-            r.owner === "owner"
-              ? { ...r, avatar: "avatars/owner.jpg" }
-              : r.owner === "vercel-labs"
-                ? { ...r, avatar: "avatars/vercel-labs.png" }
-                : r,
-          ),
-        )
-        .join("\n") + "\n",
-    );
 
     // --- run 2: everything is re-fetched and re-written, but while the
     // upstream hash is unchanged each row keeps the fetchedAt of the run
@@ -933,7 +913,7 @@ test("missing GITHUB_TOKEN aborts before any request", async () => {
   }
 });
 
-test("publish: one commit per day, date-preserving prune, tag window", async () => {
+test("publish: parentless snapshot per run, tag-bounded window", async () => {
   const PUBLISH = fileURLToPath(new URL("./publish.mjs", import.meta.url));
   const root = await mkdtemp(path.join(tmpdir(), "skills-publish-"));
   const sh = (cmd, cwd) => {
@@ -959,8 +939,8 @@ test("publish: one commit per day, date-preserving prune, tag window", async () 
         await writeFile(path.join(data, f), `{"day":"${day}"}\n`);
       }
     };
-    // The retained-history length is a parameter, so the mechanism is exercised
-    // with a 3-commit window rather than the production default (30 days).
+    // The retained-tag count is a parameter, so the window is exercised with a
+    // 3-day span rather than the production default (30).
     const WINDOW = 3;
     const publish = (day, win = WINDOW) =>
       spawnSync(process.execPath, [PUBLISH, "--date", day, "--window", String(win)], {
@@ -968,14 +948,16 @@ test("publish: one commit per day, date-preserving prune, tag window", async () 
         encoding: "utf8",
       });
     const distLog = (fmt) => sh(`git fetch -q origin dist && git log --format=${fmt} origin/dist`, work);
-    const distTip = (fmt) => sh(`git fetch -q origin dist && git log -1 --format=${fmt} origin/dist`, work);
-    const distShow = (file) => sh(`git fetch -q origin dist && git show origin/dist:${file}`, work);
+    const distHas = (file) =>
+      sh(`git fetch -q origin dist && git show origin/dist:${file} >/dev/null 2>&1 && echo yes || echo no`, work) === "yes";
     const remoteTag = (tag) => sh(`git ls-remote origin refs/tags/${tag}`, work);
+    const remoteTags = () =>
+      sh("git ls-remote --tags origin 'dist-*'", work).split("\n").filter(Boolean).map((l) => l.split("refs/tags/")[1]).sort();
 
     await scrape("d1", "first");
-    // A bad --window aborts up front: `count > NaN` is false, so an unguarded
-    // value would silently publish without ever pruning. It must fail before
-    // the snapshot is moved out of data/.
+    // A bad --window aborts up front: an unguarded value would turn the tag
+    // prune into nonsense and silently keep every tag. It must fail before the
+    // snapshot is moved out of data/.
     let r = publish("d1", "abc");
     assert.equal(r.status, 1, r.stderr);
     assert.match(r.stderr, /--window must be a positive integer/);
@@ -984,91 +966,73 @@ test("publish: one commit per day, date-preserving prune, tag window", async () 
 
     r = publish("d1");
     assert.equal(r.status, 0, r.stderr);
-    // First publish: an orphan dist branch with a single day-one commit, tagged.
+    // First publish: dist is a single parentless commit holding exactly the
+    // snapshot, tagged dist-d1. The branch is not a history — it is the newest.
     assert.equal(distLog("%s"), "skills.sh data — d1");
+    assert.equal(distLog("%P"), ""); // no parent
+    assert.equal(distLog("%H").split("\n").length, 1);
     const d1Sha = distLog("%H");
     assert.match(remoteTag("dist-d1"), new RegExp(`^${d1Sha}`));
 
-    // The snapshot carries the pointer a consumer resolves the newest tag from:
-    // one line holding this snapshot's own tag.
-    const pointerOf = () => distShow("latest");
-    assert.equal(pointerOf(), "dist-d1");
-
-    // Same-day rerun amends the day's commit instead of stacking a second one,
-    // re-points the tag at the amended sha, and keeps the original author date.
-    const authorDate = distTip("%aD");
+    // Same-day rerun replaces the snapshot with a fresh parentless commit and
+    // re-points the day's tag at it — nothing stacks, nothing amends.
     await scrape("d1", "second");
     r = publish("d1");
     assert.equal(r.status, 0, r.stderr);
     assert.equal(distLog("%H").split("\n").length, 1);
-    assert.equal(distLog("%s"), "skills.sh data — d1");
+    assert.equal(distLog("%P"), "");
     assert.notEqual(distLog("%H"), d1Sha);
-    assert.equal(distLog("%aD"), authorDate);
     assert.equal(sh("git show origin/dist:skills.jsonl", work), `{"day":"d1","body":"second"}`);
     assert.match(remoteTag("dist-d1"), new RegExp(`^${distLog("%H")}`));
-    assert.equal(pointerOf(), "dist-d1"); // the amended commit's pointer still names the day's tag
 
-    // Entries tracked on dist but no longer in the publish set cannot ride
-    // along: simulate the pre-rename era (repos.json/curated.json) amended
-    // into the day's commit — exactly how a renamed output used to survive —
-    // then publish again: the same-day amend must drop them while keeping
-    // every published entry, and history stays one commit per day.
+    // Junk tracked on dist but outside the publish set cannot survive: the next
+    // publish is a parentless commit built only from data/, so a stale
+    // repos.json / curated.json / retired latest left on the branch is simply
+    // gone, while every published entry is present.
     sh(
       "git fetch -q origin dist && git checkout -q -B dist origin/dist" +
-        " && echo old > repos.json && echo old > curated.json" +
-        " && git add repos.json curated.json && git commit -q --amend -m 'skills.sh data — d1'" +
+        " && echo old > repos.json && echo old > curated.json && echo dist-d1 > latest" +
+        " && git add repos.json curated.json latest && git commit -q --amend -m 'skills.sh data — d1'" +
         " && git push -q --force origin dist",
       work,
     );
     await scrape("d1", "third");
     r = publish("d1");
     assert.equal(r.status, 0, r.stderr);
-    const distHas = (file) =>
-      sh(`git show origin/dist:${file} >/dev/null 2>&1 && echo yes || echo no`, work) === "yes";
     assert.equal(distHas("repos.json"), false);
     assert.equal(distHas("curated.json"), false);
+    assert.equal(distHas("latest"), false);
     assert.equal(distHas("repos.jsonl"), true);
     assert.equal(distHas("skills.jsonl"), true);
     assert.equal(sh("git show origin/dist:skills.jsonl", work), `{"day":"d1","body":"third"}`);
-    assert.equal(distLog("%H").split("\n").length, 1); // still one commit for the day
 
-    // The remaining days fill the window; publishing one more overflows it and
-    // re-roots, pushing d1 out. The author date of each day's commit is
-    // captured right after its publish (git dates have 1s resolution, so runs
-    // inside the same second can tie).
-    const days = ["d2", "d3", "d4"];
-    const authorDates = {};
-    for (const day of days) {
+    // Each further day is its own parentless commit on dist; the day's tag pins
+    // it even after dist moves on. Capture each tag's sha right after publish.
+    const tagSha = { d1: distLog("%H") };
+    for (const day of ["d2", "d3", "d4"]) {
       await scrape(day, day);
       r = publish(day);
       assert.equal(r.status, 0, r.stderr);
-      authorDates[day] = distTip("%aD");
+      assert.equal(distLog("%H").split("\n").length, 1); // the branch is only ever the newest
+      assert.equal(distLog("%P"), "");
+      tagSha[day] = distLog("%H");
+      assert.match(remoteTag(`dist-${day}`), new RegExp(`^${tagSha[day]}`));
     }
-    assert.equal(distLog("%H").split("\n").length, WINDOW);
-    // The pruned (re-rooted) commits keep their real per-run timeline — the
-    // rewrite does not stamp them all with the rewrite moment — and their
-    // subjects name their days (newest first in the log).
-    const shas = distLog("%H%x7C%s%x7C%aD").split("\n");
-    assert.deepEqual(
-      shas.map((l) => l.split("|")[1]),
-      [...days].reverse().map((d) => `skills.sh data — ${d}`),
-    );
-    for (const line of shas) {
-      const [, subject, authorDate] = line.split("|");
-      assert.equal(authorDate, authorDates[subject.slice(-2)]);
-    }
+    assert.equal(new Set(Object.values(tagSha)).size, 4); // four distinct days -> four commits
 
-    // Tags mirror the window: d1 fell out and its tag was deleted, every day
-    // still in the window keeps a tag pointing at its own commit — and every
-    // retained snapshot's pointer still names exactly that tag, so the
-    // prune/re-tag round trip never leaves a snapshot describing another one.
+    // The window bounds the tag set, not branch history: with WINDOW=3 the
+    // oldest day's tag is deleted (its parentless commit goes unreachable), and
+    // exactly the newest three survive.
     assert.match(remoteTag("dist-d1"), /^$/);
-    for (const line of shas) {
-      const [sha, subject] = line.split("|");
-      const day = subject.slice(-2);
-      assert.match(remoteTag(`dist-${day}`), new RegExp(`^${sha}`), subject);
-      assert.equal(sh(`git show ${sha}:latest`, work), `dist-${day}`, subject);
+    assert.deepEqual(remoteTags(), ["dist-d2", "dist-d3", "dist-d4"]);
+    // The survivors still resolve to their own snapshots, and dist serves the
+    // newest.
+    sh("git fetch -q origin '+refs/tags/dist-*:refs/tags/dist-*'", work);
+    for (const day of ["d2", "d3", "d4"]) {
+      assert.equal(sh(`git rev-parse dist-${day}`, work), tagSha[day], day);
+      assert.equal(sh(`git show dist-${day}:skills.jsonl`, work), `{"day":"${day}","body":"${day}"}`, day);
     }
+    assert.equal(sh("git show origin/dist:skills.jsonl", work), `{"day":"d4","body":"d4"}`);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

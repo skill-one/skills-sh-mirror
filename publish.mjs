@@ -3,34 +3,28 @@
 //
 //   node publish.mjs [--date YYYY-MM-DD] [--window N]   (date defaults to today, UTC)
 //
-// Publishing means: the scraped snapshot plus a generated pointer file at the
-// branch root, one commit per day — a same-day rerun amends the day's commit
-// instead of stacking a second one, so the commit window can never be filled by
-// a single day — entries tracked on the branch but no longer in the publish
-// set are pruned (a renamed output cannot ride along as a stale leftover), and
-// history pruned to the newest N commits (N = --window, default
-// 30; one commit per day, so the window is about a month of snapshots), and each
-// retained snapshot tagged dist-<date> (from the commit subject, not the commit
-// dates: pruning re-roots commits, which resets them). Tags mirror the window
-// and tags for days that fell out of it are deleted, so the pruned objects stay
-// unreachable and the repo stays bounded. The tag name is deliberately
-// slash-free: dist/<date> in a raw.githubusercontent.com URL resolves as the
-// dist branch plus a path (the shorter ref wins) and 404s, while dist-<date> is
-// unambiguous and works in single-file raw URLs.
+// The dist branch is only ever the newest snapshot: each run force-pushes a
+// single parentless (orphan) commit whose tree is exactly the publish set.
+// Per-day pinning lives in the dist-<date> tags, not in branch history — a
+// consumer resolves the newest snapshot from the branch root and an older day
+// from its tag. Keeping history off the branch is what makes this simple: there
+// is nothing to prune or re-root, no stale entry can ride along (an orphan
+// commit starts from an empty index), and the commit is never empty (no parent
+// to diff against), so a day whose dataset is unchanged still publishes.
 //
-// latest is generated here, not scraped: a snapshot's own name only exists at
-// publish time. It holds that tag on one line — the whole pointer file — so a
-// consumer resolves the newest snapshot with a single plain-text fetch, no git
-// and no GitHub API; it also keeps every day's commit non-empty even when the
-// dataset itself is unchanged.
+// The tags are what bound the repo: the newest N (N = --window, default 30 — one
+// per day, so about a month) are kept and the rest deleted on origin, which
+// makes their commits unreachable so they can be garbage collected. The tag name
+// is deliberately slash-free: dist/<date> in a raw.githubusercontent.com URL
+// resolves as the dist branch plus a path (the shorter ref wins) and 404s, while
+// dist-<date> is unambiguous and works in single-file raw URLs.
 
-import { renameSync, rmSync, writeFileSync } from "node:fs";
+import { renameSync, rmSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { argValue } from "./lib.mjs";
 
 const DEFAULT_WINDOW = 30;
 const SNAPSHOT = ["skills", "skills.jsonl", "repos.jsonl", "owners.jsonl", "avatars", "trending.json", "curated.jsonl", "stats.json"];
-const POINTER = "latest";
 
 const git = (args, opts = {}) => {
   const r = spawnSync("git", args, { encoding: "utf8", ...opts });
@@ -38,116 +32,63 @@ const git = (args, opts = {}) => {
   return r.stdout.trim();
 };
 const hasRef = (...args) => spawnSync("git", args, { encoding: "utf8" }).status === 0;
+const gitSoft = (args) => spawnSync("git", args, { encoding: "utf8" }); // a non-zero exit is fine
 
 const argv = process.argv.slice(2);
 const date = argValue(argv, "--date") ?? new Date().toISOString().slice(0, 10);
-// Validated up front: a non-numeric window would make the prune test
-// `count > keep` always false and silently stop pruning, so reject it before
-// the snapshot is moved into place.
+// Validated up front: a non-numeric window would turn the tag-prune slice into
+// nonsense and silently keep every tag, so reject it before the snapshot is
+// moved into place.
 const keep = Number(argValue(argv, "--window") ?? DEFAULT_WINDOW);
 if (!Number.isInteger(keep) || keep < 1) {
   throw new Error(`--window must be a positive integer, got "${argValue(argv, "--window")}"`);
 }
 const subject = `skills.sh data — ${date}`;
-const dayOf = (sha) => git(["log", "-1", "--format=%s", sha]).replace(/^.*—\s*/, "");
+const expectedTag = `dist-${date}`;
 
-// Park the fresh snapshot; load the current dist branch if it exists.
+// Park the fresh snapshot, then start dist over as an unborn orphan branch with
+// an empty index. Whatever the branch held before — locally or on origin — is
+// irrelevant, since this commit has no parent. Detach first so the local branch
+// ref can be deleted even when a prior same-clone run left it checked out.
 renameSync("data", "data-fresh");
-if (hasRef("fetch", "-q", "origin", "dist")) {
-  git(["checkout", "-q", "-B", "dist", "FETCH_HEAD"]);
-} else {
-  git(["checkout", "-q", "--orphan", "dist"]);
-  git(["rm", "-rq", "--cached", "--ignore-unmatch", "."]);
-}
+if (hasRef("rev-parse", "-q", "--verify", "HEAD")) gitSoft(["checkout", "-q", "--detach"]);
+gitSoft(["update-ref", "-d", "refs/heads/dist"]);
+git(["checkout", "-q", "--orphan", "dist"]);
+git(["rm", "-rq", "--cached", "--ignore-unmatch", "."]);
 for (const f of SNAPSHOT) rmSync(f, { recursive: true, force: true });
 for (const f of SNAPSHOT) renameSync(`data-fresh/${f}`, f);
 rmSync("data-fresh", { recursive: true, force: true });
-
-// The checkout restores every entry the branch ever tracked into the index,
-// and only the SNAPSHOT names are replaced above — so an entry dropped from
-// the publish set (e.g. the pre-repos.jsonl repos.json, after a rename in
-// SNAPSHOT) would otherwise ride along in every later commit, amends included.
-// Prune the index to exactly the publish set. HEAD does not exist yet on the
-// orphan path, whose index is already empty.
-if (hasRef("rev-parse", "-q", "--verify", "HEAD")) {
-  const KEEP = new Set([...SNAPSHOT, POINTER]);
-  const stale = git(["ls-tree", "--name-only", "HEAD"]).split("\n").filter((f) => f && !KEEP.has(f));
-  if (stale.length) git(["rm", "-rqf", "--ignore-unmatch", ...stale]);
-}
-
-// Names the tag this commit will get — both derive from `date`, so they cannot
-// drift (checked against the committed tree at the end).
-writeFileSync(POINTER, `dist-${date}\n`);
-git(["add", "-f", ...SNAPSHOT, POINTER]);
-
-if (hasRef("rev-parse", "-q", "--verify", "HEAD") && dayOf("HEAD") === date) {
-  git(["commit", "-q", "--amend", "-m", subject]);
-} else {
-  git(["commit", "-q", "-m", subject]);
-}
-
-if (Number(git(["rev-list", "--count", "HEAD"])) > keep) {
-  // Re-root the newest `keep` commits (no diff replay). commit-tree would stamp
-  // every rebuilt commit with the rewrite moment — one same-second publish —
-  // so carry the original author and committer dates over instead.
-  let parent = "";
-  for (let i = keep - 1; i >= 0; i--) {
-    const args = [
-      "commit-tree",
-      git(["rev-parse", `HEAD~${i}^{tree}`]),
-      "-m",
-      git(["log", "-1", "--format=%B", `HEAD~${i}`]),
-    ];
-    if (parent) args.push("-p", parent);
-    parent = git(args, {
-      env: {
-        ...process.env,
-        GIT_AUTHOR_DATE: git(["log", "-1", "--format=%aD", `HEAD~${i}`]),
-        GIT_COMMITTER_DATE: git(["log", "-1", "--format=%cD", `HEAD~${i}`]),
-      },
-    });
-  }
-  git(["reset", "-q", "--hard", parent]);
-}
+git(["add", "-f", ...SNAPSHOT]);
+git(["commit", "-q", "-m", subject]);
 git(["push", "-q", "--force", "origin", "dist"]);
 
-// Tag each retained snapshot as dist-<date>; oldest first, so if history from
-// before the same-day amend still carries two commits of one day, the newest
-// snapshot of that day wins the tag.
+// Bound the tag set to the newest `keep`. Pull origin's tags first, then force
+// today's at this commit — so a same-day rerun re-points it and a stale fetched
+// copy of today's tag cannot win. dist-<date> sorts lexically == chronologically,
+// so the newest are the last `keep`; today's is always kept even if a manual
+// backfill carries an older date. Deleting a pruned tag on origin makes its
+// (parentless) commit unreachable, which is what keeps the repo bounded.
 try {
   git(["fetch", "-q", "origin", "+refs/tags/dist-*:refs/tags/dist-*"]);
 } catch {}
-const kept = [];
-const n = Math.min(Number(git(["rev-list", "--count", "HEAD"])), keep);
-for (let i = n - 1; i >= 0; i--) {
-  const sha = git(["rev-parse", `HEAD~${i}`]);
-  const tag = `dist-${dayOf(sha)}`;
-  git(["tag", "-f", tag, sha]);
-  if (!kept.includes(tag)) kept.push(tag);
-}
-for (const tag of git(["tag", "-l", "dist-*"]).split("\n").filter(Boolean)) {
-  if (kept.includes(tag)) continue;
+git(["tag", "-f", expectedTag, "HEAD"]);
+const all = [...new Set([...git(["tag", "-l", "dist-*"]).split("\n").filter(Boolean), expectedTag])].sort();
+const keepSet = new Set([...all.slice(-keep), expectedTag]);
+for (const tag of all) {
+  if (keepSet.has(tag)) continue;
   git(["tag", "-d", tag]);
-  try {
-    git(["push", "-q", "origin", `:refs/tags/${tag}`]);
-  } catch {}
+  gitSoft(["push", "-q", "origin", `:refs/tags/${tag}`]);
 }
-for (const tag of kept) {
-  // "+" force: a day re-published onto an amended commit re-points its tag,
-  // and a non-fast-forward tag update needs it.
-  git(["push", "-q", "--force", "origin", `+refs/tags/${tag}:refs/tags/${tag}`]);
-}
+// "+" force: a same-day rerun re-points today's tag, a non-fast-forward update.
+git(["push", "-q", "--force", "origin", `+refs/tags/${expectedTag}:refs/tags/${expectedTag}`]);
 
-// Self-check on the published state: the pointer is written before the commit
-// and the tag created after it, so re-read it from the committed tree and prove
-// what a consumer would resolve is what was actually tagged.
-const expectedTag = `dist-${date}`;
-const pointer = git(["show", `HEAD:${POINTER}`]);
-if (pointer !== expectedTag) {
-  throw new Error(`${POINTER} holds "${pointer}", expected "${expectedTag}"`);
-}
-if (!hasRef("rev-parse", "-q", "--verify", `refs/tags/${expectedTag}`)) {
-  throw new Error(`${POINTER} names tag ${expectedTag}, which this run did not create`);
+// Self-check on the published state: the committed tree is exactly the publish
+// set (an orphan commit cannot carry a stale entry, but prove it anyway), and
+// the day's tag points at the snapshot a consumer resolves it to.
+const tree = git(["ls-tree", "--name-only", "HEAD"]).split("\n").filter(Boolean).sort();
+const want = [...SNAPSHOT].sort();
+if (tree.join("\n") !== want.join("\n")) {
+  throw new Error(`published tree is [${tree.join(", ")}], expected [${want.join(", ")}]`);
 }
 if (git(["rev-parse", `${expectedTag}^{commit}`]) !== git(["rev-parse", "HEAD"])) {
   throw new Error(`tag ${expectedTag} does not point at the published snapshot HEAD`);

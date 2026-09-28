@@ -14,7 +14,6 @@ A daily snapshot of every GitHub-sourced skill on [skills.sh](https://www.skills
 ├── trending.json  the trending view's first 100 GitHub-sourced ids, in rank order
 ├── curated.jsonl  the officially featured skills, one row per owner
 ├── stats.json     the producing run's stats (counts, changes, failed ids)
-├── latest         the newest tag, one line — read it to pin
 └── skills/        one directory per skill, named after its id
     └── vercel-labs/skills/find-skills/   ({owner}/{repo}/{slug})
         └── SKILL.md
@@ -82,7 +81,7 @@ Both use the same id form as the index, so they join straight back into `skills.
 
 ## How to get the data
 
-Published daily by the [`fetch-skills.yml`](.github/workflows/fetch-skills.yml) workflow to the [`dist` branch](../../tree/dist) — each commit is a complete snapshot at the branch root.
+Published daily by the [`fetch-skills.yml`](.github/workflows/fetch-skills.yml) workflow to the [`dist` branch](../../tree/dist) — its tip is always a complete snapshot at the branch root (a single parentless commit, replaced each run; older days live in the `dist-<date>` tags).
 
 ### Fetch individual files
 
@@ -90,12 +89,11 @@ No clone, no auth. `dist` always serves the newest snapshot; swap it for a `dist
 
 ```bash
 BASE=https://raw.githubusercontent.com/skill-one/skills-sh-mirror
-latest=$(curl -s $BASE/dist/latest)
-curl -sO $BASE/$latest/skills.jsonl                    # the index: one row per skill
-curl -sO $BASE/$latest/skills/vercel-labs/skills/find-skills/SKILL.md   # any skill file, by id
+curl -sO $BASE/dist/skills.jsonl                    # the index: one row per skill
+curl -sO $BASE/dist/skills/vercel-labs/skills/find-skills/SKILL.md   # any skill file, by id
 ```
 
-`latest` is one line of plain text holding the tag (`dist-2026-09-11`) — cache by tag, since it is what changes when a new day lands. Resolve it from `dist`: raw's ~5-minute cache is the worst-case lag, and nothing busts it; via jsDelivr instead, it is a 12-hour branch cache (7 days in the browser).
+Fetch from `dist` for the newest snapshot, or replace `dist` with a `dist-<date>` tag to pin a day and cache by that tag (a tag never changes once published). raw's ~5-minute branch cache is the worst-case lag on `dist`, and nothing busts it; via jsDelivr instead, it is a 12-hour branch cache (7 days in the browser).
 
 ### Clone the whole snapshot
 
@@ -105,10 +103,10 @@ Get everything in one shot, ready for offline use:
 git clone --depth 1 -b dist https://github.com/skill-one/skills-sh-mirror.git
 ```
 
-To pin to a day, clone the `dist-<date>` tag instead (resolve the newest one as shown above):
+To pin to a day, clone a `dist-<date>` tag instead — list the tagged days with `git ls-remote --tags --refs https://github.com/skill-one/skills-sh-mirror.git 'dist-*'` (the newest sorts last):
 
 ```bash
-git clone --depth 1 -b "$latest" https://github.com/skill-one/skills-sh-mirror.git
+git clone --depth 1 -b dist-2026-09-11 https://github.com/skill-one/skills-sh-mirror.git
 ```
 
 Snapshots are published by GitHub Actions — publish now with `gh workflow run fetch-skills.yml`. To produce the data yourself: `node scraper.mjs` — see [DEVELOPING.md](DEVELOPING.md).

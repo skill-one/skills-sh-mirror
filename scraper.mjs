@@ -244,45 +244,22 @@ async function fetchCurated(api) {
   }));
 }
 
-// Previous run's index drives resume: for skills whose directory is already
-// on disk it remembers hash/fetchedAt/audits without re-fetching them.
-async function loadPrevIndex() {
+// The previous run's `<file>` (a JSONL of objects) as a Map keyed by `key`, or
+// an empty Map when it is missing or unreadable. This is what drives resume and
+// carry-over across runs: the index pins fetchedAt and reuses unchanged audit
+// results and last-good content, repos.jsonl keeps the previous row of a repo
+// whose GitHub request failed, and owners.jsonl caches avatars by URL. Rows
+// carry no local paths — a skill's directory and an owner's avatar copy are both
+// derivable (dirName / avatarPath).
+const loadPrevJsonl = async (file, key) => {
   try {
-    const text = await readFile(path.join(OUT_DIR, "skills.jsonl"), "utf8");
+    const text = await readFile(path.join(OUT_DIR, file), "utf8");
     const rows = text.split("\n").filter(Boolean).map((line) => JSON.parse(line));
-    return new Map(rows.map((row) => [row.id, row]));
+    return new Map(rows.map((row) => [row[key], row]));
   } catch {
     return new Map();
   }
-}
-
-// Previous run's repos.jsonl drives carry-over: a repo whose GitHub request
-// failed this run keeps its previous row; a repo fetched for the first time
-// whose request failed is simply absent until the next run succeeds.
-async function loadPrevRepos() {
-  try {
-    const text = await readFile(path.join(OUT_DIR, "repos.jsonl"), "utf8");
-    const rows = text.split("\n").filter(Boolean).map((line) => JSON.parse(line));
-    return new Map(rows.map((row) => [row.repo, row]));
-  } catch {
-    return new Map();
-  }
-}
-
-// Previous run's owners.jsonl drives avatar caching: while a GitHub avatar
-// URL (its ?v= parameter bumps on change) is unchanged and the file is on
-// disk, it is not re-downloaded; a failed download keeps the previous row.
-// Rows carry no local path: the copy's path is derivable from the owner
-// alone (avatarPath).
-async function loadPrevOwners() {
-  try {
-    const text = await readFile(path.join(OUT_DIR, "owners.jsonl"), "utf8");
-    const rows = text.split("\n").filter(Boolean).map((line) => JSON.parse(line));
-    return new Map(rows.map((row) => [row.owner, row]));
-  } catch {
-    return new Map();
-  }
-}
+};
 
 // Returns the index row for the skill, or null when the skill is left out of
 // the index: duplicates (stale content removed too) and skills without an
@@ -396,9 +373,9 @@ await mkdir(path.join(OUT_DIR, "skills"), { recursive: true });
 
 console.error(`[1/6] Fetching leaderboard from ${API_BASE} ...`);
 const { skills, nonGithub } = await fetchLeaderboard(skillsApi);
-const prevIndex = await loadPrevIndex();
-const prevRepos = await loadPrevRepos();
-const prevOwners = await loadPrevOwners();
+const prevIndex = await loadPrevJsonl("skills.jsonl", "id");
+const prevRepos = await loadPrevJsonl("repos.jsonl", "repo");
+const prevOwners = await loadPrevJsonl("owners.jsonl", "owner");
 
 console.error(`[2/6] Fetching trending top ${TRENDING_COUNT} (github-sourced) from ${API_BASE} ...`);
 const { ids: trending, nonGithub: trendingNonGithub } = await fetchTrending(skillsApi);
@@ -549,7 +526,7 @@ const fetchAvatar = async (url) => {
       continue;
     }
     if (!res.ok) throw new Error(`HTTP ${res.status} (${url})`);
-    return { bytes: Buffer.from(await res.arrayBuffer()), type: res.headers.get("content-type") ?? "" };
+    return Buffer.from(await res.arrayBuffer());
   }
 };
 
@@ -572,21 +549,14 @@ const avatarWorker = async () => {
     const owner = ownerSet[ownerIndex++];
     const prev = prevOwners.get(owner);
     const avatarUrl = ownerAvatars.get(owner) ?? prev?.avatarUrl ?? null;
-    const rel = avatarPath(owner);
-    const file = path.join(OUT_DIR, rel);
-    // One-time migration from the old content-type-driven names ({owner}.jpg
-    // / {owner}.png with a per-row path field): rename into the fixed name so
-    // the URL cache below keeps holding without a re-download.
-    if (prev?.avatar && prev.avatar !== rel && (await exists(path.join(OUT_DIR, prev.avatar)))) {
-      await rename(path.join(OUT_DIR, prev.avatar), file).catch(() => {});
-    }
+    const file = path.join(OUT_DIR, avatarPath(owner));
     if (!avatarUrl) {
       ownerRows.set(owner, { owner, avatarUrl: null });
     } else if (prev?.avatarUrl === avatarUrl && (await exists(file))) {
       ownerRows.set(owner, { owner, avatarUrl }); // cached: URL unchanged, copy on disk
     } else {
       try {
-        const { bytes } = await fetchAvatar(`${avatarUrl}${avatarUrl.includes("?") ? "&" : "?"}size=96`);
+        const bytes = await fetchAvatar(`${avatarUrl}${avatarUrl.includes("?") ? "&" : "?"}size=96`);
         await writeFile(`${file}.tmp`, bytes);
         await rename(`${file}.tmp`, file);
         ownerRows.set(owner, { owner, avatarUrl });
@@ -606,8 +576,8 @@ await atomicWrite(
   path.join(OUT_DIR, "owners.jsonl"),
   ownersOut.map((row) => JSON.stringify(row)).join("\n") + (ownersOut.length ? "\n" : ""),
 );
-// Files no row references anymore (legacy content-type-named copies, a
-// failed run's stray) are pruned, keeping avatars/ exactly the derivable set.
+// Files no row references anymore (an owner that left the index, a failed
+// run's stray) are pruned, keeping avatars/ exactly the derivable set.
 const referencedAvatars = new Set(ownersOut.filter((r) => r.avatarUrl).map((r) => avatarPath(r.owner)));
 for (const entry of (await readdir(avatarDir).catch(() => []))) {
   if (!referencedAvatars.has(`avatars/${entry}`)) await rm(path.join(avatarDir, entry), { force: true });

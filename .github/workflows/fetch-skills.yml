@@ -80,14 +80,13 @@ jobs:
       - name: Verify dataset
         run: node verify.mjs
 
-      # Data is published to the dist branch: one commit per day, history
-      # pruned to the newest 30 commits (publish.mjs's default --window, so
-      # about a month of snapshots), each retained snapshot tagged
-      # dist-<date>. The mechanics live in publish.mjs so tests can exercise
-      # them offline; the snapshot sits at the branch root: skills/,
+      # Data is published to the dist branch as a single parentless (orphan)
+      # commit holding exactly the snapshot at the branch root: skills/,
       # skills.jsonl, repos.jsonl, owners.jsonl, avatars/, trending.json,
-      # curated.jsonl, stats.json and latest (a one-line pointer holding the
-      # snapshot's own tag).
+      # curated.jsonl and stats.json. dist always serves the newest snapshot;
+      # the dist-<date> tags pin a day, bounded to the newest 30 (publish.mjs's
+      # default --window, so about a month). The mechanics live in publish.mjs
+      # so tests can exercise them offline.
       - name: Publish to dist branch
         run: |
           git config user.name "github-actions[bot]"

@@ -14,7 +14,6 @@ English: [README.md](README.md) · 开发指南(运行 / 校验 / 扩展):[DEVEL
 ├── trending.json  trending 榜单中前 100 个 GitHub 来源 id,按榜单顺序
 ├── curated.jsonl  官方精选技能,每个 owner 一行
 ├── stats.json     产出该快照那一次运行的统计(条目数、变化数、失败明细)
-├── latest         最新 tag,一行 —— 读它就能 pin
 └── skills/        每个技能一个目录,目录名即技能 id
     └── vercel-labs/skills/find-skills/   ({owner}/{repo}/{slug})
         └── SKILL.md
@@ -82,20 +81,19 @@ English: [README.md](README.md) · 开发指南(运行 / 校验 / 扩展):[DEVEL
 
 ## 如何获取数据
 
-由 [`fetch-skills.yml`](.github/workflows/fetch-skills.yml) 工作流每日发布到 [`dist` 分支](../../tree/dist)——每个提交都是分支根目录下的完整快照。
+由 [`fetch-skills.yml`](.github/workflows/fetch-skills.yml) 工作流每日发布到 [`dist` 分支](../../tree/dist)——分支顶端始终是根目录下的一份完整快照(单个无父提交,每轮替换;更早的日期保存在 `dist-<日期>` 标签里)。
 
 ### 获取单个文件
 
-无需克隆、无需认证。`dist` 始终是最新快照;换成 `dist-<日期>` 标签即可钉住某天(最新 30 天有标签):
+无需克隆、无需认证。`dist` 始终是最新快照;换成 `dist-<日期>` 标签即可钉住某天(最新 30 天有标签,且标签名不含 `/`——`dist/<日期>` 作为 URL ref 会 404):
 
 ```bash
 BASE=https://raw.githubusercontent.com/skill-one/skills-sh-mirror
-latest=$(curl -s $BASE/dist/latest)
-curl -sO $BASE/$latest/skills.jsonl                                    # 索引:每个技能一行
-curl -sO $BASE/$latest/skills/vercel-labs/skills/find-skills/SKILL.md  # 按 id 取任意技能文件
+curl -sO $BASE/dist/skills.jsonl                                    # 索引:每个技能一行
+curl -sO $BASE/dist/skills/vercel-labs/skills/find-skills/SKILL.md  # 按 id 取任意技能文件
 ```
 
-`latest` 就是一行纯文本的标签(`dist-2026-09-11`)——按标签缓存,因为新的一天到来时,变的只有它。解析一律从 `dist` 取:raw 的约 5 分钟缓存就是最坏延迟,绕不过去;若改用 jsDelivr 取,那是 12 小时的分支缓存(浏览器里 7 天)。
+从 `dist` 取即最新快照;把 `dist` 换成某个 `dist-<日期>` 标签即可钉住那一天,并按标签缓存(标签一经发布便不再变化)。`dist` 上 raw 的约 5 分钟分支缓存就是最坏延迟,绕不过去;若改用 jsDelivr 取,那是 12 小时的分支缓存(浏览器里 7 天)。
 
 ### 克隆整份快照
 
@@ -105,10 +103,10 @@ curl -sO $BASE/$latest/skills/vercel-labs/skills/find-skills/SKILL.md  # 按 id 
 git clone --depth 1 -b dist https://github.com/skill-one/skills-sh-mirror.git
 ```
 
-要固定到某天,改为克隆 `dist-<日期>` 标签(最新标签的解析方法见上):
+要固定到某天,改为克隆某个 `dist-<日期>` 标签——用 `git ls-remote --tags --refs https://github.com/skill-one/skills-sh-mirror.git 'dist-*'` 列出所有已打标签的日期(最新的排在最后):
 
 ```bash
-git clone --depth 1 -b "$latest" https://github.com/skill-one/skills-sh-mirror.git
+git clone --depth 1 -b dist-2026-09-11 https://github.com/skill-one/skills-sh-mirror.git
 ```
 
 快照由 GitHub Actions 发布——随时手动触发:`gh workflow run fetch-skills.yml`;也可以自己生成:`node scraper.mjs` —— 见 [DEVELOPING.zh-CN.md](DEVELOPING.zh-CN.md)。
