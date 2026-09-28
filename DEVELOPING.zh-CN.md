@@ -1,74 +1,28 @@
 # 开发指南
 
-如何运行、校验和扩展爬虫。使用数据请看 [README.zh-CN.md](README.zh-CN.md) · English: [DEVELOPING.md](DEVELOPING.md)
+如何运行、校验和扩展爬虫。使用数据:[README.zh-CN.md](README.zh-CN.md) · English: [DEVELOPING.md](DEVELOPING.md)
 
 ## 工作原理
 
-1. `GET /api/v1/skills?per_page=500&page=N` —— 分页遍历排行榜(全站约 17 次请求)。只保留 GitHub 来源的条目(`sourceType: "github"`);well-known(域名)来源没有可归属的仓库,直接跳过并计入 `nonGithub`。
-2. `GET /api/v1/skills?view=trending&per_page=200` —— 单次请求拉取 trending 榜单;200 的深度足以在跳过 well-known 条目(与排行榜一致)后仍覆盖前 100 个 GitHub 来源的截断点。以 id 数组(按上游榜单顺序)写入 `trending.json`,id 与排行榜一样做规范化处理。
-3. `GET /api/v1/skills/curated` —— 官方精选的技能,按 owner 分组。写入 `curated.jsonl`(每个 owner 一行,行内容原样保留——不做来源过滤,精选名单由上游决定),每个技能条目精简为规范化 id;外层的 `generatedAt` / `totalOwners` / `totalSkills` 被去掉(计数可由行推导)。
-4. `GET https://api.github.com/repos/{owner}/{repo}` —— 获取每个去重后仓库的元信息(约 1200 次请求:大量技能共享同一仓库)。响应本身就携带 `repos.jsonl` 记录的全部字段(`stargazers_count`、`description`、`pushed_at`),外加头像阶段需要的 `owner` 信息,因此这一步不产生额外请求。仓库 404(已删除)时三个字段全部置为 `null`;其他失败则保留上一轮的行。
-5. `GET /api/v1/skills/{source}/{skill}` —— 获取每个技能的文件(`files` 数组携带完整文本)。文件先写临时目录再原子重命名到位,因此「目录存在」就意味着「内容完整」。
-6. 同步 owner 头像 —— 对索引背后每个仓库的 owner,把 GitHub 头像下载到 `avatars/{owner}.png`(`size=96` 控制体积;`.png` 后缀固定,与响应的 content-type 无关——图片解码靠嗅探文件内容,而路径要可由 owner 单独推导就需要固定文件名),并写入 `owners.jsonl`(每个 owner 一行,只含上游 URL——本地副本的路径可由 owner 单独推导)。owner 信息搭在第 4 步的仓库响应上,下载走头像 CDN(无需 token、不受 API 限速),两者都不产生额外的 GitHub API 成本。行的 URL 未变化(GitHub 仅在头像变更时更新其 `?v=` 参数)且文件在盘时不发任何下载;下载失败时,若副本仍在盘上则沿用上一轮的行,否则将 `avatarUrl` 置为 `null`(下次运行重试)。
-7. 元数据合并成唯一的 `skills.jsonl` —— 每个已保存内容的技能一行,按 installs 降序,运行结束时原子写入。
-8. 写入 `stats.json` —— 本次运行的统计,随数据集一起发布。只保留无法从其他字段直接推导的信息:
+`node scraper.mjs [--out data]` 只访问 skills.sh,每轮从零重建全部产物:
 
-`trending.json` 与 `curated.jsonl` 中每行的 `skills` 数组都是纯 id 列表:索引刻意丢弃的每个技能级字段(`installs`、`url`,以及冗余的展示字段 `slug`、`name`、`source`、`sourceType`、`installUrl`)在这里同样丢弃,只留下规范化 id——关联回 `skills.jsonl` 的键。
+1. `GET /api/v1/skills?per_page=500&page=N`(约 17 次请求)—— 排行榜。只保留 GitHub 来源条目,每个 id 规范化为 `${source}/${去斜杠的 slug}`(`lib.mjs` 中的 `canonicalId`——skills.sh 以去斜杠形式作含斜杠 slug 的键);well-known(非 GitHub)来源与上游标记为重复的条目被跳过并计数。
+2. `GET /api/v1/skills?view=trending&per_page=200` —— 单次请求拉取 trending 榜单;前 100 个 GitHub 来源 id(按榜单顺序)写入 `trending.json`。
+3. `GET /api/v1/skills/curated` —— 官方精选伙伴;`curated.jsonl` 每个 owner 一行,技能条目精简为规范化 id(不做来源过滤)。
+4. 写入 `skills.jsonl`({ id, installs },按 installs 降序、并列按 id 升序)与 `README.md`——dist 分支的着陆页:文件说明 + 本轮运行统计(耗时与跳过计数),供人阅读。
 
-| 字段 | 含义 |
-|---|---|
-| `startedAt`、`finishedAt`、`durationMs` | 运行的开始 / 结束时间,以及两者的毫秒差 |
-| `limit`、`audits` | 运行配置(全量抓取时 `limit` 为 `null`) |
-| `leaderboardTotal` | 去重后的 GitHub 来源排行榜条目数 |
-| `nonGithub` | 因非 GitHub 来源被跳过的排行榜条目数 |
-| `githubRepos` | 本次去重后抓取仓库元信息的仓库数 |
-| `indexedRows` | `skills.jsonl` 的行数 |
-| `changed` | 本次内容版本发生变化的行数(首次抓取或上游 hash 变化)——恰好就是 `fetchedAt` 被重新打点的那些行 |
-| `added`、`removed` | 进入 / 离开索引的技能数:上游新上榜的,以及已下架的(行与内容目录一并删除;仅全量运行——`--limit` 运行会把未评估的行原样保留) |
-| `dropped`、`failed`、`carriedOver` | 各结果计数(`dropped` = 重复 / 上游无快照);`failedIds` 列出失败技能的 id |
-
-### 上游的 `hash`
-
-```
-hash = sha256( 按技能内各文件拼接,文件按路径「不区分大小写」排序:
-               utf8(相对技能根的路径) + 0x00 + 文件原始字节 + 0x00 )
-```
-
-- 顺序很关键,且用的是不区分大小写的路径排序(ICU base strength 归一化),不是字节序:按字节序只能对上约 43% 的行。
-- 它覆盖的是快照的文件集合——也就是 `skills/` 镜像的那套文件——不掺入任何其他信息:没有 id、没有仓库前缀、没有文件大小或权限。快照不一定等于源仓库该目录的全部文件(上游会漏掉部分媒体/二进制文件)。
-- skills.sh 文档只写了「技能文件内容的 SHA-256」,以上是实测反推:从 `skills/` 重算可复现 2026-09-12 快照 8993 行中的 8935 行;而抽样的不一致项在改用源仓库文件后全部对上。
-- 那 58 条不一致是镜像保真度的限制,不是算法意外:API 的 `contents` 是 JSON 字符串(开头的 UTF-8 BOM 被去掉、非 UTF-8 字节变成 U+FFFD),`safeSegment` 又会改写 `[A-Za-z0-9._-]` 之外的路径字符(中文文件名、空格)——两者都改动了参与哈希的字节或名字。
-- 复现只需约 10 行:读目录、用 `Intl.Collator("en", { sensitivity: "base" })` 按相对路径排序、把 `路径 + NUL + 字节 + NUL` 依次喂进 `createHash("sha256")`。
+每个产物先写 `<path>.tmp` 再用 rename(2) 原子换入,崩溃绝不会留下写了一半的文件。索引就是排行榜本身:不抓任何技能内容,上游下架的技能自然离开索引。瞬时故障(429/5xx、网络错误)按退避重试并遵循 `Retry-After`;`4xx` 是确定性的,一律不重试。
 
 ## 前置条件
 
-Node >= 24、Vercel OIDC token(任意 Vercel 项目均可)和 GitHub token(用于抓 star,仅有公开仓库读权限即可):
+Node >= 24 和一个 Vercel OIDC token(任意 Vercel 项目均可):
 
 ```bash
 npm i -g vercel
 vercel link && vercel env pull   # 将 VERCEL_OIDC_TOKEN 写入 .env.local,约 12 小时有效
-echo 'GITHUB_TOKEN=ghp_…' >> .env.local   # 或自行 export GITHUB_TOKEN
 ```
 
-OIDC token 过期后(HTTP 401)重新执行 `vercel env pull` 即可。切勿提交 `.env.local`。在 GitHub Actions 中,同一个 token 存为仓库 secret `GH_TOKEN` 并映射为同名环境变量 `GITHUB_TOKEN`(secret 名不允许以 `GITHUB_` 开头)——内置 `GITHUB_TOKEN` 限额为每仓库 1000 次/小时,不够约 1200 次 star 请求。
-
-## 运行
-
-```bash
-node scraper.mjs                          # 全量抓取到 ./data(约 8400 + 1200 次请求,30–45 分钟)
-node scraper.mjs --limit 20               # 只抓前 20 个技能(快速端到端验证;limit 之外的技能
-                                          # 沿用上一轮的索引行,因此在已有数据集上运行也安全)
-node scraper.mjs --out ./data             # 自定义输出目录
-node scraper.mjs --audits                 # 同时抓取安全审计结果(请求量翻倍)
-```
-
-- skills.sh 限速 600 次/分钟,GitHub 认证 REST API 限速 5000 次/小时;脚本分别以 590 次/分钟和 80 次/分钟自限(共享并发 10),按 `Retry-After` 重试 `429` 和 `5xx` 及瞬时网络错误;`4xx` 一律不重试——它们是确定性的。
-- 每次运行都全量重新下载并重写全部内容(约 8400 次 skills.sh 请求)。上次的 `skills.jsonl` 只用来固定 `fetchedAt`:上游 hash 未变化的技能保留「首次抓取该内容版本那一次运行」的 `fetchedAt`。中断重跑可续抓,上游内容变更会被自动跟进。
-- 仓库元信息(stars / description / pushedAt)每次运行按去重后的仓库全量重抓(约 1200 次 GitHub 请求),写入 `repos.jsonl`——索引各行背后的仓库每个一行,按 repo 升序(顺序确定,每日快照的 diff 因此每个仓库最多一行)。消费方按 `repo` 键 join 不会落空。仓库请求失败沿用上一轮的行(首次抓取就失败则暂缺,下次成功后补齐);仓库 404 时字段全部置 `null`。`--limit` 之外的仓库同样沿用上一轮的行。
-- owner 头像仅在新 owner、头像 URL 变化(GitHub 在头像变更时更新 URL 的 `?v=` 参数)或本地副本缺失时下载;否则直接复用现有文件,不发请求。下载失败时,若副本仍在盘上则沿用上一轮的行——首次失败则将 `avatarUrl` 置为 `null`,下次运行重试(因此 `avatarUrl` 非空当且仅当 `avatars/{owner}.png` 存在)。`avatars/` 会被清理为恰好这组可推导的副本文件。
-- 索引只包含 GitHub 来源且内容已落盘的技能:well-known(域名)来源在排行榜阶段即被跳过(计入 `nonGithub`);重复技能、上游无快照的技能不会出现在索引中(记录日志、计入 `Done:` 汇总、下次自动重试)。抓取失败的技能会沿用上一次的索引行和内容目录,镜像继续提供最后一份可用内容,且「行 ⟺ 目录」不变式不被破坏;从未成功抓取过的技能则不进索引。使用 `--limit` 时,limit 之外的技能同样沿用上一轮的索引行(limit 只约束抓取什么,不约束索引;下次全量运行会重新评估它们)。以上均计入 `carried over`。进程仅在系统性故障(鉴权、排行榜、索引写入)时以非零码退出。
-- 使用 `--audits` 时,只对内容 hash 变化的技能重新抓取审计结果;hash 未变的技能直接沿用上一次的结果,不发请求。
-- slug 规范化:上游的 slug 本身可能含 `/`(如 `claude-office-skills/skills/facebook/meta-ads`)。skills.sh 以 `${source}/${slug}`(slug 中的 `/` 去掉,如 `…/facebookmeta-ads`)作为这类技能的键——这是其详情 API 对多段 slug 唯一能寻址的形式。因此爬虫在去重之前,把每个 GitHub 来源条目的 id 规范化为 `${source}/${去斜杠的 slug}`(`lib.mjs` 中的 `canonicalId`);两个原始 id 理论上可能去斜杠后相同,此时保留先出现的那个。slug 本身不含 `/` 的 id(绝大多数)原样通过。
+token 过期后(HTTP 401)重新执行 `vercel env pull` 即可。切勿提交 `.env.local`。
 
 ## 验证
 
@@ -76,23 +30,11 @@ node scraper.mjs --audits                 # 同时抓取安全审计结果(请�
 |---|---|---|---|
 | 1. 离线测试 | 爬取逻辑是否正确? | 无(mock API) | `npm test` |
 | 2. 产物校验器 | 数据集是否完整? | 无(不联网) | `node verify.mjs --out data` |
-| 3. 真实 API 运行 | 线上接口行为是否未变? | token | `node scraper.mjs --limit 5 && node verify.mjs` |
+| 3. 真实 API 运行 | 线上接口行为是否未变? | token | `node scraper.mjs && node verify.mjs` |
 
-`verify.mjs` 是数据集被信任或上传前的门禁:每行可解析、id 唯一、按 installs 降序(并列时按 id 升序)、字段格式正确、无两行映射到同一目录名、索引行与磁盘目录双向严格对应(每行都有目录、无孤儿目录)、`stats.json` 存在且可解析并与索引一致、`trending.json` 是格式正确的 id 列表、`curated.jsonl` 是格式正确的每 owner 一行、`repos.jsonl` 格式正确、按 repo 排序且与索引的仓库集合精确一致、`owners.jsonl` + `avatars/` 格式正确且与索引的 owner 集合一致(每个被引用的头像文件都存在、无孤儿文件)、无 `.tmp` 残留。本地快速上手:
-
-```bash
-npm test                          # 快速,无需密钥
-npm run scrape && npm run verify  # 全量抓取 + 完整性校验
-```
+`verify.mjs` 是数据集被信任或发布前的门禁:每行可解析且恰好只有 `id` + `installs`(id 为规范化的 `owner/repo/slug`,installs 非负)、id 唯一且排序确定(installs 降序、并列按 id 升序)、`trending.json` 是 id 数组、`curated.jsonl` 是格式正确的 owner 行、`README.md` 存在、无 `.tmp` 残留。
 
 ## CI
 
-- **`ci.yml`**(push / PR):层 1,跑在 Node 24 上。无需 secrets,fork 的 PR 也能运行。
-- **`fetch-skills.yml`**——发布器。发布完全自动化,没有本地发布路径。每日 18:00 UTC 运行,也可随时手动触发:
-
-  ```bash
-  gh workflow run fetch-skills.yml   # 立即发布一份新快照
-  gh run watch <run-id>              # 监视运行
-  ```
-
-  每次运行先把上一份 `dist` 快照还原进 `data/`——其 `skills.jsonl` 里的上游 hash 用来固定 `fetchedAt`、沿用未变化的审计结果、保留抓取失败技能的上一次内容,并让 `changed`/`added`/`removed` 计数描述的是本次运行而非空工作区;`repos.jsonl` 与 `owners.jsonl`/`avatars/` 则为 GitHub 元数据的携带逻辑提供种子(仓库请求或头像下载失败保留上一轮的行;URL 未变化的头像不会重新下载)——然后全量抓取作为每日金丝雀 → `verify.mjs` → `publish.mjs` 强制推送 [`dist` 分支](README.zh-CN.md#如何获取数据),即一个无父(orphan)提交,其树恰为发布清单——分支永远只是最新快照,而非历史(同日重复运行只是替换该提交并把当天的标签重新指向它;由于提交从空索引开始,过时条目不会残留)。按天 pin 依靠 `dist-<日期>` 标签(标签名不含 `/`,以便在 raw URL 中解析),数量以最新的 `--window` 个为界(默认 30,一天一个,约一个月);更旧的标签会从 origin 删除,其无父提交随之不可达,仓库因此保持有界。消费者从 `dist` 分支根目录取最新快照,从某个 `dist-<日期>` 标签取更早的某天(见 [README.zh-CN.md](README.zh-CN.md#如何获取数据));若已发布的树不恰为发布清单、或当天标签没有指向它,运行会失败。工作流用长效 `VERCEL_TOKEN` 现场换取新鲜 OIDC token(所需 secrets:`VERCEL_TOKEN`、`VERCEL_ORG_ID`、`VERCEL_PROJECT_ID`——后两项在 `vercel link` 后从 `.vercel/project.json` 复制);抓 star 读取仓库 secret `GH_TOKEN`(个人访问 token,映射为环境变量 `GITHUB_TOKEN`——用 `gh secret set GH_TOKEN` 配置)。
+- **`ci.yml`**(push / PR):层 1,跑在 Node 24 上——无需 secrets,fork 的 PR 也能运行。
+- **`fetch-skills.yml`**:每日 18:00 UTC 金丝雀 + 发布器(`gh workflow run fetch-skills.yml` 可手动触发)。用长效 `VERCEL_TOKEN` 现场换取新 OIDC token(所需 secrets:`VERCEL_TOKEN`、`VERCEL_ORG_ID`、`VERCEL_PROJECT_ID`)→ `node scraper.mjs` → `node verify.mjs` → `node publish.mjs`,后者将 `dist` 分支强制推送为恰为发布清单的单个无父提交,重指 `dist-<日期>` 标签,并裁剪超出 `--window`(默认 30)的旧标签。若已发布的树不恰为发布清单、或标签没有指向它,运行会失败。

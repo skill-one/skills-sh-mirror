@@ -1,30 +1,21 @@
-// Publishes the scraped snapshot in data/ to the dist branch. The workflow
-// runs this after scrape + verify; it is also runnable by hand:
+// Publishes the scraped snapshot in data/ to the dist branch:
 //
 //   node publish.mjs [--date YYYY-MM-DD] [--window N]   (date defaults to today, UTC)
 //
-// The dist branch is only ever the newest snapshot: each run force-pushes a
-// single parentless (orphan) commit whose tree is exactly the publish set.
-// Per-day pinning lives in the dist-<date> tags, not in branch history — a
-// consumer resolves the newest snapshot from the branch root and an older day
-// from its tag. Keeping history off the branch is what makes this simple: there
-// is nothing to prune or re-root, no stale entry can ride along (an orphan
-// commit starts from an empty index), and the commit is never empty (no parent
-// to diff against), so a day whose dataset is unchanged still publishes.
-//
-// The tags are what bound the repo: the newest N (N = --window, default 30 — one
-// per day, so about a month) are kept and the rest deleted on origin, which
-// makes their commits unreachable so they can be garbage collected. The tag name
-// is deliberately slash-free: dist/<date> in a raw.githubusercontent.com URL
-// resolves as the dist branch plus a path (the shorter ref wins) and 404s, while
-// dist-<date> is unambiguous and works in single-file raw URLs.
+// Each run force-pushes a single parentless (orphan) commit whose tree is
+// exactly the publish set — dist is only ever the newest snapshot, never a
+// history (a same-day rerun replaces the commit and re-points the day's tag).
+// Per-day pinning lives in the slash-free dist-<date> tags (slash-free so the
+// ref resolves in raw URLs): the newest `--window` (default 30, about a
+// month) are kept and the rest deleted on origin, which makes their commits
+// unreachable so the repo stays bounded.
 
 import { renameSync, rmSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { argValue } from "./lib.mjs";
 
 const DEFAULT_WINDOW = 30;
-const SNAPSHOT = ["skills", "skills.jsonl", "repos.jsonl", "owners.jsonl", "avatars", "trending.json", "curated.jsonl", "stats.json"];
+const SNAPSHOT = ["README.md", "skills.jsonl", "trending.json", "curated.jsonl"];
 
 const git = (args, opts = {}) => {
   const r = spawnSync("git", args, { encoding: "utf8", ...opts });

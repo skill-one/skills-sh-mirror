@@ -16,8 +16,8 @@ concurrency: skills-fetch
 jobs:
   fetch:
     runs-on: ubuntu-latest
-    # Full scrape (~8.4k skills.sh requests + ~1.2k GitHub star requests, 30-45 min).
-    timeout-minutes: 90
+    # Full scrape: ~20 skills.sh list requests, done in about a minute.
+    timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@v4
@@ -26,7 +26,7 @@ jobs:
         with:
           node-version: 24
 
-      # Layer 1: deterministic, secret-free tests must pass before touching the API.
+      # Deterministic, secret-free tests must pass before touching the API.
       - name: Offline tests
         run: npm test
 
@@ -52,41 +52,21 @@ jobs:
       - name: Reset .gitignore
         run: git checkout -- .gitignore
 
-      # Seed the scraper with the previous snapshot: the upstream hashes in
-      # its skills.jsonl pin fetchedAt, reuse unchanged audit results, keep
-      # the last good content of failed fetches, and make the changed/added/
-      # removed counters describe this run instead of the empty workspace.
-      # repos.jsonl + owners.jsonl/avatars seed the GitHub-metadata carry-over:
-      # a failed repo request or avatar download keeps the previous row, and
-      # avatars whose URL (its ?v=) is unchanged are not re-downloaded.
-      # No-op on the very first run (no dist branch yet).
-      - name: Restore previous snapshot
-        run: |
-          if git fetch -q origin dist; then
-            mkdir -p data
-            git archive origin/dist -- skills skills.jsonl stats.json repos.jsonl owners.jsonl avatars | tar -x -C data
-          fi
-
+      # Every artifact is rebuilt from scratch each run; nothing is restored.
       - name: Scrape all skills
         run: node scraper.mjs
-        env:
-          # The built-in GITHUB_TOKEN is capped at 1,000 req/hr per repository —
-          # the star phase needs ~1.2k. GH_TOKEN is a repo secret holding the
-          # same kind of PAT used locally, mapped to the GITHUB_TOKEN env var
-          # the scraper reads (secret names may not start with GITHUB_).
-          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
 
-      # Layer 2: dataset invariants gate the publish.
+      # Dataset invariants gate the publish.
       - name: Verify dataset
         run: node verify.mjs
 
       # Data is published to the dist branch as a single parentless (orphan)
-      # commit holding exactly the snapshot at the branch root: skills/,
-      # skills.jsonl, repos.jsonl, owners.jsonl, avatars/, trending.json,
-      # curated.jsonl and stats.json. dist always serves the newest snapshot;
-      # the dist-<date> tags pin a day, bounded to the newest 30 (publish.mjs's
-      # default --window, so about a month). The mechanics live in publish.mjs
-      # so tests can exercise them offline.
+      # commit holding exactly the snapshot at the branch root: README.md (the
+      # landing page, with this run's stats), skills.jsonl, trending.json and
+      # curated.jsonl. dist always serves the newest snapshot; the dist-<date>
+      # tags pin a day, bounded to the newest 30 (publish.mjs's default
+      # --window, so about a month). The mechanics live in publish.mjs so
+      # tests can exercise them offline.
       - name: Publish to dist branch
         run: |
           git config user.name "github-actions[bot]"

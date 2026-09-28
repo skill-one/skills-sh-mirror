@@ -1,100 +1,40 @@
 # Developing
 
-How to run, verify, and extend the scraper. For using the data, see [README.md](README.md) · 中文:[DEVELOPING.zh-CN.md](DEVELOPING.zh-CN.md)
+How to run, verify, and extend the scraper. Using the data: [README.md](README.md) · 中文:[DEVELOPING.zh-CN.md](DEVELOPING.zh-CN.md)
 
 ## How it works
 
-1. `GET /api/v1/skills?per_page=500&page=N` — paginate the leaderboard (~17 requests for the whole catalogue). Only github-sourced entries (`sourceType: "github"`) are kept; well-known (domain) sources have no repository to attribute and are counted in `nonGithub`.
-2. `GET /api/v1/skills?view=trending&per_page=200` — the trending view in a single request; deep enough that its first 100 GitHub-sourced entries cover the top-100 cutoff even after well-known entries are skipped (like at the leaderboard). Written to `trending.json` as an id array in upstream rank order, with the same canonical id normalization as the leaderboard's.
-3. `GET /api/v1/skills/curated` — the officially featured skills grouped by owner. Written to `curated.jsonl`, one row per owner (the row verbatim — no source filtering, the list is curated upstream), per-skill entries reduced to canonical ids; the wrapper's `generatedAt` / `totalOwners` / `totalSkills` are dropped (the counts are derivable from the rows).
-4. `GET https://api.github.com/repos/{owner}/{repo}` — fetch each unique repository's metadata (~1,200 requests: skills cluster on shared repos). The response already carries everything `repos.jsonl` records — `stargazers_count`, `description`, `pushed_at` — plus the `owner` info the avatar phase needs, so this phase costs no extra requests. A 404 (repo deleted) pins all three fields to `null`; any other failure keeps the previous run's row.
-5. `GET /api/v1/skills/{source}/{skill}` — fetch each skill's files (the `files` array carries the full text). They are written to a temp dir and renamed into place, so an existing directory is always complete.
-6. Sync owner avatars — for every owner behind an indexed repository, download the GitHub avatar into `avatars/{owner}.png` (`size=96` to keep copies small; the `.png` extension is fixed regardless of the response's content type — image decoding sniffs the payload, and a path derivable from the owner alone needs a fixed name) and write `owners.jsonl`, one row per owner with just the upstream URL — the local copy's path is derivable from the owner alone. The owner info rides on the repo responses of step 4, and the downloads hit the avatar CDN (no token, no API rate limit), so neither adds GitHub API cost. While a row's URL is unchanged (GitHub bumps its `?v=` parameter only when the avatar changes) and the file is on disk, nothing is downloaded; a failed download keeps the previous row when its copy is still on disk, and nulls `avatarUrl` otherwise (retried next run).
-7. Merge metadata into a single `skills.jsonl` — one row per skill with saved content, sorted by installs desc, written atomically at the end.
-8. Write `stats.json` — the run's stats, published alongside the dataset. Only fields not trivially derivable from the others:
+`node scraper.mjs [--out data]` contacts skills.sh only and rebuilds everything from scratch:
 
-Both `trending.json` and the per-owner `skills` arrays in `curated.jsonl` are plain id lists: every per-skill field the index deliberately drops (`installs`, `url`, and the redundant display data `slug`, `name`, `source`, `sourceType`, `installUrl`) is dropped there too, so only the canonical id — the join key back into `skills.jsonl` — survives.
+1. `GET /api/v1/skills?per_page=500&page=N` (~17 requests) — the leaderboard. Keeps github-sourced entries only, each normalized to the canonical id `${source}/${slug-without-slashes}` (`canonicalId` in `lib.mjs` — skills.sh keys slash slugs by the stripped form); well-known (non-GitHub) sources and upstream duplicate-flagged entries are skipped and counted.
+2. `GET /api/v1/skills?view=trending&per_page=200` — the trending view in one request; its first 100 github-sourced ids (in rank order) go to `trending.json`.
+3. `GET /api/v1/skills/curated` — the curated partners; one row per owner in `curated.jsonl`, per-skill entries reduced to canonical ids (no source filtering).
+4. Writes `skills.jsonl` ({ id, installs }, sorted by installs desc, ties by id) and `README.md` — the dist landing page: a file guide plus this run's stats (timing and the skip counters) for humans.
 
-| Field | Meaning |
-|---|---|
-| `startedAt`, `finishedAt`, `durationMs` | when the run started / ended, and the wall-clock difference in ms |
-| `limit`, `audits` | run configuration (`limit` is `null` for a full scrape) |
-| `leaderboardTotal` | github-sourced leaderboard entries after deduplication |
-| `nonGithub` | leaderboard entries skipped because they are not github-sourced |
-| `githubRepos` | unique repositories metadata-fetched this run |
-| `indexedRows` | lines in `skills.jsonl` |
-| `changed` | rows whose content version changed this run (first fetch or a new upstream hash) — exactly the rows whose `fetchedAt` was re-stamped |
-| `added`, `removed` | skills entering / leaving the index: newly listed upstream, and no longer listed (row and content directory deleted; full runs only — limited runs carry unevaluated rows over) |
-| `dropped`, `failed`, `carriedOver` | outcome counters (`dropped` = duplicate / no snapshot); `failedIds` lists the failed skill ids |
-
-### The upstream `hash`
-
-```
-hash = sha256( concat over the skill's files, in case-insensitive path order:
-               utf8(path relative to the skill root) + 0x00 + raw file bytes + 0x00 )
-```
-
-- Order matters and it is case-insensitive path order (ICU base-strength collation), not a byte sort; a byte sort matches only ~43% of rows.
-- It covers the snapshot's file set — the same set `skills/` mirrors — with nothing else mixed in: no id, no repo prefix, no sizes or modes. The snapshot is not always every file in the source repo (upstream leaves some media/binary files out).
-- skills.sh documents only "SHA-256 hash of the skill's file contents", so this was recovered empirically: recomputing it from `skills/` reproduces 8,935 of the 8,993 rows of the 2026-09-12 snapshot, and every sampled exception once the files come from the source repository instead.
-- The 58 exceptions are fidelity limits of the mirror, not of the algorithm: the API's `contents` is a JSON string (a leading UTF-8 BOM is dropped, non-UTF-8 bytes arrive as U+FFFD), and `safeSegment` rewrites path characters outside `[A-Za-z0-9._-]` (CJK file names, spaces) — both change bytes or names that the digest covers.
-- Reproducing it is ~10 lines: read the directory, sort by `Intl.Collator("en", { sensitivity: "base" })` on the relative paths, feed `path + NUL + bytes + NUL` to `createHash("sha256")`.
+Every artifact is written to `<path>.tmp` first and swapped in via rename(2), so a crash can never leave a half-updated file. The index is the leaderboard itself: no skill content is fetched, and a skill upstream stops listing simply leaves the index. Transient failures (429/5xx, network errors) are retried with backoff, honoring `Retry-After`; 4xx are deterministic and never retried.
 
 ## Prerequisites
 
-Node >= 24, a Vercel OIDC token (any Vercel project works), and a GitHub token
-(for the star counts; public repo read access is enough):
+Node >= 24 and a Vercel OIDC token (any Vercel project works):
 
 ```bash
 npm i -g vercel
 vercel link && vercel env pull   # writes VERCEL_OIDC_TOKEN into .env.local, valid ~12h
-echo 'GITHUB_TOKEN=ghp_…' >> .env.local   # or export GITHUB_TOKEN yourself
 ```
 
-Re-run `vercel env pull` when the OIDC token expires (HTTP 401). Never commit `.env.local`. In GitHub Actions, the same token is stored as the repo secret `GH_TOKEN` and mapped to the same `GITHUB_TOKEN` env var (secret names may not start with `GITHUB_`) — the built-in `GITHUB_TOKEN` is capped at 1,000 req/hr per repository, too few for the ~1,200 star requests.
+Re-run `vercel env pull` when the token expires (HTTP 401). Never commit `.env.local`.
 
-## Run
-
-```bash
-node scraper.mjs                          # full scrape into ./data (~8,400 + ~1,200 requests, 30–45 min)
-node scraper.mjs --limit 20               # first 20 skills only (quick end-to-end check;
-                                          # rows outside the limit are carried over, so this
-                                          # is safe to run against an existing dataset)
-node scraper.mjs --out ./data             # custom output directory
-node scraper.mjs --audits                 # also fetch security audits (doubles request count)
-```
-
-- skills.sh allows 600 req/min and GitHub's authenticated REST API 5,000 req/hr; the scraper paces itself at 590/min and 80/min respectively (shared concurrency 10) and retries `429` and `5xx` honoring `Retry-After`, plus transient network errors. `4xx` are never retried: they are deterministic.
-- Content is fully re-downloaded and rewritten every run (~8,400 skills.sh requests). The previous `skills.jsonl` only pins `fetchedAt`: skills whose upstream hash is unchanged keep the `fetchedAt` of the run that first fetched that content version. Interrupted scrapes resume, and upstream edits are picked up automatically.
-- Repository metadata (stars / description / pushedAt) is re-fetched per unique repository every run (~1,200 GitHub requests) and written to `repos.jsonl`, one row per repository behind the index rows, sorted by repo asc (a deterministic order keeps daily diffs one line per changed repo) — so a consumer can join by the `repo` key without misses. A repo whose request failed keeps the previous run's row (a first-ever failure leaves it out until the next run succeeds); a repo that 404s gets all-`null` fields. Under `--limit`, repos outside the limit keep their previous rows too.
-- Owner avatars are downloaded only when the owner is new or its avatar URL changed (GitHub bumps the URL's `?v=` parameter on avatar changes) or the local copy is missing; otherwise the existing file is reused without a request. A failed download keeps the previous row — or nulls `avatarUrl` on a first failure, retried next run (so `avatarUrl` is non-null if and only if `avatars/{owner}.png` exists). `avatars/` is pruned to exactly that derivable set of copies.
-- The index holds only github-sourced skills whose content is on disk: well-known (domain) sources are skipped at the leaderboard (counted in `nonGithub`), and duplicate skills and skills without an upstream snapshot are left out (logged, counted in the `Done:` summary, retried next run). A skill whose fetch failed keeps its previous index row and content directory, so the mirror keeps serving the last good content and the row ⟺ directory invariant holds; skills never fetched successfully stay out of the index. With `--limit`, skills outside the limit keep their previous rows too (the limit constrains only what is fetched, never the index; the next full run re-evaluates them). All of these count as `carried over`. The process exits non-zero only for systemic failures (auth, leaderboard, index write).
-- With `--audits`, audit results are re-fetched only for skills whose content hash changed; unchanged skills reuse the previous results without a request.
-- Slug normalization: a slug may itself contain `/` upstream (e.g. `claude-office-skills/skills/facebook/meta-ads`). skills.sh keys such skills by `${source}/${slug}` with the `/` stripped from the slug (`…/facebookmeta-ads`) — the only form its detail API can address for multi-segment slugs. The scraper therefore normalizes each github-sourced leaderboard entry's id to `${source}/${slug-without-slashes}` (`canonicalId` in `lib.mjs`) before deduplication; two raw ids can in principle strip to the same canonical id, in which case the first occurrence wins. Ids whose slug carries no slash (the vast majority) pass through unchanged.
-
-## Verification
+## Verify
 
 | Layer | Answers | Needs | Command |
 |---|---|---|---|
 | 1. Offline tests | Is the scraper logic correct? | nothing (mock API) | `npm test` |
 | 2. Artifact verifier | Is a dataset intact? | nothing (no network) | `node verify.mjs --out data` |
-| 3. Real API run | Does the live API still behave? | token | `node scraper.mjs --limit 5 && node verify.mjs` |
+| 3. Real API run | Does the live API still behave? | token | `node scraper.mjs && node verify.mjs` |
 
-`verify.mjs` is the gate before trusting or uploading a dataset: every line parses, ids unique, rows sorted by installs desc (ties by id), fields well-formed, no two rows sharing a sanitized directory name, rows and content directories match exactly (every row has a directory, no orphan directories), `stats.json` present, parseable and consistent with the index, `trending.json` well-shaped id list, `curated.jsonl` well-shaped per-owner rows, `repos.jsonl` well-shaped, sorted by repo and matching the index's repositories exactly, `owners.jsonl` + `avatars/` well-shaped and consistent with the index's owners (every referenced avatar file exists, no orphan files), no `.tmp` leftovers. Local quickstart:
-
-```bash
-npm test                          # fast, no secrets
-npm run scrape && npm run verify  # full scrape + integrity check
-```
+`verify.mjs` is the gate before trusting or publishing a dataset: rows parse and carry exactly `id` + `installs` (id a canonical `owner/repo/slug`, installs non-negative), ids unique and sorted (installs desc, ties by id), `trending.json` an id array, `curated.jsonl` well-shaped owner rows, `README.md` present, no `.tmp` leftovers.
 
 ## CI
 
-- **`ci.yml`** (push / PR): layer 1 on Node 24. Secret-free, so fork PRs run too.
-- **`fetch-skills.yml`** — the publisher. Publishing is fully automated; there is no local publish path. It runs daily at 18:00 UTC and on demand:
-
-  ```bash
-  gh workflow run fetch-skills.yml   # publish a fresh snapshot now
-  gh run watch <run-id>              # follow it
-  ```
-
-  Each run restores the previous `dist` snapshot into `data/` first — the upstream hashes in its `skills.jsonl` pin `fetchedAt`, reuse unchanged audit results, keep the last good content of failed fetches, and make the `changed`/`added`/`removed` counters describe the run instead of an empty workspace, while `repos.jsonl` and `owners.jsonl`/`avatars/` seed the GitHub-metadata carry-over (a failed repo request or avatar download keeps the previous row; avatars whose URL is unchanged are not re-downloaded) — then full scrape as a daily canary → `verify.mjs` → `publish.mjs` force-pushes the [`dist` branch](README.md#how-to-get-the-data) as a single parentless (orphan) commit whose tree is exactly the publish set — the branch is only ever the newest snapshot, never a history (a same-day rerun simply replaces the commit and re-points the day's tag, and a stale entry cannot ride along because the commit starts from an empty index). Per-day pinning lives in the `dist-<date>` tags (slash-free so the tag resolves in raw URLs), bounded to the newest `--window` (default 30 — one per day, so about a month); older tags are deleted on origin, which makes their parentless commits unreachable so the repo stays bounded. A consumer resolves the newest snapshot from the `dist` branch root and an older day from its `dist-<date>` tag ([README.md](README.md#how-to-get-the-data)); the run fails if the published tree is not exactly the publish set or the day's tag does not point at it. It mints a fresh OIDC token from the long-lived `VERCEL_TOKEN` (required secrets: `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` — the last two from `.vercel/project.json` after `vercel link`); star counts read the repo secret `GH_TOKEN` (a personal access token, mapped to the `GITHUB_TOKEN` env var — set it with `gh secret set GH_TOKEN`).
+- **`ci.yml`** (push / PR): layer 1 on Node 24 — secret-free, so fork PRs run it too.
+- **`fetch-skills.yml`**: daily 18:00 UTC canary + publisher (`gh workflow run fetch-skills.yml` to trigger). Mints a fresh OIDC token from the long-lived `VERCEL_TOKEN` (secrets: `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`) → `node scraper.mjs` → `node verify.mjs` → `node publish.mjs`, which force-pushes the `dist` branch as a single parentless commit exactly the publish set, re-points the `dist-<date>` tag, and prunes tags beyond `--window` (default 30). The run fails if the published tree is not exactly the publish set or the tag does not point at it.

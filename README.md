@@ -1,112 +1,43 @@
 # skills.sh data mirror
 
-A daily snapshot of every GitHub-sourced skill on [skills.sh](https://www.skills.sh): the leaderboard as a queryable index (`skills.jsonl`) plus each skill's full files (`skills/`). Skills from well-known (domain) sources are not mirrored — they have no repository to attribute.
+A daily snapshot of every GitHub-sourced skill on [skills.sh](https://www.skills.sh) — the leaderboard as a queryable index. Everything comes from skills.sh's API: no skill content, no GitHub API. A row's id addresses the skill upstream, so nothing else needs mirroring.
 
-中文:[README.zh-CN.md](README.zh-CN.md) · Dev guide (run / verify / extend): [DEVELOPING.md](DEVELOPING.md)
+中文:[README.zh-CN.md](README.zh-CN.md) · Dev guide: [DEVELOPING.md](DEVELOPING.md)
 
-## What the data is
+## The data
 
 ```
-├── skills.jsonl   one row per skill, sorted by installs desc — query / filter / rank here
-├── repos.jsonl    one row per GitHub repository behind the index (stars, about, last push)
-├── owners.jsonl   one row per repository owner and its avatar URL
-├── avatars/       the owners' GitHub avatars, saved as {owner}.png
-├── trending.json  the trending view's first 100 GitHub-sourced ids, in rank order
-├── curated.jsonl  the officially featured skills, one row per owner
-├── stats.json     the producing run's stats (counts, changes, failed ids)
-└── skills/        one directory per skill, named after its id
-    └── vercel-labs/skills/find-skills/   ({owner}/{repo}/{slug})
-        └── SKILL.md
+skills.jsonl    { id, installs } per skill, sorted by installs desc — query/filter/rank here
+trending.json   the trending view's first 100 github-sourced ids, in rank order
+curated.jsonl   the officially featured skills, one row per owner
+README.md       the dist landing page — file guide plus the latest run's stats
 ```
-
-Each `skills.jsonl` row:
 
 ```json
-{
-  "id": "vercel-labs/skills/find-skills",
-  "installs": 3263512,
-  "url": "https://www.skills.sh/vercel-labs/skills/find-skills",
-  "hash": "b146008599c31057cef1c145774cea5d5afb30e8f43fa802e47a4b461419aaaf",
-  "fetchedAt": "2026-09-05T08:26:00.682Z"
-}
+{"id": "vercel-labs/skills/find-skills", "installs": 3263512}
 ```
 
-| Field | Meaning |
-|---|---|
-| `id`, `installs`, `url` | from the skills.sh leaderboard (the id encodes source and slug: `{owner}/{repo}/{slug}`) |
-| `hash` | Content version of the skill's files: SHA-256 over each file's `path + 0x00 + bytes + 0x00`, files in case-insensitive path order ([the upstream `hash`](DEVELOPING.md#the-upstream-hash)); `null` if unknown |
-| `fetchedAt` | when the current content version was first fetched |
-| `audits` | with `--audits`: partner audit results (`provider`, `status`, `riskLevel`, …); `[]` = none yet |
+- `id` — the canonical `{owner}/{repo}/{slug}`: it doubles as the install argument (`npx skills add <id>`), its first two segments name the hosting GitHub repository, and the skill's page lives at `https://skills.sh/<id>`.
+- `installs` — the skill's install count on skills.sh.
 
-`repos.jsonl` holds the GitHub repository metadata — one row per repository, sorted by repo:
+All artifacts are keyed by the same canonical id, so `trending.json` and `curated.jsonl` join straight back into `skills.jsonl` (curated is not source-filtered and may repeat a skill under several owners). Upstream duplicate-flagged entries are skipped — one row per distinct skill; delisted skills leave the index on the next run. `verify.mjs` gates every publish.
 
-```json
-{"repo": "vercel-labs/skills", "stars": 1523, "description": "Agents, skills, and plugins for Vercel", "pushedAt": "2026-09-11T14:02:11.000Z"}
-```
+## Getting the data
 
-| Field | Meaning |
-|---|---|
-| `repo` | `owner/repo`, an id's first two segments — the join key from every index row |
-| `stars` | the repository's stargazer count; `null` if the repo is gone or the count is unknown |
-| `description` | the repository's GitHub About text; `null` if unset or unknown |
-| `pushedAt` | the repository's last code-push time (`pushed_at`); `null` if the repo is gone. Note this tracks the repository, not the skill: use `hash`/`fetchedAt` in the index for skill-level changes |
-
-`owners.jsonl` holds the repository owners' GitHub avatars, pulled into `avatars/` so consumers need no GitHub API for them — one row per owner, sorted by owner:
-
-```json
-{"owner": "vercel-labs", "avatarUrl": "https://avatars.githubusercontent.com/u/12565288?v=4"}
-```
-
-| Field | Meaning |
-|---|---|
-| `owner` | the GitHub user/org name — the id's first segment, the join key from every index row |
-| `avatarUrl` | the upstream avatar URL (its `?v=` parameter bumps when the user changes the avatar — this is what keeps re-downloads away); `null` if that run's download failed |
-
-The local copy's path is derivable from the owner alone: `avatars/{owner}.png`. The extension is fixed regardless of the actual image format (GitHub serves png or jpeg): a derivable path needs a fixed name, and image decoders sniff the payload, so jpeg bytes under a `.png` name render fine everywhere. When `avatarUrl` is `null`, the copy is absent until the next run succeeds.
-
-Two guarantees, integrity-checked after every run:
-
-- A skill directory contains exactly the files the upstream skill ships — copy it straight into an agent's skills folder.
-- The index and `skills/` match exactly: a row exists if and only if its directory exists, and a directory is always complete.
-
-Edge cases (failed fetches, `--limit` runs, delisted skills) are covered in [DEVELOPING.md](DEVELOPING.md).
-
-`trending.json` is an array of the trending leaderboard's first 100 GitHub-sourced ids, in upstream rank order — the array index is the rank. `curated.jsonl` is the officially featured list, one row per owner:
-
-```json
-{"owner": "vercel-labs", "totalInstalls": 12345, "featuredRepo": "vercel-labs/skills", "featuredSkill": "find-skills", "skills": ["vercel-labs/skills/find-skills", "mintlify.com/mintlify"]}
-```
-
-Both use the same id form as the index, so they join straight back into `skills.jsonl`. `curated.jsonl` is not source-filtered: it can hold ids the index does not, and the same skill may appear under several owners.
-
-## How to get the data
-
-Published daily by the [`fetch-skills.yml`](.github/workflows/fetch-skills.yml) workflow to the [`dist` branch](../../tree/dist) — its tip is always a complete snapshot at the branch root (a single parentless commit, replaced each run; older days live in the `dist-<date>` tags).
-
-### Fetch individual files
-
-No clone, no auth. `dist` always serves the newest snapshot; swap it for a `dist-<date>` tag to pin a day (the newest 30 are tagged, and the name is slash-free — `dist/<date>` 404s as a URL ref):
+Published daily to the [`dist` branch](../../tree/dist) — its tip is always a complete snapshot (a single parentless commit, replaced each run); older days live in the `dist-<date>` tags (newest 30, slash-free names so they resolve in raw URLs).
 
 ```bash
 BASE=https://raw.githubusercontent.com/skill-one/skills-sh-mirror
-curl -sO $BASE/dist/skills.jsonl                    # the index: one row per skill
-curl -sO $BASE/dist/skills/vercel-labs/skills/find-skills/SKILL.md   # any skill file, by id
+curl -sO $BASE/dist/skills.jsonl                                             # newest snapshot
+curl -s $BASE/dist/skills.jsonl | jq -r 'select(.installs > 100000) | .id'   # or query in flight
+curl -sO $BASE/dist-2026-09-11/skills.jsonl                                  # pin a day
 ```
 
-Fetch from `dist` for the newest snapshot, or replace `dist` with a `dist-<date>` tag to pin a day and cache by that tag (a tag never changes once published). raw's ~5-minute branch cache is the worst-case lag on `dist`, and nothing busts it; via jsDelivr instead, it is a 12-hour branch cache (7 days in the browser).
-
-### Clone the whole snapshot
-
-Get everything in one shot, ready for offline use:
+raw's ~5-minute branch cache is the worst-case lag on `dist` (12h via jsDelivr); a `dist-<date>` tag never changes, so cache by it freely.
 
 ```bash
-git clone --depth 1 -b dist https://github.com/skill-one/skills-sh-mirror.git
+git clone --depth 1 -b dist https://github.com/skill-one/skills-sh-mirror.git   # whole snapshot
+git ls-remote --tags --refs https://github.com/skill-one/skills-sh-mirror.git 'dist-*'   # list days
 ```
 
-To pin to a day, clone a `dist-<date>` tag instead — list the tagged days with `git ls-remote --tags --refs https://github.com/skill-one/skills-sh-mirror.git 'dist-*'` (the newest sorts last):
-
-```bash
-git clone --depth 1 -b dist-2026-09-11 https://github.com/skill-one/skills-sh-mirror.git
-```
-
-Snapshots are published by GitHub Actions — publish now with `gh workflow run fetch-skills.yml`. To produce the data yourself: `node scraper.mjs` — see [DEVELOPING.md](DEVELOPING.md).
+Snapshots are published by GitHub Actions — `gh workflow run fetch-skills.yml` publishes now. To produce the data yourself: `node scraper.mjs` — see [DEVELOPING.md](DEVELOPING.md).

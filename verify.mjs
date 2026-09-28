@@ -2,74 +2,63 @@
 /**
  * Verify the integrity of a scraped dataset — no network, no token.
  *
- * Checks skills.jsonl + content directories against the scraper's invariants:
- *   - every line parses; ids unique; rows sorted by installs desc (ties by id)
- *   - required fields well-formed (id, installs, url, fetchedAt, hash, audits)
- *   - repos.jsonl parses, is well-shaped (repo/stars/description/pushedAt
- *     rows, sorted by repo), and matches the index's repositories exactly
- *   - owners.jsonl + avatars/ are well-shaped and consistent with the index's
- *     owners (every referenced avatar file exists, no orphan files)
- *   - no two rows share a sanitized directory name
- *   - rows and content directories match exactly, in both directions: every
- *     row has a non-empty directory (its files mirror the upstream skill
- *     verbatim, including files like _meta.json that skills may ship) and
- *     every directory belongs to a row
- *   - stats.json parses and its indexedRows count matches the index
- *   - trending.json is a well-shaped id list; curated.jsonl holds well-shaped
- *     per-owner rows
- *   - no .tmp / skills.jsonl.tmp leftovers from interrupted runs
+ *   - skills.jsonl: every line an object carrying exactly id and installs
+ *     (id a canonical github "owner/repo/slug", installs a non-negative
+ *     number), ids unique, sorted by installs desc (ties by id)
+ *   - trending.json: an array of unique ids
+ *   - curated.jsonl: one owner/totalInstalls/featuredRepo/featuredSkill/
+ *     skills row per owner
+ *   - README.md exists (the dist landing page, written for humans)
+ *   - no *.tmp leftovers from interrupted runs
  *
  * Usage: node verify.mjs [--out data]
  */
 
-import { readdir, readFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { argValue, avatarPath, dirName, exists, repoOfId } from "./lib.mjs";
+import { argValue, exists } from "./lib.mjs";
 
-const args = process.argv.slice(2);
-const OUT_DIR = argValue(args, "--out") ?? "data";
-const isHash = (v) => typeof v === "string" && /^[0-9a-f]{64}$/i.test(v);
-const isIso = (v) => typeof v === "string" && !Number.isNaN(Date.parse(v));
+const OUT_DIR = argValue(process.argv.slice(2), "--out") ?? "data";
 
 const problems = [];
 const problem = (msg) => problems.push(msg);
 
-function checkRow(row) {
-  const id = row.id;
-  const label = typeof id === "string" ? id : "(missing id)";
-  // Github-sourced ids only: "owner/repo/slug" (already canonical — the slug
-  // carries no "/").
-  const segs = typeof id === "string" ? id.split("/").filter((s) => s.length) : [];
-  if (segs.length !== 3) problem(`${label}: malformed id`);
-  if (!Number.isFinite(row.installs) || row.installs < 0) problem(`${label}: bad installs`);
-  if (row.url !== null && typeof row.url !== "string") problem(`${label}: bad url`);
-  if (row.fetchedAt !== null && !isIso(row.fetchedAt)) problem(`${label}: bad fetchedAt`);
-  if (row.hash !== null && !isHash(row.hash)) problem(`${label}: bad hash`);
-  if ("audits" in row && !Array.isArray(row.audits)) problem(`${label}: audits must be an array`);
-  return label;
-}
-
-let dirCount = 0;
-let rowCount = 0;
-let trendingCount = null;
-let curatedOwners = null;
-let reposCount = null;
-let ownersCount = null;
-const text = await readFile(path.join(OUT_DIR, "skills.jsonl"), "utf8").catch(() => null);
-if (text === null) {
-  problem(`skills.jsonl not found under ${OUT_DIR}`);
-} else {
+// Reads `<OUT_DIR>/<file>` (newline-delimited JSON objects); a missing file
+// or an unparseable line is reported and skipped.
+const readJsonl = async (file) => {
+  const text = await readFile(path.join(OUT_DIR, file), "utf8").catch(() => null);
+  if (text === null) {
+    problem(`${file} not found`);
+    return null;
+  }
   const rows = [];
   for (const [i, line] of text.split("\n").entries()) {
     if (!line.trim()) continue;
     try {
-      rows.push(JSON.parse(line));
+      const row = JSON.parse(line);
+      if (row === null || typeof row !== "object" || Array.isArray(row)) problem(`${file} line ${i + 1}: not a JSON object`);
+      else rows.push(row);
     } catch {
-      problem(`line ${i + 1}: invalid JSON`);
+      problem(`${file} line ${i + 1}: invalid JSON`);
     }
   }
+  return rows;
+};
+
+const readJson = async (file) => {
+  const text = await readFile(path.join(OUT_DIR, file), "utf8").catch(() => null);
+  if (text === null) problem(`${file} not found`);
+  return text;
+};
+
+let rowCount = 0;
+let trendingCount = null;
+let curatedOwners = null;
+
+const rows = await readJsonl("skills.jsonl");
+if (rows !== null) {
   rowCount = rows.length;
-  if (!rows.length) problem("index has no rows");
+  if (!rows.length) problem("skills.jsonl has no rows");
 
   const seen = new Set();
   for (const row of rows) {
@@ -81,102 +70,38 @@ if (text === null) {
     else if (rows[i - 1].installs === rows[i].installs && rows[i - 1].id > rows[i].id)
       problem(`equal-installs rows not sorted by id at ${rows[i].id}`);
   }
-
-  // Rows and directories must match exactly, in both directions.
-  const rowNames = new Map();
   for (const row of rows) {
-    const label = checkRow(row);
-    if (typeof row.id !== "string") continue;
-    const name = dirName(row.id);
-    if (rowNames.has(name)) problem(`${label}: directory name collides with another row (${rowNames.get(name)})`);
-    rowNames.set(name, row.id);
-    const dir = path.join(OUT_DIR, "skills", name);
-    if (!(await exists(dir))) {
-      problem(`${label}: index row has no content directory`);
-      continue;
-    }
-    const entries = await readdir(dir, { recursive: true, withFileTypes: true });
-    if (!entries.some((e) => e.isFile())) problem(`${label}: content directory is empty`);
-    dirCount++;
+    const id = typeof row.id === "string" && row.id ? row.id : "(missing id)";
+    // The index row is exactly the leaderboard's essentials — nothing else.
+    if (Object.keys(row).sort().join(",") !== "id,installs") problem(`${id}: rows must carry exactly id and installs`);
+    // Github-sourced ids only: "owner/repo/slug" (canonical — no "/" in the slug).
+    if (typeof row.id !== "string" || row.id.split("/").filter(Boolean).length !== 3) problem(`${id}: malformed id`);
+    if (!Number.isFinite(row.installs) || row.installs < 0) problem(`${id}: bad installs`);
   }
-  // Every directory under skills/ must be a row's content directory (whose
-  // whole subtree is skill files) or an ancestor of one (the leading id
-  // segments group skills by owner / repo).
-  const ancestors = new Set();
-  for (const name of rowNames.keys()) {
-    const segs = name.split("/");
-    for (let i = 1; i < segs.length; i++) ancestors.add(segs.slice(0, i).join("/"));
-  }
-  const walk = async (rel, insideRow) => {
-    for (const entry of await readdir(path.join(OUT_DIR, "skills", rel), { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue;
-      const sub = rel ? `${rel}/${entry.name}` : entry.name;
-      const isRow = rowNames.has(sub);
-      await walk(sub, insideRow || isRow);
-      if (!insideRow && !isRow && !ancestors.has(sub)) problem(`orphan content directory (no index row): ${sub}`);
-    }
-  };
-  if (await exists(path.join(OUT_DIR, "skills"))) await walk("", false);
 
-  if (await exists(path.join(OUT_DIR, ".tmp"))) problem(".tmp leftover from an interrupted run");
-  if (await exists(path.join(OUT_DIR, "skills.jsonl.tmp"))) problem("skills.jsonl.tmp leftover from an interrupted run");
+  // README.md is the dist landing page, written for humans — just require it.
+  if (!(await exists(path.join(OUT_DIR, "README.md")))) problem("README.md not found");
 
-  const statsRaw = await readFile(path.join(OUT_DIR, "stats.json"), "utf8").catch(() => null);
-  if (statsRaw === null) {
-    problem("stats.json not found");
-  } else {
+  const trending = await readJson("trending.json");
+  if (trending !== null) {
     try {
-      const stats = JSON.parse(statsRaw);
-      if (stats.indexedRows !== rowCount) problem(`stats.json: indexedRows ${stats.indexedRows} != index row count ${rowCount}`);
-    } catch {
-      problem("stats.json: invalid JSON");
-    }
-  }
-  if (await exists(path.join(OUT_DIR, "stats.json.tmp"))) problem("stats.json.tmp leftover from an interrupted run");
-
-  // trending.json: the trending view's first 100 github-sourced ids in
-  // upstream rank order (the join key back into the index).
-  const trendingRaw = await readFile(path.join(OUT_DIR, "trending.json"), "utf8").catch(() => null);
-  if (trendingRaw === null) {
-    problem("trending.json not found");
-  } else {
-    try {
-      const ids = JSON.parse(trendingRaw);
-      if (!Array.isArray(ids) || !ids.every((id) => typeof id === "string" && id)) {
-        problem("trending.json: not an array of ids");
-      } else {
-        const seenIds = new Set();
-        for (const id of ids) {
-          if (seenIds.has(id)) problem(`trending.json: duplicate id: ${id}`);
-          seenIds.add(id);
-        }
-        trendingCount = ids.length;
+      const ids = JSON.parse(trending);
+      if (!Array.isArray(ids) || !ids.every((id) => typeof id === "string" && id)) problem("trending.json: not an array of ids");
+      else {
+        const dup = ids.find((id, i) => ids.indexOf(id) !== i);
+        if (dup !== undefined) problem(`trending.json: duplicate id: ${dup}`);
+        else trendingCount = ids.length;
       }
     } catch {
       problem("trending.json: invalid JSON");
     }
   }
-  if (await exists(path.join(OUT_DIR, "trending.json.tmp"))) problem("trending.json.tmp leftover from an interrupted run");
 
-  // curated.jsonl: officially featured skills grouped by owner, one row per
-  // owner, per-skill entries reduced to ids. The rows are kept verbatim —
-  // upstream legitimately repeats a skill under several owners, so ids are
-  // not required to be unique across rows.
-  const curatedRaw = await readFile(path.join(OUT_DIR, "curated.jsonl"), "utf8").catch(() => null);
-  if (curatedRaw === null) {
-    problem("curated.jsonl not found");
-  } else {
-    const rows = [];
-    for (const [i, line] of curatedRaw.split("\n").entries()) {
-      if (!line.trim()) continue;
-      try {
-        rows.push(JSON.parse(line));
-      } catch {
-        problem(`curated.jsonl line ${i + 1}: invalid JSON`);
-      }
-    }
-    const shaped = rows.every((r) =>
-      r !== null && typeof r === "object" && !Array.isArray(r) &&
+  // Upstream legitimately repeats a skill under several owners, so ids are
+  // not required to be unique across curated rows.
+  const curated = await readJsonl("curated.jsonl");
+  if (curated !== null) {
+    const shaped = curated.every((r) =>
       typeof r.owner === "string" && r.owner &&
       Number.isFinite(r.totalInstalls) &&
       (r.featuredRepo === null || typeof r.featuredRepo === "string") &&
@@ -184,103 +109,12 @@ if (text === null) {
       Array.isArray(r.skills) && r.skills.every((s) => typeof s === "string" && s),
     );
     if (!shaped) problem("curated.jsonl: rows must carry owner/totalInstalls/featuredRepo/featuredSkill/skills");
-    else curatedOwners = rows.length;
+    else curatedOwners = curated.length;
   }
-  if (await exists(path.join(OUT_DIR, "curated.jsonl.tmp"))) problem("curated.jsonl.tmp leftover from an interrupted run");
+}
 
-  // repos.jsonl: one row per repository behind the indexed skills, sorted by
-  // repo asc. Must match the index's repositories exactly in both directions,
-  // so a consumer can join by the repo key without misses.
-  const reposRaw = await readFile(path.join(OUT_DIR, "repos.jsonl"), "utf8").catch(() => null);
-  if (reposRaw === null) {
-    problem("repos.jsonl not found");
-  } else {
-    const repos = [];
-    for (const [i, line] of reposRaw.split("\n").entries()) {
-      if (!line.trim()) continue;
-      try {
-        repos.push(JSON.parse(line));
-      } catch {
-        problem(`repos.jsonl line ${i + 1}: invalid JSON`);
-      }
-    }
-    const shaped = repos.every((r) =>
-      r !== null && typeof r === "object" && !Array.isArray(r) &&
-      /^[^/]+\/[^/]+$/.test(r.repo) &&
-      (r.stars === null || (Number.isFinite(r.stars) && r.stars >= 0)) &&
-      (r.description === null || typeof r.description === "string") &&
-      (r.pushedAt === null || isIso(r.pushedAt)),
-    );
-    if (!shaped) {
-      problem("repos.jsonl: rows must carry repo/stars/description/pushedAt");
-    } else {
-      reposCount = repos.length;
-      const seen = new Set();
-      for (const r of repos) {
-        if (seen.has(r.repo)) problem(`repos.jsonl: duplicate repo: ${r.repo}`);
-        seen.add(r.repo);
-      }
-      for (let i = 1; i < repos.length; i++) {
-        if (repos[i - 1].repo >= repos[i].repo) problem(`repos.jsonl: rows not sorted by repo at ${repos[i].repo}`);
-      }
-      const rowRepos = new Set(rows.map((r) => repoOfId(r.id)).filter(Boolean));
-      for (const repo of rowRepos) if (!seen.has(repo)) problem(`repos.jsonl: no row for ${repo}`);
-      for (const repo of seen) if (!rowRepos.has(repo)) problem(`repos.jsonl: orphan row (no index row): ${repo}`);
-    }
-  }
-  if (await exists(path.join(OUT_DIR, "repos.jsonl.tmp"))) problem("repos.jsonl.tmp leftover from an interrupted run");
-
-  // owners.jsonl: one row per repository owner behind the indexed skills —
-  // just the avatar URL; the local copy's path is derivable from the owner
-  // alone (avatarPath), and the avatar is pulled into avatars/ so consumers
-  // need no GitHub API for it. Owners must match the index's owners exactly
-  // in both directions; an owner's copy exists if and only if its avatarUrl
-  // is non-null, and every avatar file must be a listed owner's copy.
-  const ownersRaw = await readFile(path.join(OUT_DIR, "owners.jsonl"), "utf8").catch(() => null);
-  if (ownersRaw === null) {
-    problem("owners.jsonl not found");
-  } else {
-    const owners = [];
-    for (const [i, line] of ownersRaw.split("\n").entries()) {
-      if (!line.trim()) continue;
-      try {
-        owners.push(JSON.parse(line));
-      } catch {
-        problem(`owners.jsonl line ${i + 1}: invalid JSON`);
-      }
-    }
-    const shaped = owners.every((r) =>
-      r !== null && typeof r === "object" && !Array.isArray(r) &&
-      /^[^/]+$/.test(r.owner) &&
-      (r.avatarUrl === null || typeof r.avatarUrl === "string"),
-    );
-    if (!shaped) {
-      problem("owners.jsonl: rows must carry owner/avatarUrl");
-    } else {
-      ownersCount = owners.length;
-      const seen = new Set();
-      for (const r of owners) {
-        if (seen.has(r.owner)) problem(`owners.jsonl: duplicate owner: ${r.owner}`);
-        seen.add(r.owner);
-      }
-      for (let i = 1; i < owners.length; i++) {
-        if (owners[i - 1].owner >= owners[i].owner) problem(`owners.jsonl: rows not sorted by owner at ${owners[i].owner}`);
-      }
-      const rowOwners = new Set(rows.map((r) => repoOfId(r.id)?.split("/")[0]).filter(Boolean));
-      for (const owner of rowOwners) if (!seen.has(owner)) problem(`owners.jsonl: no row for ${owner}`);
-      for (const owner of seen) if (!rowOwners.has(owner)) problem(`owners.jsonl: orphan row (no index row): ${owner}`);
-      // avatarUrl non-null ⟺ the owner's derivable local copy is on disk.
-      for (const r of owners) {
-        if (r.avatarUrl && !(await exists(path.join(OUT_DIR, avatarPath(r.owner)))))
-          problem(`owners.jsonl: avatar file missing: ${avatarPath(r.owner)} (${r.owner})`);
-      }
-      const referenced = new Set(owners.filter((r) => r.avatarUrl).map((r) => avatarPath(r.owner)));
-      for (const entry of (await readdir(path.join(OUT_DIR, "avatars")).catch(() => []))) {
-        if (!referenced.has(`avatars/${entry}`)) problem(`orphan avatar file (no owners.jsonl row): avatars/${entry}`);
-      }
-    }
-  }
-  if (await exists(path.join(OUT_DIR, "owners.jsonl.tmp"))) problem("owners.jsonl.tmp leftover from an interrupted run");
+for (const file of ["README.md", "skills.jsonl", "trending.json", "curated.jsonl"]) {
+  if (await exists(path.join(OUT_DIR, `${file}.tmp`))) problem(`${file}.tmp leftover from an interrupted run`);
 }
 
 if (problems.length) {
@@ -289,6 +123,4 @@ if (problems.length) {
   console.error(`verify: ${problems.length} problem(s) in ${OUT_DIR}`);
   process.exit(1);
 }
-console.log(
-  `OK: ${rowCount} rows, ${dirCount} content directories, ${reposCount ?? "no"} repos, ${ownersCount ?? "no"} owners, ${trendingCount ?? "no"} trending, ${curatedOwners ?? "no"} curated owners, 0 problems (${OUT_DIR})`,
-);
+console.log(`OK: ${rowCount} rows, ${trendingCount ?? "no"} trending, ${curatedOwners ?? "no"} curated owners, 0 problems (${OUT_DIR})`);

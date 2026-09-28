@@ -1,112 +1,43 @@
 # skills.sh 数据镜像
 
-[skills.sh](https://www.skills.sh) 全站 GitHub 来源技能的每日快照:排行榜以可查询的索引形式保存(`skills.jsonl`),同时附带每个技能的完整文件(`skills/`)。
+[skills.sh](https://www.skills.sh) 全站 GitHub 来源技能的每日快照——以可查询的排行榜索引呈现。所有数据都来自 skills.sh 的 API:不抓技能内容,不调 GitHub 接口。索引行的 id 就是技能在上游的地址,因此无需镜像其他东西。
 
-English: [README.md](README.md) · 开发指南(运行 / 校验 / 扩展):[DEVELOPING.zh-CN.md](DEVELOPING.zh-CN.md)
+English: [README.md](README.md) · 开发指南:[DEVELOPING.zh-CN.md](DEVELOPING.zh-CN.md)
 
-## 数据是什么
+## 数据
 
 ```
-├── skills.jsonl   每个技能一行,按 installs 降序 —— 查询 / 筛选 / 排行在这里
-├── repos.jsonl    索引中技能所在的 GitHub 仓库,每个仓库一行(star 数、About、最近推送时间)
-├── owners.jsonl   每个仓库的 owner 一行(含其头像 URL)
-├── avatars/       owner 们的 GitHub 头像,保存为 {owner}.png
-├── trending.json  trending 榜单中前 100 个 GitHub 来源 id,按榜单顺序
-├── curated.jsonl  官方精选技能,每个 owner 一行
-├── stats.json     产出该快照那一次运行的统计(条目数、变化数、失败明细)
-└── skills/        每个技能一个目录,目录名即技能 id
-    └── vercel-labs/skills/find-skills/   ({owner}/{repo}/{slug})
-        └── SKILL.md
+skills.jsonl    每个技能一行 { id, installs },按 installs 降序 —— 查询/筛选/排行在这里
+trending.json   trending 榜单中前 100 个 GitHub 来源 id,按榜单顺序
+curated.jsonl   官方精选技能,每个 owner 一行
+README.md       dist 分支的着陆页 —— 文件说明 + 最近一次运行的统计
 ```
-
-`skills.jsonl` 每行形如:
 
 ```json
-{
-  "id": "vercel-labs/skills/find-skills",
-  "installs": 3263512,
-  "url": "https://www.skills.sh/vercel-labs/skills/find-skills",
-  "hash": "b146008599c31057cef1c145774cea5d5afb30e8f43fa802e47a4b461419aaaf",
-  "fetchedAt": "2026-09-05T08:26:00.682Z"
-}
+{"id": "vercel-labs/skills/find-skills", "installs": 3263512}
 ```
 
-| 字段                    | 含义                                                                                    |
-| ----------------------- | --------------------------------------------------------------------------------------- |
-| `id`、`installs`、`url` | 来自 skills.sh 排行榜(id 已编码 source 和 slug:`{owner}/{repo}/{slug}`)                 |
-| `hash`                  | 技能文件的内容版本:按路径不区分大小写排序,逐文件拼 `路径 + 0x00 + 字节 + 0x00` 取 SHA-256([上游的 `hash`](DEVELOPING.zh-CN.md#上游的-hash));未知时为 `null`      |
-| `fetchedAt`             | 当前内容版本首次抓取的时间                                                              |
-| `audits`                | 使用 `--audits` 时:合作方审计结果(`provider`、`status`、`riskLevel`…);`[]` = 尚无人审计 |
+- `id` —— 规范化的 `{owner}/{repo}/{slug}`:它同时就是安装参数(`npx skills add <id>`),前两段即托管该技能的 GitHub 仓库,技能页面在 `https://skills.sh/<id>`。
+- `installs` —— 该技能在 skills.sh 上的安装量。
 
-`repos.jsonl` 按仓库存储 GitHub 元信息——每个仓库一行,按 repo 排序:
+所有产物都用同一规范化 id 作键,`trending.json` 与 `curated.jsonl` 可直接 join 回 `skills.jsonl`(curated 不做来源过滤,同一技能可出现在多个 owner 名下)。上游标记为重复的条目会被跳过——每个去重技能一行;下架的技能在下一轮运行中自然离开索引。`verify.mjs` 是每次发布前的门禁。
 
-```json
-{"repo": "vercel-labs/skills", "stars": 1523, "description": "Agents, skills, and plugins for Vercel", "pushedAt": "2026-09-11T14:02:11.000Z"}
-```
+## 获取数据
 
-| 字段          | 含义                                                                                    |
-| ------------- | --------------------------------------------------------------------------------------- |
-| `repo`        | `owner/repo`,即 id 的前两段——从每行索引关联回来的键                                    |
-| `stars`       | 仓库的 star 数;仓库已删除或未知时为 `null`                                              |
-| `description` | 仓库 GitHub 页面的 About 说明;未设置或未知时为 `null`                                   |
-| `pushedAt`    | 仓库最近一次代码推送时间(`pushed_at`);仓库已删除时为 `null`。注意它描述的是仓库而非技能:技能级的变化请看索引里的 `hash` / `fetchedAt` |
-
-`owners.jsonl` 保存仓库 owner 的 GitHub 头像,已拉取到 `avatars/`,消费方无需再调 GitHub 接口——每个 owner 一行,按 owner 排序:
-
-```json
-{"owner": "vercel-labs", "avatarUrl": "https://avatars.githubusercontent.com/u/12565288?v=4"}
-```
-
-| 字段         | 含义                                                                                    |
-| ------------ | --------------------------------------------------------------------------------------- |
-| `owner`      | GitHub 用户/组织名,即 id 的第一段——从每行索引关联回来的键                              |
-| `avatarUrl`  | 上游头像 URL(用户换头像时其 `?v=` 参数会变化——正是它避免了重复下载);那一次下载失败时为 `null` |
-
-本地副本的路径可仅由 owner 推导:`avatars/{owner}.png`。扩展名固定,与实际图片格式无关(GitHub 会返回 png 或 jpeg):路径要可推导就需要固定文件名,而图片解码靠嗅探文件内容,jpeg 字节配 `.png` 后缀在任何地方都能正常渲染。`avatarUrl` 为 `null` 时副本缺失,下次运行成功后补齐。
-
-两条保证,每次运行后都会做完整性校验:
-
-- 技能目录里的文件与上游技能完全一致——整个目录可直接拷入 agent 的 skills 文件夹。
-- 索引与 `skills/` 严格对应:有行当且仅当有目录,且目录存在就意味着内容完整。
-
-边缘情况(抓取失败、`--limit` 运行、技能下架)见 [DEVELOPING.zh-CN.md](DEVELOPING.zh-CN.md)。
-
-`trending.json` 是 trending 榜单中前 100 个 GitHub 来源技能的 id,按上游榜单顺序——下标即名次。`curated.jsonl` 是官方精选名单,每个 owner 一行:
-
-```json
-{"owner": "vercel-labs", "totalInstalls": 12345, "featuredRepo": "vercel-labs/skills", "featuredSkill": "find-skills", "skills": ["vercel-labs/skills/find-skills", "mintlify.com/mintlify"]}
-```
-
-两者都用与索引相同的 id 形式,可直接 join 回 `skills.jsonl`;`curated.jsonl` 不做来源过滤,因此可能含索引里没有的 id,且同一技能可出现在多个 owner 名下。
-
-## 如何获取数据
-
-由 [`fetch-skills.yml`](.github/workflows/fetch-skills.yml) 工作流每日发布到 [`dist` 分支](../../tree/dist)——分支顶端始终是根目录下的一份完整快照(单个无父提交,每轮替换;更早的日期保存在 `dist-<日期>` 标签里)。
-
-### 获取单个文件
-
-无需克隆、无需认证。`dist` 始终是最新快照;换成 `dist-<日期>` 标签即可钉住某天(最新 30 天有标签,且标签名不含 `/`——`dist/<日期>` 作为 URL ref 会 404):
+由工作流每日发布到 [`dist` 分支](../../tree/dist)——分支顶端始终是一份完整快照(单个无父提交,每轮替换);更早的日期保存在 `dist-<日期>` 标签里(最新 30 个,标签名不含 `/`,可在 raw URL 中解析)。
 
 ```bash
 BASE=https://raw.githubusercontent.com/skill-one/skills-sh-mirror
-curl -sO $BASE/dist/skills.jsonl                                    # 索引:每个技能一行
-curl -sO $BASE/dist/skills/vercel-labs/skills/find-skills/SKILL.md  # 按 id 取任意技能文件
+curl -sO $BASE/dist/skills.jsonl                                             # 最新快照
+curl -s $BASE/dist/skills.jsonl | jq -r 'select(.installs > 100000) | .id'   # 或直接在线查询
+curl -sO $BASE/dist-2026-09-11/skills.jsonl                                  # 钉住某天
 ```
 
-从 `dist` 取即最新快照;把 `dist` 换成某个 `dist-<日期>` 标签即可钉住那一天,并按标签缓存(标签一经发布便不再变化)。`dist` 上 raw 的约 5 分钟分支缓存就是最坏延迟,绕不过去;若改用 jsDelivr 取,那是 12 小时的分支缓存(浏览器里 7 天)。
-
-### 克隆整份快照
-
-一次拿到全部数据,适合离线使用:
+`dist` 上 raw 的约 5 分钟分支缓存就是最坏延迟(jsDelivr 为 12 小时);`dist-<日期>` 标签一经发布不再变化,可放心按标签缓存。
 
 ```bash
-git clone --depth 1 -b dist https://github.com/skill-one/skills-sh-mirror.git
+git clone --depth 1 -b dist https://github.com/skill-one/skills-sh-mirror.git   # 整份快照
+git ls-remote --tags --refs https://github.com/skill-one/skills-sh-mirror.git 'dist-*'   # 列出日期
 ```
 
-要固定到某天,改为克隆某个 `dist-<日期>` 标签——用 `git ls-remote --tags --refs https://github.com/skill-one/skills-sh-mirror.git 'dist-*'` 列出所有已打标签的日期(最新的排在最后):
-
-```bash
-git clone --depth 1 -b dist-2026-09-11 https://github.com/skill-one/skills-sh-mirror.git
-```
-
-快照由 GitHub Actions 发布——随时手动触发:`gh workflow run fetch-skills.yml`;也可以自己生成:`node scraper.mjs` —— 见 [DEVELOPING.zh-CN.md](DEVELOPING.zh-CN.md)。
+快照由 GitHub Actions 发布——`gh workflow run fetch-skills.yml` 可立即触发。自己生成:`node scraper.mjs` —— 见 [DEVELOPING.zh-CN.md](DEVELOPING.zh-CN.md)。
