@@ -24,20 +24,12 @@ README.md       dist 分支的着陆页 —— 文件说明 + 最近一次运行
 
 ## 获取数据
 
-由工作流每日发布到 [`dist` 分支](../../tree/dist)——分支顶端始终是一份完整快照(单个无父提交,每轮替换);更早的日期保存在 `dist-<日期>` 标签里(最新 30 个,标签名不含 `/`,可在 raw URL 中解析)。
+每日发布到 [`dist` 分支](../../tree/dist)——分支顶端始终是最新的完整快照;更早的日期以 `dist-<日期>` 标签钉住。
 
 ```bash
 BASE=https://raw.githubusercontent.com/skill-one/skills-sh-mirror
-curl -sO $BASE/dist/skills.jsonl                                             # 最新快照
-curl -s $BASE/dist/skills.jsonl | jq -r 'select(.installs > 100000) | .id'   # 或直接在线查询
-curl -sO $BASE/dist-2026-09-11/skills.jsonl                                  # 钉住某天
+curl -sO $BASE/dist/skills.jsonl               # 最新快照
+curl -sO $BASE/dist-2026-09-11/skills.jsonl    # 钉住某天
 ```
 
-`dist` 上 raw 的约 5 分钟分支缓存就是最坏延迟(jsDelivr 为 12 小时);`dist-<日期>` 标签一经发布不再变化,可放心按标签缓存。
-
-```bash
-git clone --depth 1 -b dist https://github.com/skill-one/skills-sh-mirror.git   # 整份快照
-git ls-remote --tags --refs https://github.com/skill-one/skills-sh-mirror.git 'dist-*'   # 列出日期
-```
-
-快照由 GitHub Actions 发布——`gh workflow run fetch-skills.yml` 可立即触发。自己生成:`node scraper.mjs` —— 见 [DEVELOPING.zh-CN.md](DEVELOPING.zh-CN.md)。
+快照如何产出:见 [DEVELOPING.zh-CN.md](DEVELOPING.zh-CN.md)。

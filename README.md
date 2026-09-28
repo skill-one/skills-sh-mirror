@@ -24,20 +24,12 @@ All artifacts are keyed by the same canonical id, so `trending.json` and `curate
 
 ## Getting the data
 
-Published daily to the [`dist` branch](../../tree/dist) — its tip is always a complete snapshot (a single parentless commit, replaced each run); older days live in the `dist-<date>` tags (newest 30, slash-free names so they resolve in raw URLs).
+Published daily to the [`dist` branch](../../tree/dist) — its tip is always the newest complete snapshot; older days are pinned as `dist-<date>` tags.
 
 ```bash
 BASE=https://raw.githubusercontent.com/skill-one/skills-sh-mirror
-curl -sO $BASE/dist/skills.jsonl                                             # newest snapshot
-curl -s $BASE/dist/skills.jsonl | jq -r 'select(.installs > 100000) | .id'   # or query in flight
-curl -sO $BASE/dist-2026-09-11/skills.jsonl                                  # pin a day
+curl -sO $BASE/dist/skills.jsonl               # newest snapshot
+curl -sO $BASE/dist-2026-09-11/skills.jsonl    # pin a day
 ```
 
-raw's ~5-minute branch cache is the worst-case lag on `dist` (12h via jsDelivr); a `dist-<date>` tag never changes, so cache by it freely.
-
-```bash
-git clone --depth 1 -b dist https://github.com/skill-one/skills-sh-mirror.git   # whole snapshot
-git ls-remote --tags --refs https://github.com/skill-one/skills-sh-mirror.git 'dist-*'   # list days
-```
-
-Snapshots are published by GitHub Actions — `gh workflow run fetch-skills.yml` publishes now. To produce the data yourself: `node scraper.mjs` — see [DEVELOPING.md](DEVELOPING.md).
+How the snapshots are produced: [DEVELOPING.md](DEVELOPING.md).
