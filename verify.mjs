@@ -2,9 +2,10 @@
 /**
  * Verify the integrity of a scraped dataset — no network, no token.
  *
- *   - skills.jsonl: every line an object carrying exactly id and installs
- *     (id a canonical github "owner/repo/slug", installs a non-negative
- *     number), ids unique, sorted by installs desc (ties by id)
+ *   - skills.jsonl: every line an object carrying exactly id, name and
+ *     installs (id a canonical github "owner/repo/slug", name the upstream
+ *     display name, installs a non-negative number), ids unique, sorted by
+ *     installs desc (ties by id)
  *   - trending.json: an array of unique ids
  *   - curated.jsonl: one owner/totalInstalls/featuredRepo/featuredSkill/
  *     skills row per owner
@@ -73,9 +74,10 @@ if (rows !== null) {
   for (const row of rows) {
     const id = typeof row.id === "string" && row.id ? row.id : "(missing id)";
     // The index row is exactly the leaderboard's essentials — nothing else.
-    if (Object.keys(row).sort().join(",") !== "id,installs") problem(`${id}: rows must carry exactly id and installs`);
+    if (Object.keys(row).sort().join(",") !== "id,installs,name") problem(`${id}: rows must carry exactly id, name and installs`);
     // Github-sourced ids only: "owner/repo/slug" (canonical — no "/" in the slug).
     if (typeof row.id !== "string" || row.id.split("/").filter(Boolean).length !== 3) problem(`${id}: malformed id`);
+    if (typeof row.name !== "string" || !row.name) problem(`${id}: bad name`);
     if (!Number.isFinite(row.installs) || row.installs < 0) problem(`${id}: bad installs`);
   }
 

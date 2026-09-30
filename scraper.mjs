@@ -12,7 +12,7 @@
  * skill are skipped, keeping the index one row per distinct skill.
  *
  * Output (rebuilt from scratch on every run, each file written atomically):
- *   skills.jsonl     { id, installs } per skill, sorted by installs desc
+ *   skills.jsonl     { id, name, installs } per skill, sorted by installs desc
  *   trending.json    the trending view's first 100 github-sourced ids
  *   curated.jsonl    the curated partners, one row per owner, skills as ids
  *   README.md        the dist landing page: file guide + this run's stats
@@ -100,7 +100,9 @@ async function fetchLeaderboard(api) {
       const id = canonicalId(skill);
       if (!seen.has(id)) {
         seen.add(id);
-        skills.push({ id, installs: skill.installs });
+        // `name` is upstream's display name, kept verbatim (may differ from
+        // the slug, which is only the URL identifier inside `id`).
+        skills.push({ id, name: skill.name, installs: skill.installs });
       }
     }
     if (!pagination.hasMore || !data?.length) return { skills, nonGithub, duplicates };
@@ -178,7 +180,7 @@ A daily snapshot of every GitHub-sourced skill on [skills.sh](https://www.skills
 
 | File | Content |
 |---|---|
-| \`skills.jsonl\` | one \`{ id, installs }\` row per skill, sorted by installs desc |
+| \`skills.jsonl\` | one \`{ id, name, installs }\` row per skill, sorted by installs desc — \`id\` is \`source/slug\` (the URL identifier, slug's "/" stripped), \`name\` is upstream's display name |
 | \`trending.json\` | the trending view's first 100 github-sourced ids, in rank order |
 | \`curated.jsonl\` | the officially featured skills, one row per owner |
 

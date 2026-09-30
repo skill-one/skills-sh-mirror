@@ -7,17 +7,18 @@ A daily snapshot of every GitHub-sourced skill on [skills.sh](https://www.skills
 ## The data
 
 ```
-skills.jsonl    { id, installs } per skill, sorted by installs desc — query/filter/rank here
+skills.jsonl    { id, name, installs } per skill, sorted by installs desc — query/filter/rank here
 trending.json   the trending view's first 100 github-sourced ids, in rank order
 curated.jsonl   the officially featured skills, one row per owner
 README.md       the dist landing page — file guide plus the latest run's stats
 ```
 
 ```json
-{"id": "vercel-labs/skills/find-skills", "installs": 3263512}
+{"id": "vercel-labs/skills/find-skills", "name": "find-skills", "installs": 3263512}
 ```
 
 - `id` — the canonical `{owner}/{repo}/{slug}`: it doubles as the install argument (`npx skills add <id>`), its first two segments name the hosting GitHub repository, and the skill's page lives at `https://skills.sh/<id>`.
+- `name` — the skill's display name as returned by skills.sh's API, kept verbatim. Distinct from the `slug` inside `id`: the slug is only the URL identifier (the last segment of `id`, with any "/" stripped), while `name` is the human-readable name upstream shows.
 - `installs` — the skill's install count on skills.sh.
 
 All artifacts are keyed by the same canonical id, so `trending.json` and `curated.jsonl` join straight back into `skills.jsonl` (curated is not source-filtered and may repeat a skill under several owners). Upstream duplicate-flagged entries are skipped — one row per distinct skill; delisted skills leave the index on the next run. `verify.mjs` gates every publish.
