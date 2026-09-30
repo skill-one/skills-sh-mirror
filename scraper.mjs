@@ -100,8 +100,9 @@ async function fetchLeaderboard(api) {
       const id = canonicalId(skill);
       if (!seen.has(id)) {
         seen.add(id);
-        // `name` is upstream's display name, kept verbatim (may differ from
-        // the slug, which is only the URL identifier inside `id`).
+        // `name` is the skill's own `name:` field from its SKILL.md
+        // frontmatter (skills.sh lowercases it). The slug in `id` is that
+        // same name made addressable: lowercased, spaces -> "-", "/" dropped.
         skills.push({ id, name: skill.name, installs: skill.installs });
       }
     }
@@ -180,7 +181,7 @@ A daily snapshot of every GitHub-sourced skill on [skills.sh](https://www.skills
 
 | File | Content |
 |---|---|
-| \`skills.jsonl\` | one \`{ id, name, installs }\` row per skill, sorted by installs desc — \`id\` is \`source/slug\` (the URL identifier, slug's "/" stripped), \`name\` is upstream's display name |
+| \`skills.jsonl\` | one \`{ id, name, installs }\` row per skill, sorted by installs desc — \`name\` is the skill's SKILL.md frontmatter name (lowercased), the slug (last segment of \`id\`) is that name made addressable (spaces -> "-", "/" dropped) |
 | \`trending.json\` | the trending view's first 100 github-sourced ids, in rank order |
 | \`curated.jsonl\` | the officially featured skills, one row per owner |
 

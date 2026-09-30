@@ -18,7 +18,8 @@ README.md       the dist landing page — file guide plus the latest run's stats
 ```
 
 - `id` — the canonical `{owner}/{repo}/{slug}`: it doubles as the install argument (`npx skills add <id>`), its first two segments name the hosting GitHub repository, and the skill's page lives at `https://skills.sh/<id>`.
-- `name` — the skill's display name as returned by skills.sh's API, kept verbatim. Distinct from the `slug` inside `id`: the slug is only the URL identifier (the last segment of `id`, with any "/" stripped), while `name` is the human-readable name upstream shows.
+- `name` — the skill's own `name:` field from its `SKILL.md` frontmatter, lowercased by skills.sh (e.g. `agent development`).
+- `slug` — that same name made addressable: lowercased, every space replaced by `-`, `/` dropped, everything else kept verbatim (`&`, `.`, `_`, `:` survive; e.g. `agent-development`). It is the last segment of `id`, i.e. the name the skill is installed and URL-addressed by.
 - `installs` — the skill's install count on skills.sh.
 
 All artifacts are keyed by the same canonical id, so `trending.json` and `curated.jsonl` join straight back into `skills.jsonl` (curated is not source-filtered and may repeat a skill under several owners). Upstream duplicate-flagged entries are skipped — one row per distinct skill; delisted skills leave the index on the next run. `verify.mjs` gates every publish.
