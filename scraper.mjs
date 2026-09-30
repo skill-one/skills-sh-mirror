@@ -100,9 +100,6 @@ async function fetchLeaderboard(api) {
       const id = canonicalId(skill);
       if (!seen.has(id)) {
         seen.add(id);
-        // The slug in `id` is the skill's SKILL.md frontmatter `name:`
-        // lowercased, spaces -> "-", "/" dropped — so no separate name field
-        // is mirrored; users can recover it from the slug.
         skills.push({ id, installs: skill.installs });
       }
     }
@@ -181,7 +178,7 @@ A daily snapshot of every GitHub-sourced skill on [skills.sh](https://www.skills
 
 | File | Content |
 |---|---|
-| \`skills.jsonl\` | one \`{ id, installs }\` row per skill, sorted by installs desc — the slug (last segment of \`id\`) is the skill's SKILL.md frontmatter name, lowercased, spaces -> "-", "/" dropped |
+| \`skills.jsonl\` | one \`{ id, installs }\` row per skill, sorted by installs desc |
 | \`trending.json\` | the trending view's first 100 github-sourced ids, in rank order |
 | \`curated.jsonl\` | the officially featured skills, one row per owner |
 
