@@ -9,7 +9,7 @@ How to run, verify, and extend the scraper. Using the data: [README.md](README.m
 1. `GET /api/v1/skills?per_page=500&page=N` (~17 requests) — the leaderboard. Keeps github-sourced entries only, each normalized to the canonical id `${source}/${slug-without-slashes}` (`canonicalId` in `lib.mjs` — skills.sh keys slash slugs by the stripped form); well-known (non-GitHub) sources and upstream duplicate-flagged entries are skipped and counted.
 2. `GET /api/v1/skills?view=trending&per_page=200` — the trending view in one request; its first 100 github-sourced ids (in rank order) go to `trending.json`.
 3. `GET /api/v1/skills/curated` — the curated partners; one row per owner in `curated.jsonl`, per-skill entries reduced to canonical ids (no source filtering).
-4. Writes `skills.jsonl` ({ id, name, installs }, sorted by installs desc, ties by id) and `README.md` — the dist landing page: a file guide plus this run's stats (timing and the skip counters) for humans.
+4. Writes `skills.jsonl` ({ id, installs }, sorted by installs desc, ties by id) and `README.md` — the dist landing page: a file guide plus this run's stats (timing and the skip counters) for humans.
 
 Every artifact is written to `<path>.tmp` first and swapped in via rename(2), so a crash can never leave a half-updated file. The index is the leaderboard itself: no skill content is fetched, and a skill upstream stops listing simply leaves the index. Transient failures (429/5xx, network errors) are retried with backoff, honoring `Retry-After`; 4xx are deterministic and never retried.
 

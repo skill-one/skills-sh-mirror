@@ -9,7 +9,7 @@
 1. `GET /api/v1/skills?per_page=500&page=N`(约 17 次请求)—— 排行榜。只保留 GitHub 来源条目,每个 id 规范化为 `${source}/${去斜杠的 slug}`(`lib.mjs` 中的 `canonicalId`——skills.sh 以去斜杠形式作含斜杠 slug 的键);well-known(非 GitHub)来源与上游标记为重复的条目被跳过并计数。
 2. `GET /api/v1/skills?view=trending&per_page=200` —— 单次请求拉取 trending 榜单;前 100 个 GitHub 来源 id(按榜单顺序)写入 `trending.json`。
 3. `GET /api/v1/skills/curated` —— 官方精选伙伴;`curated.jsonl` 每个 owner 一行,技能条目精简为规范化 id(不做来源过滤)。
-4. 写入 `skills.jsonl`({ id, name, installs },按 installs 降序、并列按 id 升序)与 `README.md`——dist 分支的着陆页:文件说明 + 本轮运行统计(耗时与跳过计数),供人阅读。
+4. 写入 `skills.jsonl`({ id, installs },按 installs 降序、并列按 id 升序)与 `README.md`——dist 分支的着陆页:文件说明 + 本轮运行统计(耗时与跳过计数),供人阅读。
 
 每个产物先写 `<path>.tmp` 再用 rename(2) 原子换入,崩溃绝不会留下写了一半的文件。索引就是排行榜本身:不抓任何技能内容,上游下架的技能自然离开索引。瞬时故障(429/5xx、网络错误)按退避重试并遵循 `Retry-After`;`4xx` 是确定性的,一律不重试。
 

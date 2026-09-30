@@ -3,8 +3,7 @@
 // 500s and is counted; in particular per-skill content fetches must not
 // exist). Covers: transient-500 retry, pagination with leaderboard drift,
 // filtering (well-known — including multi-segment sources — and
-// duplicate-flagged entries), exact { id, name, installs } rows in
-// installs-desc /
+// duplicate-flagged entries), exact { id, installs } rows in installs-desc /
 // id-asc order, canonical id normalization for slash slugs, delisting and
 // re-listing, the trending and curated id reductions, the dist README.md
 // carrying the run's stats, .env.local token loading, verifier acceptance and rejection of tampered datasets, and
@@ -27,31 +26,31 @@ const VERIFY = fileURLToPath(new URL("./verify.mjs", import.meta.url));
 const PUBLISH = fileURLToPath(new URL("./publish.mjs", import.meta.url));
 
 // The mock leaderboard serves only the fields the scraper reads: sourceType,
-// isDuplicate, source, slug (canonicalId), name and installs. Ids in `hidden`
+// isDuplicate, source, slug (canonicalId) and installs. Ids in `hidden`
 // are delisted until later runs (upstream delisting / re-listing).
 const SKILLS = [
-  { id: "vercel-labs/skills/find-skills", slug: "find-skills", name: "find-skills", source: "vercel-labs/skills", installs: 12345, sourceType: "github" },
-  { id: "owner/repo/braavo", slug: "braavo", name: "Braavo", source: "owner/repo", installs: 99, sourceType: "github" },
-  { id: "owner/repo/alpha", slug: "alpha", name: "Alpha", source: "owner/repo", installs: 99, sourceType: "github" }, // ties braavo: id-asc must win
-  { id: "owner/repo/zebra", slug: "zebra", name: "Zebra", source: "owner/repo", installs: 6, sourceType: "github" },
-  { id: "owner/repo/dup", slug: "dup", name: "Dup", source: "owner/repo", installs: 2, sourceType: "github", isDuplicate: true },
-  { id: "mintlify.com/mintlify", slug: "mintlify", name: "Mintlify", source: "mintlify.com", installs: 99, sourceType: "well-known" },
+  { id: "vercel-labs/skills/find-skills", slug: "find-skills", source: "vercel-labs/skills", installs: 12345, sourceType: "github" },
+  { id: "owner/repo/braavo", slug: "braavo", source: "owner/repo", installs: 99, sourceType: "github" },
+  { id: "owner/repo/alpha", slug: "alpha", source: "owner/repo", installs: 99, sourceType: "github" }, // ties braavo: id-asc must win
+  { id: "owner/repo/zebra", slug: "zebra", source: "owner/repo", installs: 6, sourceType: "github" },
+  { id: "owner/repo/dup", slug: "dup", source: "owner/repo", installs: 2, sourceType: "github", isDuplicate: true },
+  { id: "mintlify.com/mintlify", slug: "mintlify", source: "mintlify.com", installs: 99, sourceType: "well-known" },
   // raw id carries a slash inside the slug (4 segments); skills.sh keys it by
   // the slug with the "/" stripped, so the canonical id is owner/repo/hiddenslash
-  { id: "owner/repo/hidden-slash", slug: "hidden/slash", name: "Hidden Slash", source: "owner/repo", installs: 7, sourceType: "github" },
+  { id: "owner/repo/hidden-slash", slug: "hidden/slash", source: "owner/repo", installs: 7, sourceType: "github" },
   // well-known with a MULTI-SEGMENT source: filtered like every well-known
   // entry, even though its id would survive canonical normalization
-  { id: "affaan-m/ecc/hidden-known", slug: "hidden-known", name: "Hidden Known", source: "affaan-m/ecc", installs: 5, sourceType: "well-known" },
+  { id: "affaan-m/ecc/hidden-known", slug: "hidden-known", source: "affaan-m/ecc", installs: 5, sourceType: "well-known" },
 ];
 const hidden = new Set(["owner/repo/hidden-slash", "affaan-m/ecc/hidden-known"]);
 
 // The index: every github-sourced, non-duplicate, listed entry as an exact
-// { id, name, installs } row, sorted by installs desc, ties by id asc.
+// { id, installs } row, sorted by installs desc, ties by id asc.
 const RUN1_ROWS = [
-  { id: "vercel-labs/skills/find-skills", name: "find-skills", installs: 12345 },
-  { id: "owner/repo/alpha", name: "Alpha", installs: 99 },
-  { id: "owner/repo/braavo", name: "Braavo", installs: 99 },
-  { id: "owner/repo/zebra", name: "Zebra", installs: 6 },
+  { id: "vercel-labs/skills/find-skills", installs: 12345 },
+  { id: "owner/repo/alpha", installs: 99 },
+  { id: "owner/repo/braavo", installs: 99 },
+  { id: "owner/repo/zebra", installs: 6 },
 ];
 
 // Trending ranks independently of the leaderboard: the still-hidden slash
@@ -195,7 +194,7 @@ test("scraper end-to-end against mock API", async () => {
       RUN1_ROWS[0],
       RUN1_ROWS[1],
       RUN1_ROWS[2],
-      { id: "owner/repo/hiddenslash", name: "Hidden Slash", installs: 7 },
+      { id: "owner/repo/hiddenslash", installs: 7 },
       RUN1_ROWS[3],
     ]);
     const v4 = await verify();
@@ -257,21 +256,15 @@ test("scraper end-to-end against mock API", async () => {
         cleanup: () => writeIndex(baseRows),
       },
       {
-        name: "a row carrying a field beyond id, name and installs",
-        pattern: /rows must carry exactly id, name and installs/,
+        name: "a row carrying a field beyond id and installs",
+        pattern: /rows must carry exactly id and installs/,
         setup: () => writeIndex(baseRows.map((r, i) => (i === 1 ? { ...r, url: "https://skills.sh/x" } : r))),
         cleanup: () => writeIndex(baseRows),
       },
       {
         name: "a row without installs",
-        pattern: /rows must carry exactly id, name and installs/,
-        setup: () => writeIndex(baseRows.map((r, i) => (i === 1 ? { id: r.id, name: r.name } : r))),
-        cleanup: () => writeIndex(baseRows),
-      },
-      {
-        name: "a row without name",
-        pattern: /bad name/,
-        setup: () => writeIndex(baseRows.map((r, i) => (i === 1 ? { id: r.id, installs: r.installs } : r))),
+        pattern: /rows must carry exactly id and installs/,
+        setup: () => writeIndex(baseRows.map((r, i) => (i === 1 ? { id: r.id } : r))),
         cleanup: () => writeIndex(baseRows),
       },
       indexCase("index order broken", /not sorted/, (rows) => rows.reverse()),

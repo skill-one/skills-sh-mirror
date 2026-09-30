@@ -12,7 +12,7 @@
  * skill are skipped, keeping the index one row per distinct skill.
  *
  * Output (rebuilt from scratch on every run, each file written atomically):
- *   skills.jsonl     { id, name, installs } per skill, sorted by installs desc
+ *   skills.jsonl     { id, installs } per skill, sorted by installs desc
  *   trending.json    the trending view's first 100 github-sourced ids
  *   curated.jsonl    the curated partners, one row per owner, skills as ids
  *   README.md        the dist landing page: file guide + this run's stats
@@ -100,10 +100,10 @@ async function fetchLeaderboard(api) {
       const id = canonicalId(skill);
       if (!seen.has(id)) {
         seen.add(id);
-        // `name` is the skill's own `name:` field from its SKILL.md
-        // frontmatter (skills.sh lowercases it). The slug in `id` is that
-        // same name made addressable: lowercased, spaces -> "-", "/" dropped.
-        skills.push({ id, name: skill.name, installs: skill.installs });
+        // The slug in `id` is the skill's SKILL.md frontmatter `name:`
+        // lowercased, spaces -> "-", "/" dropped — so no separate name field
+        // is mirrored; users can recover it from the slug.
+        skills.push({ id, installs: skill.installs });
       }
     }
     if (!pagination.hasMore || !data?.length) return { skills, nonGithub, duplicates };
@@ -181,7 +181,7 @@ A daily snapshot of every GitHub-sourced skill on [skills.sh](https://www.skills
 
 | File | Content |
 |---|---|
-| \`skills.jsonl\` | one \`{ id, name, installs }\` row per skill, sorted by installs desc — \`name\` is the skill's SKILL.md frontmatter name (lowercased), the slug (last segment of \`id\`) is that name made addressable (spaces -> "-", "/" dropped) |
+| \`skills.jsonl\` | one \`{ id, installs }\` row per skill, sorted by installs desc — the slug (last segment of \`id\`) is the skill's SKILL.md frontmatter name, lowercased, spaces -> "-", "/" dropped |
 | \`trending.json\` | the trending view's first 100 github-sourced ids, in rank order |
 | \`curated.jsonl\` | the officially featured skills, one row per owner |
 
